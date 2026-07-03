@@ -50,12 +50,13 @@ async function main() {
     const t = await page.locator('aside').first().innerText();
     if (!/Входящие|Проекты|Блог|заметк/i.test(t)) throw new Error('дерево: ' + t.slice(0, 60));
   });
-  await step('expand-and-open-nested', async () => {
-    // развернуть Проекты и Приложение, открыть вложенную заметку
-    for (const f of ['Проекты', 'Приложение', 'Идеи']) { try { await clickText(f); await page.waitForTimeout(200); } catch {} }
-    await clickText('Тёмная тема');
+  await step('open-nested-note', async () => {
+    // папки openByDefault раскрыты — целимся в строку-treeitem напрямую
+    await page.getByRole('treeitem', { name: /Тёмная тема/ }).first().click({ timeout: 4000 });
   });
-  await step('open-plan', () => clickText('План запуска'));
+  await step('open-plan', async () => {
+    await page.getByRole('treeitem', { name: /План запуска/ }).first().click({ timeout: 4000 });
+  });
 
   // --- палитра / свитчер ---
   await step('palette', async () => { await key('Control+k'); await page.waitForTimeout(250); await page.keyboard.type('блог'); await page.waitForTimeout(250); });
