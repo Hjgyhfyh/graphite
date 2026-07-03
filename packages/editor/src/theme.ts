@@ -190,6 +190,16 @@ export const graphiteDark = EditorView.theme(
       position: 'relative',
       color: 'var(--text-3)',
     },
+    '.cm-gr-frontmatter': {
+      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      fontSize: '12px',
+      lineHeight: '19px',
+      fontWeight: '400',
+      fontStyle: 'normal',
+      letterSpacing: '0',
+      color: 'var(--text-3)',
+      backgroundColor: 'color-mix(in srgb, var(--bg-2) 55%, transparent)',
+    },
     '.cm-gr-checkbox': {
       display: 'inline-flex',
       width: '15px',

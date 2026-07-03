@@ -91,7 +91,7 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
   const [fmIcon, setFmIcon] = useState<string | undefined>(undefined);
   const [fmColor, setFmColor] = useState<string | undefined>(undefined);
   const [tagInput, setTagInput] = useState('');
-  const [available, setAvailable] = useState(true);
+  const [notice, setNotice] = useState<'none' | 'offline' | 'readError'>('none');
 
   const load = useCallback(async () => {
     try {
@@ -105,7 +105,7 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
       setDue(typeof fm.due === 'string' ? fm.due.slice(0, 10) : undefined);
       setFmIcon(fm.icon);
       setFmColor(fm.iconColor);
-      setAvailable(true);
+      setNotice('none');
     } catch (error) {
       revRef.current = '';
       setTitle(titleFromRef(noteRef));
@@ -115,7 +115,7 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
       setDue(undefined);
       setFmIcon(undefined);
       setFmColor(undefined);
-      setAvailable(!(isGraphiteError(error) && error.code === 'UNAVAILABLE'));
+      setNotice(isGraphiteError(error) && error.code === 'UNAVAILABLE' ? 'offline' : 'readError');
     }
   }, [noteRef]);
 
@@ -171,6 +171,7 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
     try {
       const res = await commands.setStatus({ ref: noteRef, status: next });
       setStatus(res.new);
+      void load();
     } catch (error) {
       if (isGraphiteError(error) && error.code === 'UNAVAILABLE') {
         return;
@@ -464,8 +465,10 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
         </div>
       </div>
 
-      {!available ? (
+      {notice === 'offline' ? (
         <p className="px-3 pb-3 text-micro text-text-3">Изменения применятся к файлу после подключения ядра.</p>
+      ) : notice === 'readError' ? (
+        <p className="px-3 pb-3 text-micro text-warn">Не удалось прочитать заметку — правки не сохранятся.</p>
       ) : null}
     </div>
   );

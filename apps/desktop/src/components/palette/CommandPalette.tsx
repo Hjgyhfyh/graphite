@@ -23,12 +23,16 @@ const ROW =
 const HINT_ROW =
   'flex cursor-default select-none items-center gap-2.5 rounded-s px-2.5 py-2 text-caption text-text-2';
 
+function foldText(value: string): string {
+  return value.toLowerCase().replace(/ё/g, 'е');
+}
+
 function matches(query: string, ...fields: string[]): boolean {
-  const q = query.trim().toLowerCase();
+  const q = foldText(query.trim());
   if (q.length === 0) {
     return true;
   }
-  const hay = fields.filter((field) => field.length > 0).join(' ').toLowerCase();
+  const hay = foldText(fields.filter((field) => field.length > 0).join(' '));
   if (hay.includes(q)) {
     return true;
   }
@@ -70,6 +74,8 @@ function FooterHint({ keys, label }: { keys: string[]; label: string }) {
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
   const setOpen = useUiStore((s) => s.setPaletteOpen);
+  const quickSwitcherOpen = useUiStore((s) => s.quickSwitcherOpen);
+  const pushToast = useUiStore((s) => s.pushToast);
   const bindings = useKeybindingsStore((s) => s.bindings);
   const tree = useVaultStore((s) => s.tree);
   const iconByRef = useVaultStore((s) => s.iconByRef);
@@ -78,19 +84,40 @@ export function CommandPalette() {
   const [ftHits, setFtHits] = useState<SearchHit[]>([]);
   const [ftState, setFtState] = useState<FullTextState>('idle');
   const inputRef = useRef<HTMLInputElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const close = () => {
+    restoreFocusRef.current = null;
     setOpen(false);
-    setQuery('');
+  };
+
+  const cancel = () => {
+    const previous = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    setOpen(false);
+    if (previous !== null && previous.isConnected) {
+      previous.focus();
+    }
   };
 
   useEffect(() => {
-    if (!open) {
-      return;
+    if (open) {
+      const active = document.activeElement;
+      restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+      const raf = requestAnimationFrame(() => inputRef.current?.focus());
+      return () => cancelAnimationFrame(raf);
     }
-    const raf = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(raf);
+    setQuery('');
+    setFtHits([]);
+    setFtState('idle');
+    return undefined;
   }, [open]);
+
+  useEffect(() => {
+    if (open && quickSwitcherOpen) {
+      setOpen(false);
+    }
+  }, [open, quickSwitcherOpen, setOpen]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -130,7 +157,9 @@ export function CommandPalette() {
   const commandMatches = ACTIONS.filter((action) => action.id !== 'palette.open' && matches(query, action.title, action.group));
   const noteMatches = hasQuery
     ? tree.filter((node) => matches(query, node.title, node.path)).slice(0, 8)
-    : tree.slice(0, 8);
+    : [...tree].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 8);
+  const noteRefs = new Set(noteMatches.map((node) => node.ref));
+  const ftUnique = ftHits.filter((hit) => !noteRefs.has(hit.ref));
 
   return (
     <Presence>
@@ -145,14 +174,14 @@ export function CommandPalette() {
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.preventDefault();
-              close();
+              cancel();
             } else if (event.key === 'Tab') {
               event.preventDefault();
             }
           }}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              close();
+              cancel();
             }
           }}
         >
@@ -167,12 +196,16 @@ export function CommandPalette() {
             exit="exit"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <Command shouldFilter={false} label="Командная палитра" className="flex min-h-0 flex-1 flex-col">
+            <Command
+              shouldFilter={false}
+              vimBindings={false}
+              label="Командная палитра"
+              className="flex min-h-0 flex-1 flex-col"
+            >
               <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-stroke-0 px-3.5">
                 <Search size={16} strokeWidth={1.75} className="shrink-0 text-text-2" />
                 <Command.Input
                   ref={inputRef}
-                  autoFocus
                   value={query}
                   onValueChange={setQuery}
                   placeholder="Команда, заметка или поиск по тексту…"
@@ -180,24 +213,6 @@ export function CommandPalette() {
                 />
               </div>
               <Command.List className="min-h-0 flex-1 overflow-y-auto p-1.5">
-                {hasQuery ? (
-                  <Command.Group heading="Создать" className={HEADING}>
-                    <Command.Item
-                      value="create-note"
-                      onSelect={() => {
-                        close();
-                        void useVaultStore.getState().createNote({ title: trimmed });
-                      }}
-                      className={ROW}
-                    >
-                      <FilePlus size={16} strokeWidth={1.75} className="shrink-0 text-text-2" />
-                      <span className="flex-1 truncate">
-                        Новая заметка «<span className="text-text-0">{trimmed}</span>»
-                      </span>
-                    </Command.Item>
-                  </Command.Group>
-                ) : null}
-
                 {commandMatches.length > 0 ? (
                   <Command.Group heading="Команды" className={HEADING}>
                     {commandMatches.map((action) => (
@@ -206,8 +221,11 @@ export function CommandPalette() {
                         value={`command-${action.id}`}
                         keywords={[action.title, action.group]}
                         onSelect={() => {
-                          close();
-                          runAction(action.id);
+                          if (runAction(action.id)) {
+                            close();
+                          } else {
+                            pushToast({ kind: 'info', text: 'Недоступно здесь' });
+                          }
                         }}
                         className={ROW}
                       >
@@ -247,7 +265,7 @@ export function CommandPalette() {
                   </Command.Group>
                 ) : null}
 
-                {hasQuery && ftState !== 'idle' ? (
+                {hasQuery && ftState !== 'idle' && (ftState !== 'ok' || ftUnique.length > 0) ? (
                   <Command.Group heading="Полнотекст" className={HEADING}>
                     {ftState === 'loading' ? (
                       <Command.Item disabled value="ft-loading" className={HINT_ROW}>
@@ -256,7 +274,7 @@ export function CommandPalette() {
                       </Command.Item>
                     ) : null}
                     {ftState === 'ok'
-                      ? ftHits.map((hit) => {
+                      ? ftUnique.map((hit) => {
                           const info = iconByRef[hit.ref] ?? { icon: undefined, color: undefined };
                           return (
                             <Command.Item
@@ -303,6 +321,24 @@ export function CommandPalette() {
                         <span className="flex-1 truncate">Поиск временно недоступен</span>
                       </Command.Item>
                     ) : null}
+                  </Command.Group>
+                ) : null}
+
+                {hasQuery ? (
+                  <Command.Group heading="Создать" className={HEADING}>
+                    <Command.Item
+                      value="create-note"
+                      onSelect={() => {
+                        close();
+                        void useVaultStore.getState().createNote({ title: trimmed });
+                      }}
+                      className={ROW}
+                    >
+                      <FilePlus size={16} strokeWidth={1.75} className="shrink-0 text-text-2" />
+                      <span className="flex-1 truncate">
+                        Новая заметка «<span className="text-text-0">{trimmed}</span>»
+                      </span>
+                    </Command.Item>
                   </Command.Group>
                 ) : null}
               </Command.List>

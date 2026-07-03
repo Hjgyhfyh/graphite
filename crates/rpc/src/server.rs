@@ -4,6 +4,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use interprocess::local_socket::{
@@ -95,6 +96,10 @@ impl ServerHandle {
     }
 }
 
+/// Пауза перед повтором после ошибки `accept()`, чтобы устойчивый сбой
+/// слушателя не превращался в busy-spin с полной загрузкой ядра.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
 async fn accept_loop(
     listener: Listener,
     handler: Arc<dyn Handler>,
@@ -113,7 +118,12 @@ async fn accept_loop(
                             shutdown.clone(),
                         ));
                     }
-                    Err(_) => tokio::task::yield_now().await,
+                    Err(_) => {
+                        tokio::select! {
+                            _ = shutdown.changed() => break,
+                            _ = tokio::time::sleep(ACCEPT_ERROR_BACKOFF) => {}
+                        }
+                    }
                 }
             }
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
@@ -205,5 +215,33 @@ where
             ),
         )
     };
-    protocol::write_frame(io, &response).await
+    write_response(io, response).await
+}
+
+/// Пишет ответ кадром. Если сериализованный ответ не влезает в кадр
+/// (`MAX_FRAME_BYTES`), вместо тихого обрыва соединения отправляет доменный
+/// конверт `LIMIT` с тем же id — клиент получает понятную ошибку, а не EOF
+/// (CONTRACT §4.1).
+async fn write_response<W>(io: &mut W, response: RpcResponse) -> std::io::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let mut bytes = serde_json::to_vec(&response)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    if bytes.len() <= protocol::MAX_FRAME_BYTES {
+        bytes.push(b'\n');
+        io.write_all(&bytes).await?;
+        return io.flush().await;
+    }
+    let envelope = Envelope::<Value>::err(
+        GraphiteError::new(
+            GraphiteErrorCode::Limit,
+            "ответ превышает лимит кадра IPC (1 МиБ)",
+        )
+        .with_hint("запросите срез: section или offset/maxChars, либо меньший limit"),
+    )
+    .with_schema_version(protocol::SCHEMA_VERSION);
+    let result = serde_json::to_value(envelope)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    protocol::write_frame(io, &RpcResponse::result(response.id, result)).await
 }

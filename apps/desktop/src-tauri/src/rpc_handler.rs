@@ -12,7 +12,6 @@ use rpc::{Envelope, GraphiteError as RpcError, GraphiteErrorCode as RpcCode, Han
 use crate::commands;
 use crate::dto::{GraphiteError, GraphiteErrorCode, NoteRef};
 use crate::events::{UiFlashNoteEvent, UiOpenNoteEvent};
-use crate::state::core_cell;
 
 /// Исполнитель методов реестра на стороне приложения — единственный писатель
 /// vault, общий для Tauri-команд и MCP-клиентов по pipe.
@@ -51,13 +50,19 @@ impl AppHandler {
                 Some("передай ref в форме path:… или id:…"),
             )));
         };
-        if self.app.get_webview_window("main").is_none() {
+        let Some(window) = self.app.get_webview_window("main") else {
             return Some(err_env(dto_err(
                 GraphiteErrorCode::Unavailable,
                 "окно Graphite закрыто",
                 Some("открой приложение и повтори"),
             )));
-        }
+        };
+        // Окно по закрытию прячется в трей, но остаётся существующим — поэтому
+        // «открой/подсвети заметку» из MCP обязано само поднять окно, иначе
+        // событие уходит в невидимый webview без визуального эффекта.
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
         let payload = NoteRef(note_ref.to_string());
         let _ = if method == "ui_open_note" {
             self.app.emit("ui_open_note", UiOpenNoteEvent { r#ref: payload })
@@ -114,7 +119,7 @@ fn map_code(code: GraphiteErrorCode) -> RpcCode {
 /// Рукопожатие `hello`: версии схемы/формата, корень открытого vault (если есть)
 /// и статус индекса. Работает и без смонтированного vault.
 fn hello_data() -> Value {
-    let guard = core_cell().lock().unwrap();
+    let guard = commands::lock_core();
     let (root, index_status, mounted) = match guard.as_ref() {
         Some(state) => (
             Some(state.root.to_string_lossy().to_string()),

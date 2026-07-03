@@ -12,10 +12,11 @@ use crate::error::VaultError;
 use crate::indexer::Index;
 use crate::model::limits::{DISTILL_BUDGET_CHARS_DEFAULT, STALLED_DAYS_DEFAULT};
 use crate::model::{
-    BundleItem, BundleRole, ContextBriefingResponse, DistillContextParams, DistillContextResponse,
-    DistillSaveParams, DistillSaveResponse, DistillSections, DistillTargetStatus, Frontmatter,
-    JournalOp, NextStep, NoteId, NoteMeta, NoteRef, NoteType, PlanCreateParams, PlanProgressParams,
-    PlanStageDraft, PlanTaskDraft, Priority, RelType, Rev, StalledNote, Status, TaskItem,
+    Actor, BundleItem, BundleRole, ContextBriefingResponse, DistillContextParams,
+    DistillContextResponse, DistillSaveParams, DistillSaveResponse, DistillSections,
+    DistillTargetStatus, Frontmatter, JournalOp, NextStep, NoteId, NoteMeta, NoteRef, NoteType,
+    PlanCreateParams, PlanProgressParams, PlanStageDraft, PlanTaskDraft, Priority, RelType, Rev,
+    StalledNote, Status, TaskItem, TaskStatus,
 };
 use crate::txn::{self, TxnOpts};
 use crate::{parser, writer};
@@ -271,20 +272,14 @@ pub fn distill_save(
     let content = compose_note(&fm, &new_body, eol)?;
     let rev_new = writer::compute_rev(content.as_bytes());
 
-    let mut plan_pair = None;
-    if let Some(pp) = plan_params {
-        plan_pair = Some(super::planning::plan_create(root, index, &pp, opts)?);
-    }
-
     let mut tx = txn::begin(root, opts.actor, opts.tool.clone(), opts.session.clone())?;
     tx.stage_write(&source.path, content)?;
-    let mut op = tx.commit(&format!("Выжимка «{}»", source.title))?;
-
     let mut plan_ref = None;
-    if let Some((plan_resp, plan_op)) = plan_pair {
+    if let Some(pp) = plan_params {
+        let plan_resp = super::planning::stage_plan(root, index, &pp, &mut tx)?;
         plan_ref = Some(plan_resp.r#ref);
-        op = merge_ops(op, plan_op);
     }
+    let op = tx.commit(&format!("Выжимка «{}»", source.title))?;
 
     Ok((DistillSaveResponse { rev_new, plan_ref }, op))
 }
@@ -324,7 +319,7 @@ pub fn context_briefing(
 
     let mut overdue: Vec<TaskItem> = Vec::new();
     for task in index.all_tasks()? {
-        if task.done {
+        if task.done || task.status == TaskStatus::Dropped {
             continue;
         }
         let is_overdue = task
@@ -516,15 +511,14 @@ pub fn bundle_create(
         updated: Some(now),
         ..Frontmatter::default()
     };
-    let body = build_bundle_body(params.instruction.as_deref(), &members);
-    let main_content = compose_note(&fm, &body, "\n")?;
-    let rev = writer::compute_rev(main_content.as_bytes());
-
     let mut tx = txn::begin(root, opts.actor, opts.tool.clone(), opts.session.clone())?;
-    tx.stage_write(&rel_path, main_content)?;
 
-    let link_to_main = format!("[[id:{}|{}]]", main_id, title);
-    let mut added = 0u32;
+    let link_to_main = format!(
+        "[[id:{}|{}]]",
+        main_id,
+        super::planning::escape_link_alias(title)
+    );
+    let mut attached: Vec<NoteMeta> = Vec::new();
     for member in &members {
         let member_abs = writer::vault_abs_path(root, &member.path)?;
         let Ok(member_raw) = std::fs::read_to_string(&member_abs) else {
@@ -538,14 +532,21 @@ pub fn bundle_create(
             .entry(RelType::PartOf.as_str().to_string())
             .or_default();
         if entry.iter().any(|target| target.contains(&main_id)) {
+            attached.push(member.clone());
             continue;
         }
         entry.push(link_to_main.clone());
         let member_content = compose_note(&member_fm, &member_parsed.body, member_eol)?;
         tx.stage_write(&member.path, member_content)?;
-        added += 1;
+        attached.push(member.clone());
     }
 
+    let body = build_bundle_body(params.instruction.as_deref(), &attached);
+    let main_content = compose_note(&fm, &body, "\n")?;
+    let rev = writer::compute_rev(main_content.as_bytes());
+    tx.stage_write(&rel_path, main_content)?;
+
+    let added = attached.len() as u32;
     let op = tx.commit(&format!("Бандл «{title}»: {added} второстепенных"))?;
     Ok((
         BundleCreateResponse {
@@ -565,21 +566,62 @@ pub fn idea_to_tasks(
     index: &Index,
     params: &IdeaToTasksParams,
 ) -> Result<IdeaToTasksResponse, VaultError> {
-    let source_text = if let Some(text) = &params.text {
-        text.clone()
+    let (source_text, source) = if let Some(text) = &params.text {
+        (text.clone(), None)
     } else if let Some(r) = &params.r#ref {
         let meta = index.note_by_ref(r)?;
-        read_note_body(root, &meta.path)?.1
+        let body = read_note_body(root, &meta.path)?.1;
+        (body, Some(meta))
     } else {
         return Err(VaultError::Validation(
             "нужен text или ref для разбора идеи в задачи".to_string(),
         ));
     };
 
-    Ok(IdeaToTasksResponse {
-        tasks: parse_idea_lines(&source_text),
-        plan_ref: None,
-    })
+    let tasks = parse_idea_lines(&source_text);
+
+    let plan_ref = if params.create_plan.unwrap_or(false) && !tasks.is_empty() {
+        let plan_params = idea_plan_params(&tasks, source.as_ref());
+        let opts = TxnOpts {
+            actor: Actor::Assistant,
+            tool: Some("idea_to_tasks".to_string()),
+            session: None,
+        };
+        let (resp, _op) = super::planning::plan_create(root, index, &plan_params, &opts)?;
+        Some(resp.r#ref)
+    } else {
+        None
+    };
+
+    Ok(IdeaToTasksResponse { tasks, plan_ref })
+}
+
+/// Параметры плана из черновиков идеи: одна стадия «План» с задачами и связь
+/// `distilled_from` к заметке-источнику (если разбирали её, а не сырой текст).
+fn idea_plan_params(drafts: &[IdeaToTaskDraft], source: Option<&NoteMeta>) -> PlanCreateParams {
+    let tasks = drafts
+        .iter()
+        .map(|draft| PlanTaskDraft {
+            text: draft.text.clone(),
+            due: draft.due.clone(),
+        })
+        .collect();
+    let title = match source {
+        Some(meta) => format!("План: {}", meta.title),
+        None => "План из идеи".to_string(),
+    };
+    let goal = source.map(|meta| meta.title.clone()).unwrap_or_default();
+    PlanCreateParams {
+        title,
+        goal,
+        target_date: None,
+        parent: None,
+        stages: vec![PlanStageDraft {
+            title: "План".to_string(),
+            tasks,
+        }],
+        sources: source.map(|meta| vec![meta_ref(meta)]),
+    }
 }
 
 fn require_nonempty(value: &str, name: &str) -> Result<(), VaultError> {
@@ -798,15 +840,11 @@ fn build_bundle_body(instruction: Option<&str>, members: &[NoteMeta]) -> String 
 }
 
 fn member_wikilink(meta: &NoteMeta) -> String {
-    format!("[[id:{}|{}]]", meta.id.0, meta.title)
-}
-
-fn merge_ops(mut base: JournalOp, extra: JournalOp) -> JournalOp {
-    base.files.extend(extra.files);
-    if !extra.summary.is_empty() {
-        base.summary = format!("{}; {}", base.summary, extra.summary);
-    }
-    base
+    format!(
+        "[[id:{}|{}]]",
+        meta.id.0,
+        super::planning::escape_link_alias(&meta.title)
+    )
 }
 
 fn resolve_metas(index: &Index, ids: &[NoteId]) -> Result<Vec<NoteMeta>, VaultError> {
@@ -1068,11 +1106,5 @@ fn extract_annotations(text: &str) -> (String, Option<String>, Option<Priority>)
 }
 
 fn is_plain_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && [0, 1, 2, 3, 5, 6, 8, 9]
-            .iter()
-            .all(|&i| bytes[i].is_ascii_digit())
+    value.len() == 10 && parse_ymd(value).is_some()
 }

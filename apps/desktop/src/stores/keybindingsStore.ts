@@ -8,7 +8,6 @@ export type ActionId =
   | 'search.inNote'
   | 'view.tasks'
   | 'settings.open'
-  | 'graph.open'
   | 'note.new'
   | 'note.newChild'
   | 'note.rename'
@@ -47,7 +46,6 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'search.inNote', title: 'Поиск в заметке', group: 'Навигация' },
   { id: 'view.tasks', title: 'Задачи', group: 'Навигация' },
   { id: 'settings.open', title: 'Настройки', group: 'Навигация' },
-  { id: 'graph.open', title: 'Граф связей', group: 'Навигация' },
   { id: 'note.new', title: 'Новая заметка', group: 'Заметки' },
   { id: 'note.newChild', title: 'Под-заметка', group: 'Заметки' },
   { id: 'note.rename', title: 'Переименовать', group: 'Заметки' },
@@ -79,7 +77,6 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'search.inNote': ['Ctrl+F'],
   'view.tasks': ['Ctrl+Shift+T'],
   'settings.open': ['Ctrl+Comma'],
-  'graph.open': ['Ctrl+G'],
   'note.new': ['Ctrl+N'],
   'note.newChild': ['Ctrl+Shift+N'],
   'note.rename': ['F2'],
@@ -114,7 +111,16 @@ const DISPLAY_KEYS: Record<string, string> = {
   Comma: ',',
   Period: '.',
   Slash: '/',
+  Minus: '-',
+  Equal: '=',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backquote: '`',
   Space: 'Space',
+  Tab: 'Tab',
+  Enter: 'Enter',
   Up: '↑',
   Down: '↓',
   Left: '←',
@@ -122,6 +128,33 @@ const DISPLAY_KEYS: Record<string, string> = {
   Delete: 'Del',
   Escape: 'Esc',
   Backspace: 'Backspace',
+};
+
+const CODE_TO_TOKEN: Record<string, string> = {
+  Space: 'Space',
+  Enter: 'Enter',
+  NumpadEnter: 'Enter',
+  Escape: 'Escape',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  Tab: 'Tab',
+  Comma: 'Comma',
+  Period: 'Period',
+  Slash: 'Slash',
+  Backslash: 'Backslash',
+  IntlBackslash: 'Backslash',
+  Minus: 'Minus',
+  Equal: 'Equal',
+  Backquote: 'Backquote',
+  Quote: 'Quote',
+  Semicolon: 'Semicolon',
+  BracketLeft: 'BracketLeft',
+  BracketRight: 'BracketRight',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  Insert: 'Insert',
 };
 
 function normalizeKey(key: string): string {
@@ -149,6 +182,41 @@ function normalizeKey(key: string): string {
   return key;
 }
 
+/**
+ * Токен физической клавиши из `event.code` — не зависит от активной раскладки.
+ * При русской раскладке `event.key` даёт кириллицу (B → «и»), из-за чего дефолты
+ * (латиница) не матчились; `code` стабилен (`KeyB` в любой раскладке). Для клавиш
+ * без `code` откатываемся на `event.key`.
+ */
+function keyToken(event: KeyboardEvent): string {
+  const code = event.code;
+  if (code.length > 0) {
+    if (code.length === 4 && code.startsWith('Key')) {
+      return code.slice(3);
+    }
+    if (code.length === 6 && code.startsWith('Digit')) {
+      return code.slice(5);
+    }
+    if (code.length === 7 && code.startsWith('Numpad')) {
+      const digit = code.slice(6);
+      if (digit >= '0' && digit <= '9') {
+        return digit;
+      }
+    }
+    if (code.startsWith('Arrow')) {
+      return code.slice(5);
+    }
+    if (/^F\d{1,2}$/.test(code)) {
+      return code;
+    }
+    const mapped = CODE_TO_TOKEN[code];
+    if (mapped !== undefined) {
+      return mapped;
+    }
+  }
+  return normalizeKey(event.key);
+}
+
 export function eventToChord(event: KeyboardEvent): string | null {
   if (MODIFIER_KEYS.has(event.key)) {
     return null;
@@ -163,7 +231,7 @@ export function eventToChord(event: KeyboardEvent): string | null {
   if (event.shiftKey) {
     parts.push('Shift');
   }
-  parts.push(normalizeKey(event.key));
+  parts.push(keyToken(event));
   return parts.join('+');
 }
 

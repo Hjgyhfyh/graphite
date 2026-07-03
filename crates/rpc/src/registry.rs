@@ -1,4 +1,4 @@
-//! Реестр методов IPC (CONTRACT §3 + §4.3): 30 инструментов и служебные методы.
+//! Реестр методов IPC (CONTRACT §3 + §4.3): инструменты и служебные методы.
 //! Флаги RO/D/I — из таблицы §3; таймауты клиента — из §4.4.
 
 use std::time::Duration;
@@ -80,7 +80,7 @@ pub fn is_known(method: &str) -> bool {
     find(method).is_some()
 }
 
-/// Только 30 инструментов реестра, без служебных методов.
+/// Только инструменты реестра, без служебных методов.
 pub fn tool_methods() -> impl Iterator<Item = &'static MethodSpec> {
     METHODS.iter().filter(|spec| !spec.service)
 }

@@ -6,7 +6,7 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { Annotation, EditorState } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { EditorView, drawSelection, dropCursor, highlightSpecialChars, keymap } from '@codemirror/view';
-import { aiTouchField, setAiTouched } from './aiTouch';
+import { aiTouchField, clearAiTouched, setAiTouched } from './aiTouch';
 import { livePreview } from './livePreview';
 import { taskCheckboxes } from './taskList';
 import { graphiteDark } from './theme';
@@ -14,6 +14,8 @@ import { wikiLinkCompletion } from './wikilink';
 import type { WikiLinkSource } from './wikilink';
 
 const external = Annotation.define<boolean>();
+
+const AI_CLEAR_DELAY_MS = 1500;
 
 export interface CreateEditorOptions {
   initialDoc?: string;
@@ -39,7 +41,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       return;
     }
     if (update.transactions.some((tr) => tr.annotation(external) !== true)) {
-      onChange(update.state.doc.toString());
+      onChange(update.state.sliceDoc());
     }
   });
 
@@ -49,9 +51,14 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
     ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
     : [];
 
+  const eolExtensions: Extension[] = initialDoc.includes('\r\n')
+    ? [EditorState.lineSeparator.of('\r\n')]
+    : [];
+
   const state = EditorState.create({
     doc: initialDoc,
     extensions: [
+      ...eolExtensions,
       history(),
       drawSelection(),
       dropCursor(),
@@ -75,9 +82,11 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
 
   const view = new EditorView({ state, parent: container });
 
+  let aiClearTimer: ReturnType<typeof setTimeout> | undefined;
+
   return {
     view,
-    getDoc: () => view.state.doc.toString(),
+    getDoc: () => view.state.sliceDoc(),
     setDoc: (doc) => {
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: doc },
@@ -89,11 +98,22 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       const start = Math.max(0, Math.min(from, max));
       const end = Math.max(start, Math.min(to, max));
       view.dispatch({ effects: setAiTouched.of({ from: start, to: end }) });
+      if (aiClearTimer !== undefined) {
+        clearTimeout(aiClearTimer);
+      }
+      aiClearTimer = setTimeout(() => {
+        aiClearTimer = undefined;
+        view.dispatch({ effects: clearAiTouched.of(null) });
+      }, AI_CLEAR_DELAY_MS);
     },
     focus: () => {
       view.focus();
     },
     destroy: () => {
+      if (aiClearTimer !== undefined) {
+        clearTimeout(aiClearTimer);
+        aiClearTimer = undefined;
+      }
       view.destroy();
     },
   };

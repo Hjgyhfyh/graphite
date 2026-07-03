@@ -44,7 +44,6 @@ export interface UiStore {
   animationSpeed: number;
   floatingCaptureOpen: boolean;
   toasts: Toast[];
-  firstRun: boolean;
   setRailView(v: RailView): void;
   toggleSidebar(): void;
   setSidebarHidden(hidden: boolean): void;
@@ -63,11 +62,14 @@ export interface UiStore {
   toggleFloatingCapture(): void;
   pushToast(t: Omit<Toast, 'id'>): string;
   dismissToast(id: string): void;
-  finishFirstRun(): void;
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function hydrateNumber(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : fallback;
 }
 
 export const useUiStore = create<UiStore>()(
@@ -86,7 +88,6 @@ export const useUiStore = create<UiStore>()(
       animationSpeed: ANIMATION_SPEED_DEFAULT,
       floatingCaptureOpen: false,
       toasts: [],
-      firstRun: false,
       setRailView: (v) => {
         set({ railView: v });
       },
@@ -154,9 +155,6 @@ export const useUiStore = create<UiStore>()(
       dismissToast: (id) => {
         set((s) => ({ toasts: s.toasts.filter((toast) => toast.id !== id) }));
       },
-      finishFirstRun: () => {
-        set({ firstRun: false });
-      },
     }),
     {
       name: 'graphite.ui',
@@ -170,6 +168,21 @@ export const useUiStore = create<UiStore>()(
         reducedMotion: s.reducedMotion,
         animationSpeed: s.animationSpeed,
       }),
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<UiStore>;
+        return {
+          ...current,
+          ...saved,
+          treeWidth: hydrateNumber(saved.treeWidth, TREE_WIDTH_MIN, TREE_WIDTH_MAX, TREE_WIDTH_DEFAULT),
+          rightWidth: hydrateNumber(saved.rightWidth, RIGHT_WIDTH_MIN, RIGHT_WIDTH_MAX, RIGHT_WIDTH_DEFAULT),
+          animationSpeed: hydrateNumber(
+            saved.animationSpeed,
+            ANIMATION_SPEED_MIN,
+            ANIMATION_SPEED_MAX,
+            ANIMATION_SPEED_DEFAULT,
+          ),
+        };
+      },
     },
   ),
 );

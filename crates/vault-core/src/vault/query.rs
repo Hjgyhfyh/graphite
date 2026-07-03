@@ -56,14 +56,7 @@ pub fn tasks_query(
         None => None,
     };
 
-    let all = index.tasks_query(&TasksQueryParams {
-        scope: None,
-        status: None,
-        due_before: None,
-        overdue: None,
-        plan: None,
-        limit: None,
-    })?;
+    let all = index.all_tasks()?;
 
     let status = params.status.unwrap_or(TaskStatusFilter::Open);
     let due_before = params.due_before.as_deref();
@@ -101,7 +94,7 @@ pub fn tasks_query(
             continue;
         }
         hits.push(TaskHit {
-            id: task.id.clone(),
+            id: hit_id(&task),
             text: task.text.clone(),
             done: task.done,
             due: task.due.clone(),
@@ -140,18 +133,38 @@ pub fn task_check(
     }
     let note_by_id = notes_by_id(index)?;
 
-    let mut wanted: BTreeMap<String, HashMap<String, bool>> = BTreeMap::new();
+    let mut wanted: BTreeMap<String, HashMap<TaskTarget, bool>> = BTreeMap::new();
     let mut plan_ids: BTreeSet<String> = BTreeSet::new();
     for item in &params.tasks {
-        let Some(&task) = task_by_id.get(item.id.as_str()) else {
+        if let Some(&task) = task_by_id.get(item.id.as_str()) {
+            wanted
+                .entry(task.note_id.0.clone())
+                .or_default()
+                .insert(TaskTarget::Anchor(task.anchor.0.clone()), item.done);
+            if let Some(plan_id) = task_plan_note_id(task, note_by_id.get(&task.note_id.0)) {
+                plan_ids.insert(plan_id);
+            }
             continue;
-        };
-        wanted
-            .entry(task.note_id.0.clone())
-            .or_default()
-            .insert(task.anchor.0.clone(), item.done);
-        if let Some(plan_id) = task_plan_note_id(task, note_by_id.get(&task.note_id.0)) {
-            plan_ids.insert(plan_id);
+        }
+        // Безъякорная задача адресуется синтетическим id `loc:<note>:<line>` из
+        // tasks_query: отмечаем по номеру строки и проставляем якорь на лету,
+        // чтобы дальше она была стабильно адресуема.
+        if let Some((note_id, line)) = parse_loc_id(&item.id) {
+            if !note_by_id.contains_key(&note_id) {
+                continue;
+            }
+            wanted
+                .entry(note_id.clone())
+                .or_default()
+                .insert(TaskTarget::Line(line), item.done);
+            if let Some(task) = all_tasks
+                .iter()
+                .find(|t| t.note_id.0 == note_id && t.line == line)
+            {
+                if let Some(plan_id) = task_plan_note_id(task, note_by_id.get(&note_id)) {
+                    plan_ids.insert(plan_id);
+                }
+            }
         }
     }
 
@@ -330,37 +343,75 @@ fn journal_scope_path(note_path: &str) -> Option<String> {
     }
 }
 
-/// Применяет к телу заметки набор `anchor → done`, переключая символ состояния
-/// чекбокса. Frontmatter и стиль концов строк не трогаются; возвращает новый
-/// текст и число реально изменённых задач.
-fn toggle_file(text: &str, wants: &HashMap<String, bool>) -> (String, u32) {
+/// Цель отметки задачи: по якорю (стабильный id) или по номеру строки
+/// (для безъякорных задач, адресованных синтетическим `loc:`-id).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum TaskTarget {
+    Anchor(String),
+    Line(u32),
+}
+
+const LOC_ID_PREFIX: &str = "loc:";
+
+/// Id задачи для выдачи наружу: якорь, если есть; иначе синтетический
+/// `loc:<note>:<line>`, по которому `task_check` найдёт безъякорную задачу.
+fn hit_id(task: &TaskItem) -> String {
+    if task.id.is_empty() {
+        format!("{LOC_ID_PREFIX}{}:{}", task.note_id.0, task.line)
+    } else {
+        task.id.clone()
+    }
+}
+
+/// Разбор синтетического id `loc:<note>:<line>` → (id заметки, номер строки).
+fn parse_loc_id(id: &str) -> Option<(String, u32)> {
+    let rest = id.strip_prefix(LOC_ID_PREFIX)?;
+    let (note_id, line) = rest.rsplit_once(':')?;
+    if note_id.is_empty() {
+        return None;
+    }
+    Some((note_id.to_string(), line.parse().ok()?))
+}
+
+/// Применяет к телу заметки набор целей (`anchor`/номер строки) → `done`,
+/// переключая символ состояния чекбокса. Безъякорная строка при первом же
+/// переключении получает якорь `^t-…`, становясь стабильно адресуемой.
+/// Frontmatter и стиль концов строк не трогаются; возвращает новый текст и
+/// число реально изменённых задач.
+fn toggle_file(text: &str, wants: &HashMap<TaskTarget, bool>) -> (String, u32) {
     let Ok(parsed) = parser::parse_note(text) else {
         return (text.to_string(), 0);
     };
     let body = &text[parsed.body_offset..];
-    let mut out = String::with_capacity(text.len());
+    let mut out = String::with_capacity(text.len() + 16);
     out.push_str(&text[..parsed.body_offset]);
-    let mut remaining: HashMap<&str, bool> =
-        wants.iter().map(|(k, v)| (k.as_str(), *v)).collect();
     let mut changed = 0u32;
+    let mut line_no = 0u32;
     for piece in body.split_inclusive('\n') {
+        line_no += 1;
         let content = piece.trim_end_matches(['\r', '\n']);
         let ending = &piece[content.len()..];
-        if !remaining.is_empty() {
-            if let Some(checkbox) = scan_checkbox(content) {
-                if let Some(anchor) = &checkbox.anchor {
-                    if let Some(desired) = remaining.remove(anchor.as_str()) {
-                        let current_done = matches!(checkbox.state, 'x' | 'X');
-                        if desired != current_done {
-                            let new_char = if desired { 'x' } else { ' ' };
-                            out.push_str(&content[..checkbox.state_idx]);
-                            out.push(new_char);
-                            out.push_str(&content[checkbox.state_idx + 1..]);
-                            out.push_str(ending);
-                            changed += 1;
-                            continue;
-                        }
+        if let Some(checkbox) = scan_checkbox(content) {
+            let by_anchor = checkbox
+                .anchor
+                .as_ref()
+                .and_then(|anchor| wants.get(&TaskTarget::Anchor(anchor.clone())).copied());
+            let desired = by_anchor.or_else(|| wants.get(&TaskTarget::Line(line_no)).copied());
+            if let Some(desired) = desired {
+                let current_done = matches!(checkbox.state, 'x' | 'X');
+                if desired != current_done {
+                    let mut line = String::with_capacity(content.len() + 12);
+                    line.push_str(&content[..checkbox.state_idx]);
+                    line.push(if desired { 'x' } else { ' ' });
+                    line.push_str(&content[checkbox.state_idx + 1..]);
+                    if by_anchor.is_none() && checkbox.anchor.is_none() {
+                        let anchor = parser::generate_anchor();
+                        line = format!("{} ^{}", line.trim_end(), anchor.0);
                     }
+                    out.push_str(&line);
+                    out.push_str(ending);
+                    changed += 1;
+                    continue;
                 }
             }
         }

@@ -4,6 +4,17 @@ use tauri_specta::Event;
 
 use crate::dto::{Actor, JournalOp, NoteRef, Rev};
 
+/// Вид изменения заметки — позволяет фронту отличить внешнее удаление/
+/// переименование от обычной правки (закрыть вкладку, обновить путь).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteChangeKind {
+    Created,
+    Modified,
+    Removed,
+    Moved,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 #[serde(rename_all = "camelCase")]
 #[tauri_specta(event_name = "note_changed")]
@@ -11,6 +22,10 @@ pub struct NoteChangedEvent {
     pub r#ref: NoteRef,
     pub rev: Rev,
     pub actor: Actor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<NoteChangeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<NoteRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

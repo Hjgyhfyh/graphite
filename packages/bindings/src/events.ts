@@ -15,6 +15,7 @@ export interface GraphiteEventMap {
   mcp_session: McpSessionEvent;
   ui_open_note: UiOpenNoteEvent;
   ui_flash_note: UiFlashNoteEvent;
+  'capture-shown': void;
 }
 
 export type GraphiteEventName = keyof GraphiteEventMap;
@@ -26,4 +27,5 @@ export const GRAPHITE_EVENT = {
   mcpSession: 'mcp_session',
   uiOpenNote: 'ui_open_note',
   uiFlashNote: 'ui_flash_note',
+  captureShown: 'capture-shown',
 } as const satisfies Record<string, GraphiteEventName>;

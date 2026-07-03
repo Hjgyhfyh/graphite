@@ -559,14 +559,6 @@ export interface DistillSaveResponse {
   planRef?: NoteRef;
 }
 
-export interface UiNoteParams {
-  ref: NoteRef;
-}
-
-export interface UiNoteResponse {
-  ok: boolean;
-}
-
 export interface BufferSaveParams {
   ref: NoteRef;
   baseRev: Rev;
@@ -662,10 +654,14 @@ export interface IdeaToTasksResponse {
   planRef?: NoteRef;
 }
 
+export type NoteChangeKind = 'created' | 'modified' | 'removed' | 'moved';
+
 export interface NoteChangedEvent {
   ref: NoteRef;
   rev: Rev;
   actor: Actor;
+  kind?: NoteChangeKind;
+  from?: NoteRef;
 }
 
 export interface IndexProgressEvent {

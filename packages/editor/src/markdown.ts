@@ -159,7 +159,7 @@ const HR_RE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const FENCE_RE = /^\s{0,3}(```+|~~~+)\s*([^`]*)$/;
 const QUOTE_RE = /^\s{0,3}>\s?(.*)$/;
 const LIST_RE = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
-const TASK_RE = /^\[([ xX])\]\s+(.*)$/;
+const TASK_RE = /^\[([ xX])\]\s*(.*)$/;
 
 function isBlank(line: string): boolean {
   return line.trim().length === 0;
@@ -177,10 +177,11 @@ function isBlockStart(line: string): boolean {
 }
 
 /**
- * Block-level markdown parser scoped to what the reading view renders. Line indices are
- * tracked so interactive checkboxes can toggle the exact source line.
+ * Block-level markdown parser scoped to what the reading view renders. Absolute line indices
+ * are tracked (via `baseOffset` through nested recursion) so interactive checkboxes toggle the
+ * exact source line of the whole document, even inside blockquotes.
  */
-export function parseBlocks(source: string): MdBlock[] {
+export function parseBlocks(source: string, baseOffset = 0): MdBlock[] {
   const lines = source.split('\n');
   const blocks: MdBlock[] = [];
   let i = 0;
@@ -227,6 +228,7 @@ export function parseBlocks(source: string): MdBlock[] {
 
     const quote = QUOTE_RE.exec(line);
     if (quote !== null) {
+      const blockStart = i;
       const inner: string[] = [];
       while (i < n) {
         const q = QUOTE_RE.exec(lines[i]);
@@ -241,7 +243,7 @@ export function parseBlocks(source: string): MdBlock[] {
         inner.push(q[1]);
         i += 1;
       }
-      blocks.push({ kind: 'blockquote', children: parseBlocks(inner.join('\n')) });
+      blocks.push({ kind: 'blockquote', children: parseBlocks(inner.join('\n'), baseOffset + blockStart) });
       continue;
     }
 
@@ -263,7 +265,7 @@ export function parseBlocks(source: string): MdBlock[] {
             ordered,
             marker: m[2],
             content: parseInline(task[2]),
-            task: { checked: task[1].toLowerCase() === 'x', line: i },
+            task: { checked: task[1].toLowerCase() === 'x', line: baseOffset + i },
           });
         } else {
           items.push({ indent, ordered, marker: m[2], content: parseInline(rest) });

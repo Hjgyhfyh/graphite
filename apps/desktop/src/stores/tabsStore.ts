@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { NoteRef } from '@graphite/bindings';
 import { usePanesStore } from './panesStore';
+import { useVaultStore } from './vaultStore';
 
 export type TabKind = 'editor' | 'plan' | 'settings' | 'search' | 'tasks';
 
@@ -88,6 +89,7 @@ export const useTabsStore = create<TabsStore>()((set, get) => ({
       panes.setActivePane(paneId);
       return;
     }
+    const iconInfo = useVaultStore.getState().iconByRef[ref];
     const tab: Tab = {
       id: crypto.randomUUID(),
       noteRef: ref,
@@ -96,6 +98,8 @@ export const useTabsStore = create<TabsStore>()((set, get) => ({
       kind,
       pinned: false,
       paneId,
+      icon: iconInfo?.icon,
+      iconColor: iconInfo?.color,
       order: nextOrder(get().tabs, paneId),
     };
     set((s) => ({ tabs: [...s.tabs, tab] }));

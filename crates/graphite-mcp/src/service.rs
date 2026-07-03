@@ -1,7 +1,8 @@
-//! MCP-сервис Graphite: 30 инструментов реестра CONTRACT §3, каждый — тонкий
+//! MCP-сервис Graphite: инструменты реестра CONTRACT §3, каждый — тонкий
 //! прокси в ядро через `rpc::RpcClient` (named pipe). Ответ инструмента —
 //! конверт `{v, ok, data|error}` в JSON-тексте. Плюс ресурсы
-//! (`vault://conventions|inbox|recent`) и промпт `distill` (SPEC §7.4/§7.5).
+//! (`vault://conventions|inbox|recent`) и промпты (distill, plan_from_ideas,
+//! weekly_review, brainstorm, inbox_triage) — SPEC §7.4/§7.5.
 
 use std::path::PathBuf;
 
@@ -38,6 +39,12 @@ impl GraphiteService {
         Value::Object(serde_json::Map::new())
     }
 
+    /// Открывает свежее соединение на один вызов и проксирует метод в ядро.
+    /// Рукопожатие `hello` намеренно пропущено: канал — доверенный локальный
+    /// pipe, сервер не гейтит вызовы по hello, а `schemaVersion` совпадает
+    /// заведомо (MCP-бинарь и ядро делят один крейт `rpc`). Если появится
+    /// гейтинг по capability — добавить сюда `client.hello()` с проверкой
+    /// совместимости.
     async fn proxy(&self, method: &str, params: Value) -> Result<String, ErrorData> {
         let mut client = match RpcClient::connect().await {
             Ok(client) => client,
@@ -62,6 +69,40 @@ impl GraphiteService {
         })?;
         serde_json::to_string_pretty(&envelope)
             .map_err(|err| ErrorData::internal_error(format!("сериализация ответа: {err}"), None))
+    }
+
+    /// Текущие `icon`/`icon_color` заметки из frontmatter — для set_icon, чтобы
+    /// точечная смена одного поля не стёрла парное (ядро трактует отсутствие
+    /// поля как очистку). Ошибку чтения заметки пробрасываем вызывающему.
+    async fn current_icon(
+        &self,
+        note_ref: &str,
+    ) -> Result<(Option<String>, Option<String>), ErrorData> {
+        let text = self
+            .proxy("note_read", serde_json::json!({ "ref": note_ref }))
+            .await?;
+        let value: Value = serde_json::from_str(&text).map_err(|err| {
+            ErrorData::internal_error(format!("разбор ответа note_read: {err}"), None)
+        })?;
+        if value.get("ok").and_then(Value::as_bool) != Some(true) {
+            let message = value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("не удалось прочитать заметку");
+            return Err(ErrorData::internal_error(message.to_string(), None));
+        }
+        let frontmatter = value.get("data").and_then(|data| data.get("frontmatter"));
+        let field = |key: &str| {
+            frontmatter
+                .and_then(|fm| fm.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        Ok((
+            field("icon"),
+            field("icon_color").or_else(|| field("iconColor")),
+        ))
     }
 }
 
@@ -106,6 +147,12 @@ impl GraphiteService {
         annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
     )]
     async fn search(&self, Parameters(args): Parameters<SearchArgs>) -> Result<String, ErrorData> {
+        if matches!(args.mode, Some(SearchModeArg::Semantic | SearchModeArg::Hybrid)) {
+            return Err(ErrorData::invalid_params(
+                "семантический и гибридный поиск пока недоступны (нет capability semantic_search) — используйте mode:keyword",
+                None,
+            ));
+        }
         self.proxy("search", Self::to_params(&args)?).await
     }
 
@@ -336,14 +383,31 @@ impl GraphiteService {
 
     #[tool(
         name = "set_icon",
-        description = "Ставит заметке иконку lucide и/или цвет во frontmatter (icon/iconColor) — для дерева, вкладок и свитчера. Пустое поле снимает значение.",
+        description = "Ставит заметке иконку lucide и/или цвет во frontmatter (icon/iconColor) — для дерева, вкладок и свитчера. Пропуск поля сохраняет текущее значение, пустая строка снимает его.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     async fn set_icon(
         &self,
         Parameters(args): Parameters<SetIconArgs>,
     ) -> Result<String, ErrorData> {
-        self.proxy("set_icon", Self::to_params(&args)?).await
+        if args.icon.is_none() && args.color.is_none() {
+            return Err(ErrorData::invalid_params(
+                "укажите icon и/или color: хотя бы одно поле",
+                None,
+            ));
+        }
+        let (icon, color) = if args.icon.is_none() || args.color.is_none() {
+            let (current_icon, current_color) = self.current_icon(&args.r#ref).await?;
+            (args.icon.or(current_icon), args.color.or(current_color))
+        } else {
+            (args.icon, args.color)
+        };
+        let resolved = SetIconArgs {
+            r#ref: args.r#ref,
+            icon,
+            color,
+        };
+        self.proxy("set_icon", Self::to_params(&resolved)?).await
     }
 
     #[tool(
@@ -456,17 +520,20 @@ impl GraphiteService {
 impl ServerHandler for GraphiteService {
     fn get_info(&self) -> ServerInfo {
         let instructions = format!(
-            "Graphite — локальное хранилище заметок и планов (vault: {}). \
-             Мутации выполняй только через инструменты — они дают поиск по индексу, \
-             ссылочную целостность, валидацию и журнал. Адресация — ref: \"id:01J8…\" \
-             (рекомендовано) или \"path:Проекты/Блог.md\". Ответ каждого инструмента — \
-             конверт {{v, ok, data|error}}; при error.code=CONFLICT перечитай заметку \
-             через note_read и повтори мутацию с новым rev. Начинай сессию с vault_info. \
-             Кроме базовых: иконки и цвет заметок (set_icon), закрепление (note_pin), \
-             бандлы по смыслу (bundle_create) и их сборка в один текст для ИИ — «Copy Page» \
-             (bundle_compose), разбор сырой идеи в задачи (idea_to_tasks). \
-             Ресурсы: vault://conventions (правила хранилища), vault://inbox, vault://recent. \
-             Промпт: distill — флагманская «Выжимка» заметки.",
+            "Graphite — локальное хранилище заметок и планов. Инструменты работают с \
+             хранилищем, открытым в приложении Graphite; его корень, лимиты и capabilities \
+             узнавай через vault_info (путь запуска --vault «{}» может отличаться от \
+             активного хранилища). Мутации выполняй только через инструменты — они дают \
+             поиск по индексу, ссылочную целостность, валидацию и журнал. Адресация — ref: \
+             \"id:01J8…\" (рекомендовано) или \"path:Проекты/Блог.md\". Ответ каждого \
+             инструмента — конверт {{v, ok, data|error}}; при error.code=CONFLICT перечитай \
+             заметку через note_read и повтори мутацию с новым rev. Начинай сессию с \
+             vault_info. Кроме базовых: иконки и цвет заметок (set_icon), закрепление \
+             (note_pin), бандлы по смыслу (bundle_create) и их сборка в один текст для ИИ — \
+             «Copy Page» (bundle_compose), разбор сырой идеи в задачи (idea_to_tasks), журнал \
+             и откат (journal_list, undo_op, undo_session). Ресурсы: vault://conventions \
+             (правила хранилища), vault://inbox, vault://recent. Промпты: distill \
+             (флагманская «Выжимка»), plan_from_ideas, weekly_review, brainstorm, inbox_triage.",
             self.vault.display()
         );
         ServerInfo::new(
@@ -546,26 +613,41 @@ impl ServerHandler for GraphiteService {
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
         match request.name.as_str() {
-            DISTILL_PROMPT => {
-                let note_ref = request
-                    .arguments
-                    .as_ref()
-                    .and_then(|args| args.get("ref"))
-                    .and_then(|value| value.as_str());
-                Ok(distill_prompt(note_ref))
-            }
+            DISTILL_PROMPT => Ok(distill_prompt(prompt_arg(&request, "ref"))),
+            PLAN_FROM_IDEAS_PROMPT => Ok(plan_from_ideas_prompt(
+                prompt_arg(&request, "scope"),
+                prompt_arg(&request, "horizon"),
+            )),
+            WEEKLY_REVIEW_PROMPT => Ok(weekly_review_prompt()),
+            BRAINSTORM_PROMPT => Ok(brainstorm_prompt(prompt_arg(&request, "ref"))),
+            INBOX_TRIAGE_PROMPT => Ok(inbox_triage_prompt()),
             other => Err(ErrorData::invalid_params(
-                format!("неизвестный промпт «{other}»: доступен {DISTILL_PROMPT}"),
+                format!(
+                    "неизвестный промпт «{other}»: доступны {DISTILL_PROMPT}, {PLAN_FROM_IDEAS_PROMPT}, {WEEKLY_REVIEW_PROMPT}, {BRAINSTORM_PROMPT}, {INBOX_TRIAGE_PROMPT}"
+                ),
                 None,
             )),
         }
     }
 }
 
+/// Строковый аргумент промпта по ключу, если он передан.
+fn prompt_arg<'a>(request: &'a GetPromptRequestParams, key: &str) -> Option<&'a str> {
+    request
+        .arguments
+        .as_ref()
+        .and_then(|args| args.get(key))
+        .and_then(|value| value.as_str())
+}
+
 const CONVENTIONS_URI: &str = "vault://conventions";
 const INBOX_URI: &str = "vault://inbox";
 const RECENT_URI: &str = "vault://recent";
 const DISTILL_PROMPT: &str = "distill";
+const PLAN_FROM_IDEAS_PROMPT: &str = "plan_from_ideas";
+const WEEKLY_REVIEW_PROMPT: &str = "weekly_review";
+const BRAINSTORM_PROMPT: &str = "brainstorm";
+const INBOX_TRIAGE_PROMPT: &str = "inbox_triage";
 
 /// Правила хранилища для ассистента (SPEC §6, §7.4). Статичный текст —
 /// не зависит от ядра, отдаётся даже без смонтированного vault.
@@ -638,6 +720,54 @@ fn prompt_catalog() -> Vec<Prompt> {
             ]),
         )
         .with_title("Выжимка"),
+        Prompt::new(
+            PLAN_FROM_IDEAS_PROMPT,
+            Some(
+                "Из инбокса к плану: ≤3 уточняющих вопроса, затем plan_create со связью на идеи-источники и показ ближайших шагов.",
+            ),
+            Some(vec![
+                PromptArgument::new("scope")
+                    .with_title("Скоуп")
+                    .with_description(
+                        "Ограничить идеи поддеревом: \"id:…\" или \"path:…\". Без него — весь инбокс.",
+                    )
+                    .with_required(false),
+                PromptArgument::new("horizon")
+                    .with_title("Горизонт")
+                    .with_description("Горизонт планирования, например «2 недели» или дата.")
+                    .with_required(false),
+            ]),
+        )
+        .with_title("План из идей"),
+        Prompt::new(
+            WEEKLY_REVIEW_PROMPT,
+            Some(
+                "Еженедельный обзор: прогресс планов и активность за 7 дней, разбор застоя и просрочки, дайджест-заметка.",
+            ),
+            None,
+        )
+        .with_title("Недельный обзор"),
+        Prompt::new(
+            BRAINSTORM_PROMPT,
+            Some(
+                "Мозговой штурм по заметке: наводящие вопросы, каждый виток дописывается в заметку.",
+            ),
+            Some(vec![
+                PromptArgument::new("ref")
+                    .with_title("Заметка")
+                    .with_description("Адрес заметки для проработки: \"id:…\" или \"path:…\".")
+                    .with_required(true),
+            ]),
+        )
+        .with_title("Мозговой штурм"),
+        Prompt::new(
+            INBOX_TRIAGE_PROMPT,
+            Some(
+                "Разбор инбокса: классификация записей, список решений в чат, применение после подтверждения.",
+            ),
+            None,
+        )
+        .with_title("Разбор входящих"),
     ]
 }
 
@@ -662,6 +792,89 @@ fn distill_prompt(note_ref: Option<&str>) -> GetPromptResult {
     );
     GetPromptResult::new(vec![PromptMessage::new_text(Role::User, body)]).with_description(
         "Флагманская механика «Выжимка» — довести сырую идею до цель/зачем/критерии и, по желанию, плана.",
+    )
+}
+
+/// Сценарий `plan_from_ideas` (SPEC §7.5): из инбокса к плану со связью на
+/// идеи-источники. `scope`/`horizon` подставляются, если заданы.
+fn plan_from_ideas_prompt(scope: Option<&str>, horizon: Option<&str>) -> GetPromptResult {
+    let scope_line = match scope {
+        Some(s) => format!("Скоуп: {s} — ограничь идеи этим поддеревом."),
+        None => "Скоуп не задан — бери все необработанные записи из vault://inbox.".to_string(),
+    };
+    let horizon_line = match horizon {
+        Some(h) => format!("Горизонт планирования: {h}."),
+        None => "Горизонт не задан — уточни его вопросом, если он важен.".to_string(),
+    };
+    let body = format!(
+        "Собери план из сырых идей во «Входящих» Graphite.\n\n\
+         {scope_line}\n{horizon_line}\n\n\
+         Протокол:\n\
+         1. Прочитай vault://inbox (и search по скоупу, если задан) — собери идеи-кандидаты.\n\
+         2. Задай не больше 3 уточняющих вопросов (цель, горизонт, приоритеты) по одному за раз, с гипотезой и вариантами.\n\
+         3. Разложи идеи в задачи (idea_to_tasks помогает с черновиком) и вызови plan_create с sources — план свяжется с источниками distilled_from.\n\
+         4. Покажи 3 ближайших следующих шага из плана.\n\
+         5. Открой план в приложении через ui_open_note.\n\
+         Пиши по-русски, кратко и по делу. Мутации — только через инструменты."
+    );
+    GetPromptResult::new(vec![PromptMessage::new_text(Role::User, body)]).with_description(
+        "Из инбокса к плану: уточнить, разложить в задачи, создать план и показать следующие шаги.",
+    )
+}
+
+/// Сценарий `weekly_review` (SPEC §7.5): прогресс планов и активность за 7 дней
+/// → разбор застоя/просрочки → перепланирование → дайджест-заметка.
+fn weekly_review_prompt() -> GetPromptResult {
+    let body = "Проведи еженедельный обзор хранилища Graphite.\n\n\
+         Протокол:\n\
+         1. Вызови plan_progress(allActive=true) — проценты, стадии, застой, просрочка, следующие шаги.\n\
+         2. Вызови activity_get(since=\"-7d\") — что реально менялось за неделю.\n\
+         3. Разбери застоявшиеся и просроченные задачи: предложи перепланирование через plan_update (сроки, порядок, снятие/добавление задач).\n\
+         4. Собери итог в дайджест-заметку (note_create, type journal): сделано, где затык, план на следующую неделю.\n\
+         Пиши по-русски, кратко и по делу. Мутации — только через инструменты."
+        .to_string();
+    GetPromptResult::new(vec![PromptMessage::new_text(Role::User, body)]).with_description(
+        "Еженедельный разбор: прогресс планов и активность за 7 дней → перепланирование → дайджест.",
+    )
+}
+
+/// Сценарий `brainstorm` (SPEC §7.5): «выжать максимум» по заметке, каждый
+/// содержательный виток дописывается в неё. `ref` подставляется, если задан.
+fn brainstorm_prompt(note_ref: Option<&str>) -> GetPromptResult {
+    let target = match note_ref {
+        Some(r) => format!("Заметка для проработки: {r}."),
+        None => {
+            "Заметка не задана — попроси ref или предложи кандидата из vault://inbox.".to_string()
+        }
+    };
+    let body = format!(
+        "Проведи мозговой штурм по заметке в Graphite — «выжми максимум».\n\n\
+         {target}\n\n\
+         Протокол:\n\
+         1. Прочитай заметку note_read(ref) с её связями (include links/backlinks).\n\
+         2. Веди диалог наводящими вопросами: развивай идеи, ищи пробелы, альтернативы, риски — по одному вопросу за раз.\n\
+         3. Каждый содержательный виток фиксируй в заметку note_edit(append_section), чтобы мысль не терялась.\n\
+         4. В конце подведи итог: что нового появилось и что стоит проработать дальше.\n\
+         Пиши по-русски, кратко и по делу. Мутации — только через инструменты."
+    );
+    GetPromptResult::new(vec![PromptMessage::new_text(Role::User, body)]).with_description(
+        "Мозговой штурм по заметке: наводящие вопросы, каждый виток дописывается в заметку.",
+    )
+}
+
+/// Сценарий `inbox_triage` (SPEC §7.5): классификация инбокса → список решений
+/// в чат → применение после подтверждения человека.
+fn inbox_triage_prompt() -> GetPromptResult {
+    let body = "Разбери «Входящие» Graphite (inbox triage).\n\n\
+         Протокол:\n\
+         1. Прочитай vault://inbox — необработанные записи status: inbox.\n\
+         2. Классифицируй каждую: превратить в план/проект, слить с существующей заметкой, задача, справка, заморозить/удалить.\n\
+         3. Выдай список решений в чат — по записи одна строка с предлагаемым действием и причиной.\n\
+         4. После подтверждения пользователя примени изменения инструментами (set_status, note_move, link_add, note_delete, plan_create) по одному действию за раз.\n\
+         Пиши по-русски, кратко и по делу. Мутации — только через инструменты."
+        .to_string();
+    GetPromptResult::new(vec![PromptMessage::new_text(Role::User, body)]).with_description(
+        "Разбор инбокса: классифицировать записи, показать решения, применить после подтверждения.",
     )
 }
 

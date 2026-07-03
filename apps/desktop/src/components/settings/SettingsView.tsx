@@ -219,10 +219,18 @@ export function SettingsView() {
   const copyValue =
     (okMessage: string) =>
     (value: string): void => {
-      void navigator.clipboard.writeText(value).then(
-        () => pushToast({ kind: 'success', text: okMessage }),
-        () => pushToast({ kind: 'error', text: 'Не удалось скопировать' }),
-      );
+      if (typeof navigator === 'undefined' || navigator.clipboard === undefined) {
+        pushToast({ kind: 'error', text: 'Буфер обмена недоступен' });
+        return;
+      }
+      try {
+        void navigator.clipboard.writeText(value).then(
+          () => pushToast({ kind: 'success', text: okMessage }),
+          () => pushToast({ kind: 'error', text: 'Не удалось скопировать' }),
+        );
+      } catch {
+        pushToast({ kind: 'error', text: 'Не удалось скопировать' });
+      }
     };
 
   const reindex = async () => {
@@ -247,11 +255,14 @@ export function SettingsView() {
       });
       return;
     }
+    let completed = false;
+    let failed = false;
     for (let i = 0; i < 300 && mounted.current; i += 1) {
       let status: IndexStatus;
       try {
         status = await commands.indexStatus();
       } catch {
+        failed = true;
         break;
       }
       if (!mounted.current) {
@@ -259,6 +270,7 @@ export function SettingsView() {
       }
       setPolled(status);
       if (status.state === 'idle') {
+        completed = true;
         break;
       }
       await delay(350);
@@ -266,7 +278,13 @@ export function SettingsView() {
     if (mounted.current) {
       setReindexing(false);
       setPolled(undefined);
-      pushToast({ kind: 'success', text: 'Индекс пересобран' });
+      if (completed) {
+        pushToast({ kind: 'success', text: 'Индекс пересобран' });
+      } else if (failed) {
+        pushToast({ kind: 'error', text: 'Не удалось подтвердить пересборку' });
+      } else {
+        pushToast({ kind: 'info', text: 'Индексация ещё идёт — обновите позже' });
+      }
     }
   };
 

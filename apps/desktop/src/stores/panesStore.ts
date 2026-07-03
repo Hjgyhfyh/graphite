@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useTabsStore } from './tabsStore';
+import { useVaultStore } from './vaultStore';
 
 export const MAX_PANES = 5;
 
@@ -23,6 +24,23 @@ export interface PanesStore {
 export function activeTab(state: PanesStore): { paneId: string; tabId?: string } {
   const pane = state.panes.find((p) => p.id === state.activePaneId) ?? state.panes[0];
   return { paneId: pane.id, tabId: pane.activeTabId };
+}
+
+/**
+ * Держит `vaultStore.currentRef` равным заметке видимой (активной) editor-вкладки
+ * активной панели. Клик по вкладке, переключение панели split-view и закрытие
+ * вкладки идут через панель-стор — правая панель, дерево и хоткеи благодаря этому
+ * всегда указывают на заметку, которую пользователь реально видит.
+ */
+function syncCurrentRef(state: PanesStore): void {
+  const pane = state.panes.find((p) => p.id === state.activePaneId);
+  const tab = pane?.activeTabId === undefined
+    ? undefined
+    : useTabsStore.getState().tabs.find((t) => t.id === pane.activeTabId);
+  const nextRef = tab !== undefined && tab.kind === 'editor' ? tab.noteRef : undefined;
+  if (useVaultStore.getState().currentRef !== nextRef) {
+    useVaultStore.setState({ currentRef: nextRef });
+  }
 }
 
 export const usePanesStore = create<PanesStore>()((set, get) => ({
@@ -60,14 +78,17 @@ export const usePanesStore = create<PanesStore>()((set, get) => ({
       );
       return { panes: withTabs, activePaneId: nextActive };
     });
+    syncCurrentRef(get());
   },
   setActivePane: (id) => {
     set((s) => (s.panes.some((p) => p.id === id) ? { activePaneId: id } : s));
+    syncCurrentRef(get());
   },
   setPaneActiveTab: (paneId, tabId) => {
     set((s) => ({
       panes: s.panes.map((p) => (p.id === paneId ? { ...p, activeTabId: tabId } : p)),
     }));
+    syncCurrentRef(get());
   },
   moveTabToPane: (tabId, paneId) => {
     useTabsStore.getState().moveToPane(tabId, paneId);
@@ -84,5 +105,6 @@ export const usePanesStore = create<PanesStore>()((set, get) => ({
       });
       return { panes, activePaneId: paneId };
     });
+    syncCurrentRef(get());
   },
 }));

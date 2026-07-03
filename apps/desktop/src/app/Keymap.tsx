@@ -8,7 +8,7 @@ import { useVaultStore } from '../stores/vaultStore';
 
 type ActionHandler = () => void;
 
-const handlers = new Map<ActionId, ActionHandler>();
+const handlers = new Map<ActionId, ActionHandler[]>();
 
 const GLOBAL_ACTIONS = new Set<ActionId>([
   'palette.open',
@@ -32,9 +32,19 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
 ]);
 
 export function registerActionHandler(id: ActionId, handler: ActionHandler): () => void {
-  handlers.set(id, handler);
+  const stack = handlers.get(id) ?? [];
+  stack.push(handler);
+  handlers.set(id, stack);
   return () => {
-    if (handlers.get(id) === handler) {
+    const current = handlers.get(id);
+    if (current === undefined) {
+      return;
+    }
+    const index = current.lastIndexOf(handler);
+    if (index !== -1) {
+      current.splice(index, 1);
+    }
+    if (current.length === 0) {
       handlers.delete(id);
     }
   };
@@ -85,6 +95,15 @@ function cycleTab(direction: 1 | -1): void {
   useTabsStore.getState().activate(tabs[next].id);
 }
 
+function focusActiveEditor(): boolean {
+  const content = document.querySelector<HTMLElement>('.cm-editor .cm-content');
+  if (content === null) {
+    return false;
+  }
+  content.focus();
+  return true;
+}
+
 function runBuiltin(id: ActionId): boolean {
   const ui = useUiStore.getState();
   switch (id) {
@@ -118,6 +137,8 @@ function runBuiltin(id: ActionId): boolean {
     case 'editor.toggleReading':
       ui.toggleReadingMode();
       return true;
+    case 'search.inNote':
+      return focusActiveEditor();
     case 'capture.quick':
       ui.setFloatingCaptureOpen(true);
       return true;
@@ -166,7 +187,8 @@ function runBuiltin(id: ActionId): boolean {
 }
 
 export function runAction(id: ActionId): boolean {
-  const handler = handlers.get(id);
+  const stack = handlers.get(id);
+  const handler = stack !== undefined && stack.length > 0 ? stack[stack.length - 1] : undefined;
   if (handler !== undefined) {
     handler();
     return true;

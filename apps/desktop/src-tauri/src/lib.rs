@@ -15,7 +15,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 use dto::{Actor, NoteRef, Rev};
-use events::NoteChangedEvent;
+use events::{McpSessionEvent, NoteChangeKind, NoteChangedEvent};
 
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -68,15 +68,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::UiOpenNoteEvent,
             events::UiFlashNoteEvent,
         ])
-}
-
-#[cfg(debug_assertions)]
-fn export_bindings(builder: &Builder<tauri::Wry>) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../packages/bindings/src/generated.ts");
-    if let Err(error) = builder.export(specta_typescript::Typescript::default(), path) {
-        eprintln!("graphite: экспорт TS-биндингов пропущен: {error}");
-    }
 }
 
 /// Показывает и фокусирует главное окно (клик по трею, пункт «Открыть»).
@@ -164,15 +155,47 @@ fn start_vault_watcher(
     app: &tauri::AppHandle,
     root: &Path,
 ) -> Result<vault_core::watcher::VaultWatcher, vault_core::VaultError> {
+    use vault_core::watcher::WatchEventKind;
     let echo: Arc<dyn vault_core::watcher::EchoSource> = vault_core::writer::shared_echo();
     let app = app.clone();
     vault_core::watcher::start(root, echo, move |events| {
         for event in events {
+            let path = event.path.clone();
+            // Внешняя правка (свои записи echo уже отфильтровал) должна попасть в
+            // индекс, иначе поиск/задачи/связи по ней остаются устаревшими.
+            {
+                let mut guard = commands::lock_core();
+                if let Some(state) = guard.as_mut() {
+                    let root = state.root.clone();
+                    match &event.kind {
+                        WatchEventKind::Removed => {
+                            let _ = state.index.remove_by_path(&path);
+                        }
+                        WatchEventKind::Moved { from } => {
+                            let _ = state.index.remove_by_path(from);
+                            let _ = state.index.reindex_paths(&root, &[path.clone()]);
+                        }
+                        _ => {
+                            let _ = state.index.reindex_paths(&root, &[path.clone()]);
+                        }
+                    }
+                }
+            }
+            let (kind, from) = match &event.kind {
+                WatchEventKind::Created => (NoteChangeKind::Created, None),
+                WatchEventKind::Modified => (NoteChangeKind::Modified, None),
+                WatchEventKind::Removed => (NoteChangeKind::Removed, None),
+                WatchEventKind::Moved { from } => {
+                    (NoteChangeKind::Moved, Some(NoteRef(format!("path:{from}"))))
+                }
+            };
             let rev = event.rev.map(|r| Rev(r.0)).unwrap_or_else(|| Rev(String::new()));
             let payload = NoteChangedEvent {
-                r#ref: NoteRef(format!("path:{}", event.path)),
+                r#ref: NoteRef(format!("path:{path}")),
                 rev,
                 actor: Actor::External,
+                kind: Some(kind),
+                from,
             };
             let _ = app.emit("note_changed", payload);
         }
@@ -189,7 +212,7 @@ fn spawn_watcher_supervisor(app: tauri::AppHandle) {
         .spawn(move || {
             let mut current: Option<(std::path::PathBuf, vault_core::watcher::VaultWatcher)> = None;
             loop {
-                let root = state::core_cell().lock().unwrap().as_ref().map(|s| s.root.clone());
+                let root = commands::lock_core().as_ref().map(|s| s.root.clone());
                 let unchanged = match (&current, &root) {
                     (Some((watched, _)), Some(root)) => watched == root,
                     (None, None) => true,
@@ -214,9 +237,6 @@ fn spawn_watcher_supervisor(app: tauri::AppHandle) {
 pub fn run() {
     let builder = specta_builder();
 
-    #[cfg(debug_assertions)]
-    export_bindings(&builder);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main_window(app);
@@ -240,6 +260,7 @@ pub fn run() {
         })
         .setup(move |app| {
             builder.mount_events(app);
+            runtime::set_app_handle(app.handle().clone());
             commands::mount_saved_vault();
 
             let mcp_item = build_tray(app)?;
@@ -252,16 +273,17 @@ pub fn run() {
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let handler = Arc::new(rpc_handler::AppHandler::new(app_handle.clone()));
-                let text = match rpc::RpcServer::new(handler).start().await {
+                let (text, active) = match rpc::RpcServer::new(handler).start().await {
                     Ok(server) => {
                         *rpc_slot.lock().unwrap() = Some(server);
-                        "MCP: активен"
+                        ("MCP: активен", true)
                     }
                     Err(err) => {
                         eprintln!("graphite: канал ядра {} не поднят: {err}", rpc::protocol::PIPE_PATH);
-                        "MCP: не запущен"
+                        ("MCP: не запущен", false)
                     }
                 };
+                let _ = app_handle.emit("mcp_session", McpSessionEvent { active, session: None });
                 let _ = app_handle.run_on_main_thread(move || {
                     let _ = mcp_item.set_text(text);
                 });

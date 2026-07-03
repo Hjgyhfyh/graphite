@@ -54,6 +54,13 @@ function IndexIndicator() {
   const reduced = usePrefersReducedMotion();
   const busy = status.state !== 'idle';
   const fraction = status.total > 0 ? Math.min(1, status.done / status.total) : 0;
+  const [everIndexed, setEverIndexed] = useState(false);
+
+  useEffect(() => {
+    if (busy || status.total > 0) {
+      setEverIndexed(true);
+    }
+  }, [busy, status.total]);
 
   return (
     <Presence mode="wait">
@@ -82,7 +89,7 @@ function IndexIndicator() {
             {status.total > 0 ? `${status.done}/${status.total}` : '…'}
           </span>
         </Fade>
-      ) : hasVault ? (
+      ) : hasVault && everIndexed ? (
         <Fade key="fresh" className="flex items-center gap-1.5 text-text-2">
           <span aria-hidden className="size-1.5 rounded-full bg-ok" />
           Индекс свежий
@@ -118,11 +125,25 @@ function McpIndicator({ active }: { active: boolean }) {
 
 export function StatusBar() {
   const info = useVaultStore((s) => s.info);
+  const railView = useUiStore((s) => s.railView);
+  const setRailView = useUiStore((s) => s.setRailView);
   const sidebarHidden = useUiStore((s) => s.sidebarHidden);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const setSidebarHidden = useUiStore((s) => s.setSidebarHidden);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const [mcp, setMcp] = useState<McpSessionEvent>({ active: false });
+
+  const sidebarView = railView === 'tree' || railView === 'search';
+  const sidebarShown = sidebarView && !sidebarHidden;
+  const onToggleSidebar = () => {
+    if (sidebarView) {
+      toggleSidebar();
+    } else {
+      setRailView('tree');
+      setSidebarHidden(false);
+    }
+  };
 
   useEffect(() => {
     if (!isTauriAvailable()) {
@@ -137,11 +158,34 @@ export function StatusBar() {
   }, []);
 
   useEffect(() => {
+    let timer: number | undefined;
+    const schedule = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      timer = window.setTimeout(() => {
+        void useVaultStore.getState().loadInfo();
+      }, 200);
+    };
+    const unsubscribe = useVaultStore.subscribe((state, prev) => {
+      if (state.tree !== prev.tree) {
+        schedule();
+      }
+    });
+    return () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const status = await commands.indexStatus();
-        if (!cancelled && status.state !== 'idle') {
+        if (!cancelled && status.state !== 'idle' && status.total > 0) {
           useVaultStore.getState().setIndexStatus({ done: status.done, total: status.total });
         }
       } catch {
@@ -173,18 +217,18 @@ export function StatusBar() {
         <IndexIndicator />
         <McpIndicator active={mcp.active} />
         <span aria-hidden className="h-3.5 w-px bg-stroke-0" />
-        <Tooltip content={sidebarHidden ? 'Показать панель заметок' : 'Скрыть панель заметок'} side="top">
+        <Tooltip content={sidebarShown ? 'Скрыть панель заметок' : 'Показать панель заметок'} side="top">
           <button
             type="button"
-            aria-label={sidebarHidden ? 'Показать панель заметок' : 'Скрыть панель заметок'}
-            aria-pressed={!sidebarHidden}
-            onClick={() => toggleSidebar()}
+            aria-label={sidebarShown ? 'Скрыть панель заметок' : 'Показать панель заметок'}
+            aria-pressed={sidebarShown}
+            onClick={onToggleSidebar}
             className="flex size-6 items-center justify-center rounded-xs text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
           >
-            {sidebarHidden ? (
-              <PanelLeft size={14} strokeWidth={1.75} />
-            ) : (
+            {sidebarShown ? (
               <PanelLeftClose size={14} strokeWidth={1.75} />
+            ) : (
+              <PanelLeft size={14} strokeWidth={1.75} />
             )}
           </button>
         </Tooltip>

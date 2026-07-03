@@ -39,6 +39,7 @@ export interface VaultStore {
   openVault(path: string): Promise<void>;
   createVault(path: string): Promise<void>;
   openNote(ref: NoteRef): void;
+  flashNote(ref: NoteRef): void;
   applyNoteChanged(e: NoteChangedEvent): void;
   setIndexStatus(s: IndexProgressEvent): void;
   toggleExpanded(path: string): void;
@@ -63,6 +64,11 @@ function reason(error: unknown, fallback: string): string {
   return fallback;
 }
 
+const NOTE_CHANGED_DEBOUNCE_MS = 180;
+
+let treeLoadSeq = 0;
+let noteChangedTimer: ReturnType<typeof setTimeout> | undefined;
+
 export const useVaultStore = create<VaultStore>()((set, get) => ({
   info: undefined,
   tree: [],
@@ -76,15 +82,20 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     try {
       set({ info: await commands.vaultInfo() });
     } catch {
-      set({ info: undefined });
+      // сохраняем прежние сведения: разовый сбой обновления не должен ронять UI в экран выбора хранилища
     }
   },
   loadTree: async (root) => {
+    const seq = (treeLoadSeq += 1);
+    const full = root === undefined;
     try {
       const response = await commands.vaultTree({ root });
+      if (seq !== treeLoadSeq) {
+        return;
+      }
       set((s) => {
-        const iconByRef = { ...s.iconByRef };
-        const pinnedNotes = new Set(s.pinnedNotes);
+        const iconByRef: Record<NoteRef, NoteIconInfo> = full ? {} : { ...s.iconByRef };
+        const pinnedNotes = full ? new Set<NoteRef>() : new Set(s.pinnedNotes);
         for (const node of response.nodes) {
           if (node.icon !== undefined || node.iconColor !== undefined) {
             iconByRef[node.ref] = { icon: node.icon, color: node.iconColor };
@@ -96,7 +107,9 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         return { tree: response.nodes, iconByRef, pinnedNotes };
       });
     } catch {
-      set({ tree: [] });
+      if (seq === treeLoadSeq) {
+        set({ tree: [] });
+      }
     }
   },
   loadChildren: async (ref) => {
@@ -121,8 +134,18 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     useTabsStore.getState().open(ref);
     set({ currentRef: ref });
   },
+  flashNote: (ref) => {
+    set({ currentRef: ref });
+  },
   applyNoteChanged: () => {
-    void get().loadTree();
+    if (noteChangedTimer !== undefined) {
+      clearTimeout(noteChangedTimer);
+    }
+    noteChangedTimer = setTimeout(() => {
+      noteChangedTimer = undefined;
+      void get().loadTree();
+      void get().loadInfo();
+    }, NOTE_CHANGED_DEBOUNCE_MS);
   },
   setIndexStatus: (e) => {
     set({
@@ -152,6 +175,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         type: opts?.type,
       });
       await get().loadTree();
+      void get().loadInfo();
       get().openNote(created.ref);
     } catch (error) {
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось создать заметку') });
@@ -161,6 +185,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     try {
       const created = await commands.bundleCreate(params);
       await get().loadTree();
+      void get().loadInfo();
       get().openNote(created.ref);
       useUiStore.getState().pushToast({ kind: 'success', text: 'Коллекция создана' });
     } catch (error) {
@@ -186,6 +211,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       }
       set((s) => ({ currentRef: s.currentRef === ref ? undefined : s.currentRef }));
       await get().loadTree();
+      void get().loadInfo();
       useUiStore.getState().pushToast({
         kind: 'info',
         text: 'Заметка перемещена в корзину',
@@ -199,6 +225,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     try {
       await commands.noteRestore({ restoreToken: token, ref });
       await get().loadTree();
+      void get().loadInfo();
       useUiStore.getState().pushToast({ kind: 'success', text: 'Заметка восстановлена' });
     } catch (error) {
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось восстановить') });

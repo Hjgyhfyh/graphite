@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Clock, FileText, ListChecks, ListTodo } from 'lucide-react';
 import { cx } from '@graphite/ui';
-import type { NoteRef, Priority, TaskHit } from '@graphite/bindings';
+import type { NoteRef, Priority, TaskHit, TreeNode } from '@graphite/bindings';
 import { useTasksStore } from '../../stores/tasksStore';
 import type { TaskFilter } from '../../stores/tasksStore';
 import { useVaultStore } from '../../stores/vaultStore';
@@ -47,14 +47,14 @@ interface TaskGroup {
   tasks: TaskHit[];
 }
 
-function groupTasks(tasks: TaskHit[]): TaskGroup[] {
+function groupTasks(tasks: TaskHit[], titleFor: (ref: NoteRef) => string): TaskGroup[] {
   const groups = new Map<string, TaskGroup>();
   for (const task of tasks) {
     const isPlan = task.plan !== undefined;
     const ref = task.plan ?? task.source.ref;
     const existing = groups.get(ref);
     if (existing === undefined) {
-      groups.set(ref, { ref, title: titleFromRef(ref), isPlan, tasks: [task] });
+      groups.set(ref, { ref, title: titleFor(ref), isPlan, tasks: [task] });
     } else {
       existing.tasks.push(task);
     }
@@ -232,13 +232,34 @@ export function TasksView() {
   const setFilter = useTasksStore((s) => s.setFilter);
   const toggle = useTasksStore((s) => s.toggle);
   const loadTasks = useTasksStore((s) => s.loadTasks);
+  const tree = useVaultStore((s) => s.tree);
+  const childrenByRef = useVaultStore((s) => s.childrenByRef);
   const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
 
-  const groups = useMemo(() => groupTasks(tasks), [tasks]);
+  const titleByRef = useMemo(() => {
+    const map = new Map<NoteRef, string>();
+    const add = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        if (node.title.length > 0) {
+          map.set(node.ref, node.title);
+        }
+      }
+    };
+    add(tree);
+    for (const nodes of Object.values(childrenByRef)) {
+      add(nodes);
+    }
+    return map;
+  }, [tree, childrenByRef]);
+
+  const groups = useMemo(
+    () => groupTasks(tasks, (ref) => titleByRef.get(ref) ?? titleFromRef(ref)),
+    [tasks, titleByRef],
+  );
   const empty = EMPTY_STATES[filter];
 
   return (

@@ -68,33 +68,53 @@ export function Rail() {
   const setRailView = useUiStore((s) => s.setRailView);
   const sidebarHidden = useUiStore((s) => s.sidebarHidden);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const setSidebarHidden = useUiStore((s) => s.setSidebarHidden);
+
+  const sidebarView = railView === 'tree' || railView === 'search';
+  const sidebarShown = sidebarView && !sidebarHidden;
+
+  const selectView = (view: RailView) => {
+    setRailView(view);
+    if (view === 'tree' || view === 'search') {
+      setSidebarHidden(false);
+    }
+  };
+
+  const onToggleSidebar = () => {
+    if (sidebarView) {
+      toggleSidebar();
+    } else {
+      setRailView('tree');
+      setSidebarHidden(false);
+    }
+  };
 
   return (
     <nav
       aria-label="Разделы"
       className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke-0 bg-bg-1 py-2"
     >
-      <Tooltip content={sidebarHidden ? 'Показать панель заметок' : 'Скрыть панель заметок'} side="right">
+      <Tooltip content={sidebarShown ? 'Скрыть панель заметок' : 'Показать панель заметок'} side="right">
         <button
           type="button"
-          aria-label={sidebarHidden ? 'Показать панель заметок' : 'Скрыть панель заметок'}
-          aria-pressed={!sidebarHidden}
-          onClick={() => toggleSidebar()}
+          aria-label={sidebarShown ? 'Скрыть панель заметок' : 'Показать панель заметок'}
+          aria-pressed={sidebarShown}
+          onClick={onToggleSidebar}
           className="flex size-9 items-center justify-center rounded-s text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
         >
-          {sidebarHidden ? (
-            <PanelLeft size={18} strokeWidth={1.75} />
-          ) : (
+          {sidebarShown ? (
             <PanelLeftClose size={18} strokeWidth={1.75} />
+          ) : (
+            <PanelLeft size={18} strokeWidth={1.75} />
           )}
         </button>
       </Tooltip>
       <span aria-hidden className="my-1 h-px w-5 rounded-full bg-stroke-0" />
       {MAIN_ITEMS.map((item) => (
-        <RailButton key={item.view} item={item} active={railView === item.view} onSelect={setRailView} />
+        <RailButton key={item.view} item={item} active={railView === item.view} onSelect={selectView} />
       ))}
       <div className="flex-1" />
-      <RailButton item={SETTINGS_ITEM} active={railView === SETTINGS_ITEM.view} onSelect={setRailView} />
+      <RailButton item={SETTINGS_ITEM} active={railView === SETTINGS_ITEM.view} onSelect={selectView} />
     </nav>
   );
 }

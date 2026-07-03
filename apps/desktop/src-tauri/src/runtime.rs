@@ -3,9 +3,26 @@
 //! до того, как известен его путь, и без открытого окна (для pipe/MCP).
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const APP_IDENTIFIER: &str = "com.graphite.app";
 const LAST_VAULT_FILE: &str = "last-vault.json";
+
+/// Дескриптор приложения, доступный всем слоям (Tauri-командам и pipe/MCP-
+/// диспетчеру), чтобы мутации могли эмитить события окну независимо от того,
+/// из какого потока они пришли.
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+/// Публикует дескриптор приложения один раз на старте (setup).
+pub fn set_app_handle(app: tauri::AppHandle) {
+    let _ = APP_HANDLE.set(app);
+}
+
+/// Дескриптор приложения, если он уже опубликован. До завершения setup —
+/// `None` (эмиссия событий тихо пропускается).
+pub fn app_handle() -> Option<tauri::AppHandle> {
+    APP_HANDLE.get().cloned()
+}
 
 /// Каталог конфигурации приложения (`%APPDATA%\com.graphite.app`).
 pub fn config_dir() -> Option<PathBuf> {

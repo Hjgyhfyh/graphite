@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'motion/react';
 import { Tree } from 'react-arborist';
@@ -12,7 +12,19 @@ import type {
   TreeApi,
 } from 'react-arborist';
 import * as ContextMenu from '@radix-ui/react-context-menu';
-import { ChevronRight, Columns2, FileText, Palette, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react';
+import {
+  ChevronRight,
+  Columns2,
+  FileText,
+  Folder,
+  FolderOpen,
+  Palette,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import type { NoteRef, TreeNode } from '@graphite/bindings';
 import { Kbd, STAGGER_CAP, cx } from '@graphite/ui';
 import { useActionHandler } from '../../app/Keymap';
@@ -44,6 +56,7 @@ interface ArNode {
   path: string;
   name: string;
   isFolder: boolean;
+  virtual?: boolean;
   updated: string;
   children: ArNode[] | null;
 }
@@ -85,14 +98,17 @@ function dirOf(path: string): string {
   return slash === -1 ? '' : path.slice(0, slash);
 }
 
+function baseName(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash === -1 ? path : path.slice(slash + 1);
+}
+
 function buildForest(nodes: readonly TreeNode[]): ArNode[] {
-  const arNodes: ArNode[] = [];
   const folderByKey = new Map<string, ArNode>();
-  const parentDirs: string[] = [];
+  const fileNodes: ArNode[] = [];
 
   for (const node of nodes) {
     const isFolder = node.path.endsWith(INDEX_SUFFIX);
-    const folderKey = isFolder ? node.path.slice(0, -INDEX_SUFFIX.length) : '';
     const ar: ArNode = {
       id: node.ref,
       ref: node.ref,
@@ -102,30 +118,63 @@ function buildForest(nodes: readonly TreeNode[]): ArNode[] {
       updated: node.updated,
       children: isFolder ? [] : null,
     };
-    arNodes.push(ar);
-    parentDirs.push(isFolder ? dirOf(folderKey) : dirOf(node.path));
     if (isFolder) {
-      folderByKey.set(folderKey, ar);
+      folderByKey.set(node.path.slice(0, -INDEX_SUFFIX.length), ar);
+    } else {
+      fileNodes.push(ar);
     }
   }
 
-  const roots: ArNode[] = [];
-  for (let i = 0; i < arNodes.length; i += 1) {
-    let dir = parentDirs[i];
-    let parent: ArNode | undefined;
-    while (dir !== '') {
-      const found = folderByKey.get(dir);
+  const ensureChain = (dir: string) => {
+    let cur = dir;
+    while (cur !== '' && !folderByKey.has(cur)) {
+      folderByKey.set(cur, {
+        id: `path:${cur}`,
+        ref: `path:${cur}`,
+        path: cur,
+        name: baseName(cur),
+        isFolder: true,
+        virtual: true,
+        updated: '',
+        children: [],
+      });
+      cur = dirOf(cur);
+    }
+  };
+
+  for (const key of [...folderByKey.keys()]) {
+    ensureChain(dirOf(key));
+  }
+  for (const file of fileNodes) {
+    ensureChain(dirOf(file.path));
+  }
+
+  const parentFor = (dir: string): ArNode | undefined => {
+    let cur = dir;
+    while (cur !== '') {
+      const found = folderByKey.get(cur);
       if (found !== undefined) {
-        parent = found;
-        break;
+        return found;
       }
-      dir = dirOf(dir);
+      cur = dirOf(cur);
     }
+    return undefined;
+  };
+
+  const roots: ArNode[] = [];
+  const attach = (ar: ArNode, dir: string) => {
+    const parent = parentFor(dir);
     if (parent !== undefined && parent.children !== null) {
-      parent.children.push(arNodes[i]);
+      parent.children.push(ar);
     } else {
-      roots.push(arNodes[i]);
+      roots.push(ar);
     }
+  };
+  for (const [key, ar] of folderByKey) {
+    attach(ar, dirOf(key));
+  }
+  for (const file of fileNodes) {
+    attach(file, dirOf(file.path));
   }
 
   const sortRec = (list: ArNode[]) => {
@@ -158,17 +207,17 @@ function EmptyState() {
 function useElementSize() {
   const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (el === null) {
       return;
     }
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (rect !== undefined) {
-        setSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
-      }
-    });
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      setSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -250,12 +299,18 @@ function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
           event.preventDefault();
           event.stopPropagation();
           event.nativeEvent.stopImmediatePropagation();
-          ctx.openNote(node.data.ref);
+          if (node.data.virtual === true) {
+            node.toggle();
+          } else {
+            ctx.openNote(node.data.ref);
+          }
         } else if (event.key === 'Delete') {
           event.preventDefault();
           event.stopPropagation();
           event.nativeEvent.stopImmediatePropagation();
-          ctx.remove(node.data.ref);
+          if (node.data.virtual !== true) {
+            ctx.remove(node.data.ref);
+          }
         }
       }}
       className="flex items-center px-1 outline-none"
@@ -353,6 +408,17 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="z-50 min-w-56 origin-(--radix-context-menu-content-transform-origin) animate-pop rounded-m border border-stroke-1 bg-bg-2 p-1 shadow-3">
+          {data.virtual === true ? (
+            <ContextMenu.Item className={MENU_ITEM} onSelect={() => node.toggle()}>
+              {node.isOpen ? (
+                <FolderOpen size={15} strokeWidth={1.75} className="text-text-2" />
+              ) : (
+                <Folder size={15} strokeWidth={1.75} className="text-text-2" />
+              )}
+              {node.isOpen ? 'Свернуть' : 'Развернуть'}
+            </ContextMenu.Item>
+          ) : (
+            <>
           <ContextMenu.Item className={MENU_ITEM} onSelect={() => ctx.openNote(data.ref)}>
             <FileText size={15} strokeWidth={1.75} className="text-text-2" />
             Открыть
@@ -392,6 +458,8 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
             <Trash2 size={15} strokeWidth={1.75} />
             Удалить
           </ContextMenu.Item>
+            </>
+          )}
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -435,8 +503,13 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
     if (currentRef === undefined) {
       return;
     }
+    const api = treeRef.current;
+    if (api === undefined) {
+      return;
+    }
     try {
-      treeRef.current?.scrollTo(currentRef);
+      api.openParents(currentRef);
+      void api.scrollTo(currentRef)?.catch(() => undefined);
     } catch {
       /* узел ещё не в дереве */
     }
@@ -479,6 +552,10 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   }, []);
 
   const handleActivate = useCallback((node: NodeApi<ArNode>) => {
+    if (node.data.virtual === true) {
+      node.toggle();
+      return;
+    }
     useVaultStore.getState().openNote(node.data.ref);
   }, []);
 
@@ -500,6 +577,10 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
 
   const handleMove = useCallback<MoveHandler<ArNode>>((args) => {
     const parentRef: NoteRef = args.parentId ?? ROOT_REF;
+    const stripped = parentRef.slice(ROOT_REF.length);
+    const targetDir = stripped.endsWith(INDEX_SUFFIX)
+      ? stripped.slice(0, -INDEX_SUFFIX.length)
+      : stripped;
     void (async () => {
       for (const dragged of args.dragNodes) {
         const currentParent =
@@ -507,7 +588,9 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
         if (currentParent === parentRef) {
           continue;
         }
-        setJustMoved(dragged.data.id);
+        const base = baseName(dragged.data.path);
+        const movedRef: NoteRef = `path:${targetDir === '' ? base : `${targetDir}/${base}`}`;
+        setJustMoved(movedRef);
         window.clearTimeout(moveTimer.current);
         moveTimer.current = window.setTimeout(() => setJustMoved(undefined), 520);
         await useVaultStore.getState().move(dragged.data.ref, parentRef);
@@ -517,10 +600,15 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
 
   const disableDrop = useCallback(
     (args: { parentNode: NodeApi<ArNode>; dragNodes: NodeApi<ArNode>[]; index: number }) => {
-      if (args.parentNode.isRoot) {
-        return false;
+      if (!args.parentNode.isRoot && !args.parentNode.data.isFolder) {
+        return true;
       }
-      return !args.parentNode.data.isFolder;
+      const targetParent: NoteRef = args.parentNode.isRoot ? ROOT_REF : args.parentNode.data.ref;
+      return args.dragNodes.every((dragged) => {
+        const current =
+          dragged.parent !== null && !dragged.parent.isRoot ? dragged.parent.id : ROOT_REF;
+        return current === targetParent;
+      });
     },
     [],
   );
@@ -650,15 +738,15 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
 
           <div ref={listRef} className="min-h-0 flex-1">
             <NodeCtx.Provider value={ctxValue}>
-              {size.height > 0 && size.width > 0 ? (
+              {forest.length > 0 ? (
                 <Tree<ArNode>
                   ref={treeRef}
                   data={forest}
                   idAccessor="id"
                   childrenAccessor="children"
                   openByDefault
-                  width={size.width}
-                  height={size.height}
+                  width={size.width > 0 ? size.width : width}
+                  height={size.height > 0 ? size.height : 600}
                   indent={INDENT}
                   rowHeight={ROW_HEIGHT}
                   overscanCount={8}

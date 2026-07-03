@@ -1,5 +1,5 @@
 import { syntaxTree } from '@codemirror/language';
-import type { Range } from '@codemirror/state';
+import type { Range, Text } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 
@@ -26,10 +26,31 @@ const LIST_MARK = markDeco('cm-gr-list-mark');
 const QUOTE_LINE = lineDeco('cm-gr-quote');
 const FENCE_LINE = lineDeco('cm-gr-fence');
 const HR_LINE = lineDeco('cm-gr-hr');
+const FRONTMATTER_LINE = lineDeco('cm-gr-frontmatter');
+
+const FM_OPEN_RE = /^\uFEFF?---\s*$/;
+const FM_CLOSE_RE = /^(?:---|\.\.\.)\s*$/;
+const FM_MAX_SCAN = 200;
+
+/** End char offset of a leading YAML frontmatter block, or 0 when the doc has none. */
+function frontmatterEnd(doc: Text): number {
+  if (doc.lines < 2 || !FM_OPEN_RE.test(doc.line(1).text)) {
+    return 0;
+  }
+  const last = Math.min(doc.lines, FM_MAX_SCAN);
+  for (let ln = 2; ln <= last; ln += 1) {
+    if (FM_CLOSE_RE.test(doc.line(ln).text)) {
+      return doc.line(ln).to;
+    }
+  }
+  return 0;
+}
 
 function buildDecorations(view: EditorView): DecorationSet {
   const items: Range<Decoration>[] = [];
   const doc = view.state.doc;
+
+  const fmEnd = frontmatterEnd(doc);
 
   const pushLines = (from: number, to: number, deco: Decoration): void => {
     let line = doc.lineAt(from);
@@ -48,10 +69,23 @@ function buildDecorations(view: EditorView): DecorationSet {
   };
 
   for (const { from, to } of view.visibleRanges) {
+    if (fmEnd > 0 && from < fmEnd) {
+      let line = doc.lineAt(from);
+      while (line.from < fmEnd) {
+        items.push(FRONTMATTER_LINE.range(line.from));
+        if (line.to >= to || line.to + 1 > doc.length) {
+          break;
+        }
+        line = doc.lineAt(line.to + 1);
+      }
+    }
     syntaxTree(view.state).iterate({
       from,
       to,
       enter: (node) => {
+        if (fmEnd > 0 && node.to <= fmEnd) {
+          return;
+        }
         const name = node.name;
         const heading = HEADING_LINE[name];
         if (heading !== undefined) {

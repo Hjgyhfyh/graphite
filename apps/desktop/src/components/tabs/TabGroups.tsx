@@ -3,14 +3,11 @@ import type { DragEvent as ReactDragEvent } from 'react';
 import { motion } from 'motion/react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as Popover from '@radix-ui/react-popover';
-import { ChevronDown, ChevronRight, Layers, Palette, Pencil, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Layers, Palette, Pencil, X } from 'lucide-react';
 import { cx, springTransition } from '@graphite/ui';
 import { GROUP_COLORS, useTabsStore } from '../../stores/tabsStore';
 import type { Tab, TabGroup } from '../../stores/tabsStore';
-import { usePanesStore } from '../../stores/panesStore';
 import { resolveIconColor } from '../tree/NoteIcon';
-
-const TAB_DND_TYPE = 'application/x-graphite-tab';
 
 export type StripSegment =
   | { kind: 'tab'; tab: Tab }
@@ -368,138 +365,5 @@ export function GroupChip({
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
-  );
-}
-
-export interface TabGroupsProps {
-  paneId: string;
-}
-
-export function TabGroups({ paneId }: TabGroupsProps) {
-  const tabs = useTabsStore((s) => s.tabs);
-  const groups = useTabsStore((s) => s.groups);
-  const activeTabId = usePanesStore((s) => s.panes.find((p) => p.id === paneId)?.activeTabId);
-  const [dropGroupId, setDropGroupId] = useState<string | null>(null);
-  const [dropNew, setDropNew] = useState(false);
-
-  const paneTabs = tabs.filter((tab) => tab.paneId === paneId);
-  const present = groups
-    .filter((group) => paneTabs.some((tab) => tab.groupId === group.id))
-    .sort((a, b) => a.order - b.order);
-
-  if (present.length === 0 && paneTabs.length < 2) {
-    return null;
-  }
-
-  const acceptsTab = (event: ReactDragEvent<HTMLElement>): boolean => event.dataTransfer.types.includes(TAB_DND_TYPE);
-
-  const bringToPane = (tabId: string, tab: Tab) => {
-    if (tab.paneId !== paneId) {
-      usePanesStore.getState().moveTabToPane(tabId, paneId);
-    }
-    if (tab.pinned) {
-      useTabsStore.getState().togglePin(tabId);
-    }
-  };
-
-  const onGroupDragOver = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
-    if (!acceptsTab(event)) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    event.dataTransfer.dropEffect = 'move';
-    setDropGroupId(groupId);
-  };
-  const onGroupDrop = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
-    if (!acceptsTab(event)) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const tabId = event.dataTransfer.getData(TAB_DND_TYPE);
-    setDropGroupId(null);
-    if (tabId === '') {
-      return;
-    }
-    const dragged = useTabsStore.getState().tabs.find((tab) => tab.id === tabId);
-    if (dragged === undefined) {
-      return;
-    }
-    bringToPane(tabId, dragged);
-    useTabsStore.getState().addToGroup(tabId, groupId);
-    normalizeOrder(paneId);
-  };
-
-  const createFrom = (tabId?: string) => {
-    const store = useTabsStore.getState();
-    const target = tabId ?? activeTabId ?? paneTabs[0]?.id;
-    if (target === undefined) {
-      return;
-    }
-    const tab = store.tabs.find((candidate) => candidate.id === target);
-    if (tab === undefined) {
-      return;
-    }
-    bringToPane(target, tab);
-    store.createGroup(undefined, [target]);
-    normalizeOrder(paneId);
-  };
-
-  return (
-    <div className="flex items-center gap-1.5 overflow-x-auto border-b border-stroke-0 px-2 py-1">
-      {present.map((group) => {
-        const members = paneTabs.filter((tab) => tab.groupId === group.id);
-        return (
-          <GroupChip
-            key={group.id}
-            paneId={paneId}
-            group={group}
-            count={members.length}
-            collapsedView={group.collapsed}
-            containsActive={members.some((member) => member.id === activeTabId)}
-            isDropTarget={dropGroupId === group.id}
-            onDragOver={(event) => onGroupDragOver(event, group.id)}
-            onDragLeave={() => setDropGroupId((current) => (current === group.id ? null : current))}
-            onDrop={(event) => onGroupDrop(event, group.id)}
-          />
-        );
-      })}
-      <button
-        type="button"
-        aria-label="Новая группа вкладок"
-        title="Собрать вкладки в пачку"
-        onClick={() => createFrom()}
-        onDragOver={(event) => {
-          if (!acceptsTab(event)) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = 'move';
-          setDropNew(true);
-        }}
-        onDragLeave={() => setDropNew(false)}
-        onDrop={(event) => {
-          if (!acceptsTab(event)) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          const tabId = event.dataTransfer.getData(TAB_DND_TYPE);
-          setDropNew(false);
-          if (tabId !== '') {
-            createFrom(tabId);
-          }
-        }}
-        className={cx(
-          'flex h-7 flex-none items-center gap-1 rounded-s border border-dashed px-2 text-caption transition-colors duration-[120ms]',
-          dropNew ? 'border-accent text-text-0' : 'border-stroke-1 text-text-2 hover:text-text-0',
-        )}
-      >
-        <Plus size={13} strokeWidth={1.75} />
-        Группа
-      </button>
-    </div>
   );
 }

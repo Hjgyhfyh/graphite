@@ -478,6 +478,11 @@ export function AiFeedTab() {
             </button>
           </div>
         )
+      ) : groups.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+          <Sparkles size={20} strokeWidth={1.5} className="text-text-3" />
+          <p className="text-caption text-text-2">В этой категории пока пусто</p>
+        </div>
       ) : (
         <div className="flex flex-col gap-3 px-3 pb-3">
           {groups.map((group) => {

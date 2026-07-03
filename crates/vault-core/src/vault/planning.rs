@@ -25,6 +25,35 @@ pub fn plan_create(
     params: &PlanCreateParams,
     opts: &TxnOpts,
 ) -> Result<(PlanCreateResponse, JournalOp), VaultError> {
+    let (rel, content, resp) = build_plan_write(root, index, params)?;
+    let mut t = txn::begin(root, opts.actor, opts.tool.clone(), opts.session.clone())?;
+    t.stage_write(&rel, content)?;
+    let op = t.commit(&format!("Создание плана «{}»", params.title.trim()))?;
+    Ok((resp, op))
+}
+
+/// Стейджит новый план в переданную транзакцию (без собственного коммита),
+/// чтобы источник дистилляции и созданный план писались и откатывались одной
+/// операцией (SPEC §7.5).
+pub(crate) fn stage_plan(
+    root: &Path,
+    index: &Index,
+    params: &PlanCreateParams,
+    tx: &mut txn::Txn,
+) -> Result<PlanCreateResponse, VaultError> {
+    let (rel, content, resp) = build_plan_write(root, index, params)?;
+    tx.stage_write(&rel, content)?;
+    Ok(resp)
+}
+
+/// Готовит запись плана без транзакции: свободный путь, frontmatter, тело со
+/// стадиями и задачами, связи `distilled_from` к источникам. Возвращает
+/// относительный путь, содержимое файла и ответ создания.
+fn build_plan_write(
+    root: &Path,
+    index: &Index,
+    params: &PlanCreateParams,
+) -> Result<(String, String, PlanCreateResponse), VaultError> {
     let title = params.title.trim();
     let parent_dir = parent_dir_from_ref(index, params.parent.as_ref())?;
     let base = writer::sanitize_file_name(title);
@@ -62,17 +91,14 @@ pub fn plan_create(
     let (body, task_ids, total) = build_plan_body(&params.stages);
     let content = writer::normalize_lf(&format!("{fm_text}\n{body}"));
 
-    let mut t = txn::begin(root, opts.actor, opts.tool.clone(), opts.session.clone())?;
-    t.stage_write(&rel, content)?;
-    let op = t.commit(&format!("Создание плана «{title}»"))?;
-
     Ok((
+        rel.clone(),
+        content,
         PlanCreateResponse {
             r#ref: NoteRef(format!("path:{rel}")),
             task_ids,
             progress: PlanCreateProgress { done: 0, total },
         },
-        op,
     ))
 }
 
@@ -107,7 +133,8 @@ pub fn plan_update(
         ));
     }
 
-    let mut body = parsed.body.clone();
+    let eol = detect_eol(&raw);
+    let mut body = writer::normalize_lf(&parsed.body);
     for op in &params.ops {
         body = apply_plan_op(body, op)?;
     }
@@ -122,11 +149,16 @@ pub fn plan_update(
     let mut fm = parsed.frontmatter.clone();
     fm.updated = Some(writer::now_iso_utc());
     let fm_text = parser::serialize_frontmatter(&fm)?;
-    let content = writer::normalize_lf(&if fm_text.is_empty() {
+    let lf_content = if fm_text.is_empty() {
         body
     } else {
-        format!("{fm_text}\n{body}")
-    });
+        format!("{fm_text}{body}")
+    };
+    let content = if eol == "\n" {
+        lf_content
+    } else {
+        lf_content.replace('\n', eol)
+    };
     let rev_new = writer::compute_rev(content.as_bytes());
 
     let mut t = txn::begin(root, opts.actor, opts.tool.clone(), opts.session.clone())?;
@@ -163,7 +195,8 @@ pub fn plan_progress(
                 .into_iter()
                 .filter(|m| {
                     m.r#type == NoteType::Plan
-                        && (!active_only || m.status == Some(Status::Active))
+                        && (!active_only
+                            || matches!(m.status, Some(Status::Active) | Some(Status::Planned)))
                 })
                 .collect()
         }
@@ -237,20 +270,23 @@ fn plan_progress_one(
 fn stage_progress(body: &str, tasks: &[TaskItem]) -> Result<Vec<StageProgress>, VaultError> {
     let headings = parser::extract_headings(body)?;
     let mut out = Vec::new();
-    for heading in headings.iter().filter(|h| h.level == 2) {
-        let key = parser::normalize_for_compare(&heading.text);
+    for (pos, heading) in headings.iter().enumerate() {
+        if heading.level != 2 {
+            continue;
+        }
+        let start = heading.line;
+        let end = headings[pos + 1..]
+            .iter()
+            .find(|h| h.level <= 2)
+            .map(|h| h.line)
+            .unwrap_or(u32::MAX);
         let mut done = 0u32;
         let mut total = 0u32;
         for task in tasks {
             if task.status == TaskStatus::Dropped {
                 continue;
             }
-            let matches = task
-                .stage
-                .as_deref()
-                .map(|s| parser::normalize_for_compare(s) == key)
-                .unwrap_or(false);
-            if matches {
+            if task.line > start && task.line < end {
                 total += 1;
                 if task.done {
                     done += 1;
@@ -362,7 +398,7 @@ fn add_task(body: &str, stage: &str, text: &str, due: Option<&str>) -> Result<St
         }
     }
     let anchor = fresh_anchor(body);
-    let line = render_task_line("", "-", ' ', text, due, &anchor);
+    let line = render_task_line("", "-", ' ', text, due, None, None, &anchor);
     lines.insert(insert_at.min(lines.len()), line);
     Ok(lines.join("\n"))
 }
@@ -393,7 +429,16 @@ fn edit_task(
         Some(value) if value.trim().is_empty() => None,
         Some(value) => Some(value.trim().to_string()),
     };
-    lines[idx] = render_task_line(&indent, &marker, state, &text, due.as_deref(), want);
+    lines[idx] = render_task_line(
+        &indent,
+        &marker,
+        state,
+        &text,
+        due.as_deref(),
+        task.priority,
+        task.every.as_deref(),
+        want,
+    );
     Ok(lines.join("\n"))
 }
 
@@ -412,41 +457,96 @@ fn remove_task(body: &str, task_id: &str) -> Result<String, VaultError> {
 }
 
 fn reorder_tasks(body: &str, order: &[String]) -> Result<String, VaultError> {
+    let headings = parser::extract_headings(body)?;
     let tasks = parser::extract_tasks(&NoteId(String::new()), body)?;
     let mut lines = body_lines(body);
-    let slots: Vec<(usize, String)> = tasks
+
+    // Слот задачи: физический индекс строки, якорь и стадия (строка её H2 или
+    // `None` вне стадии). Порядок слотов — документный (extract_tasks).
+    let slots: Vec<(usize, String, Option<u32>)> = tasks
         .iter()
         .filter(|t| !t.anchor.0.is_empty() && (t.line as usize) <= lines.len())
-        .map(|t| (t.line as usize - 1, t.anchor.0.clone()))
+        .map(|t| {
+            (
+                t.line as usize - 1,
+                t.anchor.0.clone(),
+                governing_stage_line(&headings, t.line),
+            )
+        })
         .collect();
     if slots.is_empty() {
         return Ok(body.to_string());
     }
+
     let content_by_anchor: HashMap<String, String> = slots
         .iter()
-        .filter_map(|(idx, anchor)| lines.get(*idx).map(|line| (anchor.clone(), line.clone())))
+        .filter_map(|(idx, anchor, _)| lines.get(*idx).map(|line| (anchor.clone(), line.clone())))
         .collect();
-    let known: HashSet<&str> = slots.iter().map(|(_, a)| a.as_str()).collect();
+    let stage_of: HashMap<&str, Option<u32>> =
+        slots.iter().map(|(_, a, g)| (a.as_str(), *g)).collect();
 
+    // Запрошенный порядок — раскладываем по стадиям, чтобы анкор нельзя было
+    // перенести в чужую стадию (реордер строго внутри стадии).
+    let mut requested: HashMap<Option<u32>, Vec<String>> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut new_order: Vec<String> = Vec::with_capacity(slots.len());
     for id in order {
         let key = id.trim().trim_start_matches('^').to_string();
-        if known.contains(key.as_str()) && seen.insert(key.clone()) {
-            new_order.push(key);
+        if let Some(stage) = stage_of.get(key.as_str()) {
+            if seen.insert(key.clone()) {
+                requested.entry(*stage).or_default().push(key);
+            }
         }
     }
-    for (_, anchor) in &slots {
-        if seen.insert(anchor.clone()) {
-            new_order.push(anchor.clone());
-        }
+
+    // Физические слоты по стадиям (в документном порядке).
+    let mut stage_slots: HashMap<Option<u32>, Vec<(usize, String)>> = HashMap::new();
+    for (idx, anchor, stage) in &slots {
+        stage_slots
+            .entry(*stage)
+            .or_default()
+            .push((*idx, anchor.clone()));
     }
-    for ((idx, _), anchor) in slots.iter().zip(new_order.iter()) {
-        if let Some(content) = content_by_anchor.get(anchor) {
-            lines[*idx] = content.clone();
+    for (stage, members) in &stage_slots {
+        // Новый порядок стадии: запрошенные анкоры, затем остальные в документном.
+        let mut new_order: Vec<String> = Vec::with_capacity(members.len());
+        let mut placed: HashSet<String> = HashSet::new();
+        if let Some(req) = requested.get(stage) {
+            for anchor in req {
+                if placed.insert(anchor.clone()) {
+                    new_order.push(anchor.clone());
+                }
+            }
+        }
+        for (_, anchor) in members {
+            if placed.insert(anchor.clone()) {
+                new_order.push(anchor.clone());
+            }
+        }
+        for ((idx, _), anchor) in members.iter().zip(new_order.iter()) {
+            if let Some(content) = content_by_anchor.get(anchor) {
+                lines[*idx] = content.clone();
+            }
         }
     }
     Ok(lines.join("\n"))
+}
+
+/// Строка H2-заголовка, управляющего задачей на строке `line_no`, либо `None`
+/// вне стадии. Зеркалит parser::stage_for_line, но ключ — строка заголовка
+/// (уникальна для каждого вхождения), поэтому одноимённые стадии не сливаются.
+fn governing_stage_line(headings: &[parser::Heading], line_no: u32) -> Option<u32> {
+    let mut current = None;
+    for heading in headings {
+        if heading.line >= line_no {
+            break;
+        }
+        match heading.level {
+            1 => current = None,
+            2 => current = Some(heading.line),
+            _ => {}
+        }
+    }
+    current
 }
 
 /// Границы стадии по её H2-заголовку: 0-based индекс строки заголовка и
@@ -473,15 +573,18 @@ fn body_lines(body: &str) -> Vec<String> {
     body.split('\n').map(str::to_string).collect()
 }
 
-/// Рендер строки задачи: `отступ маркер " [" state "] " текст [@due] " ^" якорь`.
-/// Пустой текст заменяется плейсхолдером — иначе якорь примыкает к чекбоксу и
-/// перестаёт распознаваться грамматикой §7.1.
+/// Рендер строки задачи: `отступ маркер " [" state "] " текст [@due] [@p] [@every]
+/// " ^" якорь`. Приоритет и повтор сохраняются при пересборке строки, иначе
+/// правка текста/срока стёрла бы их (§7.1). Пустой текст заменяется
+/// плейсхолдером — иначе якорь примыкает к чекбоксу и не распознаётся.
 fn render_task_line(
     indent: &str,
     marker: &str,
     state: char,
     text: &str,
     due: Option<&str>,
+    priority: Option<Priority>,
+    every: Option<&str>,
     anchor: &str,
 ) -> String {
     let mut clean = clean_inline(text);
@@ -498,6 +601,16 @@ fn render_task_line(
     if let Some(d) = due.map(str::trim).filter(|d| !d.is_empty()) {
         line.push_str(" @due(");
         line.push_str(d);
+        line.push(')');
+    }
+    if let Some(p) = priority {
+        line.push_str(" @p(");
+        line.push_str(p.as_str());
+        line.push(')');
+    }
+    if let Some(e) = every.map(str::trim).filter(|e| !e.is_empty()) {
+        line.push_str(" @every(");
+        line.push_str(e);
         line.push(')');
     }
     if !anchor.is_empty() {
@@ -586,6 +699,8 @@ fn build_plan_body(stages: &[PlanStageDraft]) -> (String, Vec<Vec<String>>, u32)
                     ' ',
                     &task.text,
                     task.due.as_deref(),
+                    None,
+                    None,
                     &anchor,
                 ));
                 block.push('\n');
@@ -642,8 +757,14 @@ fn fallback_link(src: &NoteRef) -> String {
     }
 }
 
-fn escape_link_alias(title: &str) -> String {
-    title.replace(['\n', '\r'], " ").replace('|', "\\|")
+/// Экранирует заголовок под алиас wiki-ссылки `[[target|alias]]`: убирает
+/// переносы строк, экранирует `|` и не даёт `]]` оборвать ссылку раньше срока.
+pub(crate) fn escape_link_alias(title: &str) -> String {
+    let mut out = title.replace(['\n', '\r'], " ").replace('|', "\\|");
+    while out.contains("]]") {
+        out = out.replace("]]", "] ]");
+    }
+    out
 }
 
 /// Каталог-родитель для новой заметки из `ref`. `path:`-форма трактуется без
@@ -750,6 +871,15 @@ fn strip_md(path: &str) -> Option<&str> {
         Some(&path[..n - 3])
     } else {
         None
+    }
+}
+
+/// Стиль концов строк исходника: `\r\n`, если он встречается, иначе `\n`.
+fn detect_eol(raw: &str) -> &'static str {
+    if raw.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
     }
 }
 

@@ -6,6 +6,12 @@ import { applyMotionSpeed } from './scale';
 import { usePrefersReducedMotion } from './usePrefersReducedMotion';
 import { REDUCED_CROSSFADE, fadeVariants, popVariants, reducedFadeVariants, slideUpVariants } from './variants';
 
+// Масштаб скорости из persist-стора применяем синхронно при загрузке модуля —
+// до того как AppLaunch/PanelStagger отрисуют первый кадр. Иначе первая
+// launch/stagger-анимация проиграется на скорости 1, а масштаб догонит только со
+// второго кадра (layout-эффект провайдера выполняется после эффектов детей).
+applyMotionSpeed(useUiStore.getState().reducedMotion ? 1 : useUiStore.getState().animationSpeed);
+
 export interface TransitionBoxProps {
   children: ReactNode;
   className?: string;

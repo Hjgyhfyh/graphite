@@ -67,6 +67,12 @@ function stateOf(variants: Variants, key: string): DurationTransition {
   return variants[key] as unknown as DurationTransition;
 }
 
+/**
+ * Масштабирует мотион-слой приложения (motion/variants + springSnappy/Standard/Soft)
+ * под ползунок скорости из настроек. Компоненты, берущие пружины напрямую из
+ * `@graphite/ui` (`springs.*`/`springTransition`), этим ползунком не управляются —
+ * у них собственный фиксированный тайминг вне этого слоя.
+ */
 export function applyMotionSpeed(speed: number): void {
   const k = clampSpeed(speed);
   const scaled = (value: number): number => value / k;

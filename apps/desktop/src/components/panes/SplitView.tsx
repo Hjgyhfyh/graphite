@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { cx } from '@graphite/ui';
 import { usePanesStore } from '../../stores/panesStore';
@@ -10,6 +10,8 @@ import { PaneTabs, TAB_DND_TYPE } from './PaneTabs';
 
 const MIN_PANE_PX = 200;
 const DIVIDER_PX = 1;
+
+const paneWeights = new Map<string, number>();
 
 interface ResizeContext {
   leftId: string;
@@ -73,6 +75,7 @@ function PaneColumn({
       return;
     }
     moveTabToPane(draggedId, pane.id);
+    useTabsStore.getState().removeFromGroup(draggedId);
   };
 
   return (
@@ -118,10 +121,38 @@ export function SplitView() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<ResizeContext | null>(null);
-  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [weights, setWeights] = useState<Record<string, number>>(() => ({ ...Object.fromEntries(paneWeights) }));
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const weightOf = (id: string): number => weights[id] ?? 1;
+
+  useEffect(() => {
+    for (const [id, weight] of Object.entries(weights)) {
+      paneWeights.set(id, weight);
+    }
+  }, [weights]);
+
+  useEffect(() => {
+    const ids = new Set(panes.map((pane) => pane.id));
+    for (const id of Array.from(paneWeights.keys())) {
+      if (!ids.has(id)) {
+        paneWeights.delete(id);
+      }
+    }
+    setWeights((prev) => {
+      const kept = Object.entries(prev).filter(([id]) => ids.has(id));
+      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+    });
+  }, [panes]);
+
+  useEffect(
+    () => () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      resizeRef.current = null;
+    },
+    [],
+  );
 
   const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>, index: number) => {
     const container = containerRef.current;

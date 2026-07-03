@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDownLeft, Inbox } from 'lucide-react';
+import { cx } from '@graphite/ui';
 import { commands } from '@graphite/bindings';
 import type { LinkIn, NoteRef, RelType } from '@graphite/bindings';
 import { springSnappy, usePrefersReducedMotion } from '../../motion';
@@ -31,9 +32,12 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
   const iconByRef = useVaultStore((s) => s.iconByRef);
   const reduced = usePrefersReducedMotion();
   const [links, setLinks] = useState<LinkIn[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setLinks([]);
+    setLoading(true);
     commands.linksGet({ ref: noteRef, direction: 'in' }).then(
       (response) => {
         if (!cancelled) {
@@ -47,11 +51,13 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
             }
           }
           setLinks(unique);
+          setLoading(false);
         }
       },
       () => {
         if (!cancelled) {
           setLinks([]);
+          setLoading(false);
         }
       },
     );
@@ -83,7 +89,21 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
           <span className="rounded-full bg-bg-3 px-1.5 text-micro text-text-2">{links.length}</span>
         ) : null}
       </div>
-      {links.length > 0 ? (
+      {loading ? (
+        <div className="flex flex-col gap-1">
+          {[0, 1].map((row) => (
+            <div
+              key={row}
+              className={cx(
+                'h-8 rounded-s border border-stroke-0',
+                reduced
+                  ? 'bg-bg-2'
+                  : 'animate-shimmer bg-[length:200%_100%] bg-[image:linear-gradient(90deg,var(--bg-2),var(--bg-3),var(--bg-2))]',
+              )}
+            />
+          ))}
+        </div>
+      ) : links.length > 0 ? (
         <ul className="flex flex-col gap-0.5">
           <AnimatePresence initial={false}>
             {links.map((link) => {

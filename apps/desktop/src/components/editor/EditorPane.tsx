@@ -39,6 +39,27 @@ markdown-файлами в вашей папке — без облака и по
 const SAVE_DEBOUNCE_MS = 600;
 const READING_FONT = '"Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif';
 
+const pendingSaves = new Map<NoteRef, Promise<void>>();
+
+function describeError(error: unknown, fallback: string): string {
+  if (isGraphiteError(error)) {
+    return error.code === 'UNAVAILABLE' ? 'Ядро ещё не подключено' : error.message;
+  }
+  return fallback;
+}
+
+function isExternalHref(href: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(href.trim());
+}
+
+function openExternal(href: string): void {
+  try {
+    window.open(href, '_blank', 'noopener,noreferrer');
+  } catch {
+    /* opening external links is best-effort outside the desktop shell */
+  }
+}
+
 const HEADING_TAG: Record<1 | 2 | 3 | 4 | 5 | 6, ElementType> = {
   1: 'h1',
   2: 'h2',
@@ -122,12 +143,28 @@ function renderInline(nodes: readonly MdInline[], keyPrefix: string, ctx: Inline
             {node.label}
           </button>
         );
-      case 'link':
+      case 'link': {
+        const external = isExternalHref(node.href);
         return (
-          <span key={key} className="text-accent underline decoration-accent/40 underline-offset-2" title={node.href}>
+          <a
+            key={key}
+            href={node.href}
+            title={node.href}
+            {...(external ? { target: '_blank', rel: 'noreferrer noopener' } : {})}
+            onClick={(event) => {
+              event.preventDefault();
+              if (external) {
+                openExternal(node.href);
+              } else {
+                ctx.onOpenLink(node.href.replace(/\.md$/i, ''));
+              }
+            }}
+            className="cursor-pointer rounded-xs text-accent underline decoration-accent/40 underline-offset-2 transition-colors hover:decoration-accent"
+          >
             {renderInline(node.children, key, ctx)}
-          </span>
+          </a>
         );
+      }
       default:
         return null;
     }
@@ -284,6 +321,8 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
   const docRef = useRef('');
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<number | undefined>(undefined);
+  const savingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
 
   const setDirty = useTabsStore((s) => s.setDirty);
   const readingMode = useUiStore((s) => s.readingMode);
@@ -295,44 +334,106 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
 
   const isWelcome = noteRef === WELCOME_NOTE_REF;
 
-  const persist = useCallback(
-    async (content: string) => {
-      if (isWelcome) {
-        return;
-      }
-      try {
-        const res = await commands.bufferSave({ ref: noteRef, baseRev: baseRevRef.current, content });
-        baseRevRef.current = res.revNew;
-        dirtyRef.current = false;
-        setDirty(tabId, false);
-      } catch (error) {
-        useUiStore.getState().pushToast({
-          kind: 'error',
-          text: isGraphiteError(error)
-            ? error.code === 'UNAVAILABLE'
-              ? 'Ядро ещё не подключено'
-              : error.message
-            : 'Не удалось сохранить заметку',
-        });
+  const applyDisk = useCallback(
+    (content: string, rev: string, highlight: boolean) => {
+      const handle = editorRef.current;
+      const previous = docRef.current;
+      baseRevRef.current = rev;
+      docRef.current = content;
+      dirtyRef.current = false;
+      pendingSaveRef.current = false;
+      setDocText(content);
+      setDirty(tabId, false);
+      if (handle !== null) {
+        handle.setDoc(content);
+        if (highlight) {
+          const range = changedRange(previous, content);
+          if (range !== null) {
+            handle.markAi(range.from, range.to);
+          }
+        }
       }
     },
-    [isWelcome, noteRef, tabId, setDirty],
+    [noteRef, tabId, setDirty],
   );
 
-  const scheduleSave = useCallback(
-    (content: string) => {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = window.setTimeout(() => {
-        void persist(content);
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [persist],
-  );
+  const reconcileConflict = useCallback(async () => {
+    try {
+      const res = await commands.noteRead({ ref: noteRef });
+      baseRevRef.current = res.rev;
+      if (res.content === docRef.current) {
+        dirtyRef.current = false;
+        setDirty(tabId, false);
+        return;
+      }
+      useUiStore.getState().pushToast({
+        kind: 'error',
+        text: `«${titleFromRef(noteRef)}» изменена извне — ваши правки пока не сохранены`,
+        action: {
+          label: 'Загрузить с диска',
+          run: () => {
+            applyDisk(res.content, res.rev, true);
+          },
+        },
+      });
+    } catch {
+      /* leave the buffer dirty; the next edit or flush retries with the rebased rev */
+    }
+  }, [noteRef, tabId, setDirty, applyDisk]);
+
+  const persist = useCallback(async (): Promise<void> => {
+    if (isWelcome) {
+      return;
+    }
+    if (savingRef.current) {
+      pendingSaveRef.current = true;
+      return;
+    }
+    savingRef.current = true;
+    const run = (async () => {
+      try {
+        do {
+          pendingSaveRef.current = false;
+          const content = docRef.current;
+          try {
+            const res = await commands.bufferSave({ ref: noteRef, baseRev: baseRevRef.current, content });
+            baseRevRef.current = res.revNew;
+            if (docRef.current === content) {
+              dirtyRef.current = false;
+              setDirty(tabId, false);
+            }
+          } catch (error) {
+            pendingSaveRef.current = false;
+            if (isGraphiteError(error) && error.code === 'CONFLICT') {
+              await reconcileConflict();
+            } else {
+              useUiStore.getState().pushToast({
+                kind: 'error',
+                text: describeError(error, 'Не удалось сохранить заметку'),
+              });
+            }
+            return;
+          }
+        } while (pendingSaveRef.current);
+      } finally {
+        savingRef.current = false;
+      }
+    })();
+    pendingSaves.set(noteRef, run);
+    await run;
+  }, [isWelcome, noteRef, tabId, setDirty, reconcileConflict]);
+
+  const scheduleSave = useCallback(() => {
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      void persist();
+    }, SAVE_DEBOUNCE_MS);
+  }, [persist]);
 
   const flushSave = useCallback(() => {
     window.clearTimeout(saveTimerRef.current);
     if (!isWelcome && dirtyRef.current) {
-      void persist(docRef.current);
+      void persist();
     }
   }, [isWelcome, persist]);
 
@@ -398,7 +499,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
           docRef.current = next;
           dirtyRef.current = true;
           setDirty(tabId, true);
-          scheduleSave(next);
+          scheduleSave();
         },
       });
       editorRef.current = handle;
@@ -410,31 +511,31 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
     if (isWelcome) {
       baseRevRef.current = '';
       setLoaded(true);
-      mount(WELCOME_DOC);
+      mount(WELCOME_DOC, true);
     } else {
-      commands.noteRead({ ref: noteRef }).then(
-        (res) => {
-          if (disposed) {
-            return;
-          }
-          baseRevRef.current = res.rev;
-          setLoaded(true);
-          mount(res.content);
-        },
-        (error: unknown) => {
-          if (disposed) {
-            return;
-          }
-          const reason = isGraphiteError(error)
-            ? error.code === 'UNAVAILABLE'
-              ? 'Ядро ещё не подключено'
-              : error.message
-            : 'не удалось прочитать заметку';
-          baseRevRef.current = '';
-          setLoaded(true);
-          mount(`# ${titleFromRef(noteRef)}\n\n> ${reason}\n`, true);
-        },
-      );
+      const prior = pendingSaves.get(noteRef);
+      Promise.resolve(prior)
+        .catch(() => undefined)
+        .then(() => commands.noteRead({ ref: noteRef }))
+        .then(
+          (res) => {
+            if (disposed) {
+              return;
+            }
+            baseRevRef.current = res.rev;
+            setLoaded(true);
+            mount(res.content);
+          },
+          (error: unknown) => {
+            if (disposed) {
+              return;
+            }
+            const reason = describeError(error, 'не удалось прочитать заметку');
+            baseRevRef.current = '';
+            setLoaded(true);
+            mount(`# ${titleFromRef(noteRef)}\n\n> ${reason}\n`, true);
+          },
+        );
     }
 
     return () => {
@@ -460,11 +561,10 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
     let active = true;
     const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
       const payload = event.payload;
-      if (!active || payload.ref !== noteRef || payload.actor === 'user' || dirtyRef.current) {
+      if (!active || payload.ref !== noteRef || payload.actor === 'user') {
         return;
       }
-      const handle = editorRef.current;
-      if (handle === null) {
+      if (editorRef.current === null) {
         return;
       }
       commands.noteRead({ ref: noteRef }).then(
@@ -472,18 +572,29 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
           if (!active) {
             return;
           }
-          baseRevRef.current = res.rev;
-          const previous = docRef.current;
-          if (res.content === previous) {
+          if (res.content === docRef.current) {
+            baseRevRef.current = res.rev;
+            if (dirtyRef.current) {
+              dirtyRef.current = false;
+              setDirty(tabId, false);
+            }
             return;
           }
-          const range = changedRange(previous, res.content);
-          handle.setDoc(res.content);
-          docRef.current = res.content;
-          setDocText(res.content);
-          if (range !== null) {
-            handle.markAi(range.from, range.to);
+          if (!dirtyRef.current) {
+            applyDisk(res.content, res.rev, true);
+            return;
           }
+          baseRevRef.current = res.rev;
+          useUiStore.getState().pushToast({
+            kind: 'info',
+            text: `«${titleFromRef(noteRef)}» изменена извне`,
+            action: {
+              label: 'Загрузить с диска',
+              run: () => {
+                applyDisk(res.content, res.rev, true);
+              },
+            },
+          });
         },
         () => undefined,
       );
@@ -492,7 +603,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       active = false;
       void subscription.then((unlisten) => unlisten());
     };
-  }, [noteRef, isWelcome]);
+  }, [noteRef, isWelcome, tabId, setDirty, applyDisk]);
 
   const handleReadingToggle = useCallback(
     (line: number) => {
@@ -506,7 +617,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       if (!isWelcome) {
         dirtyRef.current = true;
         setDirty(tabId, true);
-        scheduleSave(next);
+        scheduleSave();
       }
     },
     [isWelcome, tabId, setDirty, scheduleSave],

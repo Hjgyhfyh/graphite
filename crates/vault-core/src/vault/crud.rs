@@ -139,11 +139,24 @@ pub fn set_status(
     let path = meta.path.clone();
     let raw = read_note(root, &path)?;
     let parsed = parser::parse_note(&raw)?;
-    let mut fm = parsed.frontmatter;
-    let old = fm.status;
-    fm.status = Some(params.status);
-    fm.updated = Some(writer::now_iso_utc());
-    let new_text = format!("{}{}", parser::serialize_frontmatter(&fm)?, parsed.body);
+    ensure_frontmatter_ok(&parsed)?;
+    let old = parsed.frontmatter.status;
+    let status = params.status;
+    let now = writer::now_iso_utc();
+    let mut target = parsed.frontmatter.clone();
+    target.status = Some(status);
+    target.updated = Some(now.clone());
+    let edits = [
+        (
+            "status",
+            FmSet::Set(render_key_lines(|f| f.status = Some(status))?),
+        ),
+        (
+            "updated",
+            FmSet::Set(render_key_lines(|f| f.updated = Some(now.clone()))?),
+        ),
+    ];
+    let new_text = patch_or_serialize(&raw, &parsed, &target, &edits)?;
     let reason = params
         .reason
         .as_deref()
@@ -154,16 +167,10 @@ pub fn set_status(
         "Статус «{}»: {} → {}{reason}",
         meta.title,
         old.map(Status::as_str).unwrap_or("—"),
-        params.status.as_str(),
+        status.as_str(),
     );
     let op = write_note(root, opts, &path, new_text, &summary)?;
-    Ok((
-        SetStatusResponse {
-            old,
-            new: params.status,
-        },
-        op,
-    ))
+    Ok((SetStatusResponse { old, new: status }, op))
 }
 
 /// Добавление типизированной связи в frontmatter `rel:` (set-семантика).
@@ -180,9 +187,9 @@ pub fn link_add(
     let path = from.path.clone();
     let raw = read_note(root, &path)?;
     let parsed = parser::parse_note(&raw)?;
-    let mut fm = parsed.frontmatter;
-    let exists = fm
-        .rel
+    ensure_frontmatter_ok(&parsed)?;
+    let mut rel_map = parsed.frontmatter.rel.clone();
+    let exists = rel_map
         .get(&rel_key)
         .map(|list| {
             list.iter()
@@ -197,12 +204,22 @@ pub fn link_add(
         let op = commit_empty(root, opts, &summary)?;
         return Ok((LinkAddResponse { created: false }, op));
     }
-    fm.rel
+    rel_map
         .entry(rel_key.clone())
         .or_default()
         .push(make_wikilink(&to));
-    fm.updated = Some(writer::now_iso_utc());
-    let new_text = format!("{}{}", parser::serialize_frontmatter(&fm)?, parsed.body);
+    let now = writer::now_iso_utc();
+    let mut target = parsed.frontmatter.clone();
+    target.rel = rel_map.clone();
+    target.updated = Some(now.clone());
+    let edits = [
+        ("rel", rel_edit(&rel_map)?),
+        (
+            "updated",
+            FmSet::Set(render_key_lines(|f| f.updated = Some(now.clone()))?),
+        ),
+    ];
+    let new_text = patch_or_serialize(&raw, &parsed, &target, &edits)?;
     let summary = format!("Связь {rel_key}: «{}» → «{}»", from.title, to.title);
     let op = write_note(root, opts, &path, new_text, &summary)?;
     Ok((LinkAddResponse { created: true }, op))
@@ -221,15 +238,16 @@ pub fn link_remove(
     let path = from.path.clone();
     let raw = read_note(root, &path)?;
     let parsed = parser::parse_note(&raw)?;
-    let mut fm = parsed.frontmatter;
+    ensure_frontmatter_ok(&parsed)?;
+    let mut rel_map = parsed.frontmatter.rel.clone();
     let type_filter = params.r#type.as_ref().map(|t| t.as_str().to_string());
     let mut removed = false;
-    let keys: Vec<String> = fm.rel.keys().cloned().collect();
+    let keys: Vec<String> = rel_map.keys().cloned().collect();
     for key in keys {
         if type_filter.as_ref().is_some_and(|want| want != &key) {
             continue;
         }
-        if let Some(list) = fm.rel.get_mut(&key) {
+        if let Some(list) = rel_map.get_mut(&key) {
             let before = list.len();
             list.retain(|entry| !link_points_to(index, &from.id, entry, &to.id));
             if list.len() != before {
@@ -237,14 +255,24 @@ pub fn link_remove(
             }
         }
     }
-    fm.rel.retain(|_, list| !list.is_empty());
+    rel_map.retain(|_, list| !list.is_empty());
     if !removed {
         let summary = format!("Связь «{}» → «{}» не найдена", from.title, to.title);
         let op = commit_empty(root, opts, &summary)?;
         return Ok((LinkRemoveResponse { removed: false }, op));
     }
-    fm.updated = Some(writer::now_iso_utc());
-    let new_text = format!("{}{}", parser::serialize_frontmatter(&fm)?, parsed.body);
+    let now = writer::now_iso_utc();
+    let mut target = parsed.frontmatter.clone();
+    target.rel = rel_map.clone();
+    target.updated = Some(now.clone());
+    let edits = [
+        ("rel", rel_edit(&rel_map)?),
+        (
+            "updated",
+            FmSet::Set(render_key_lines(|f| f.updated = Some(now.clone()))?),
+        ),
+    ];
+    let new_text = patch_or_serialize(&raw, &parsed, &target, &edits)?;
     let summary = format!("Снята связь: «{}» → «{}»", from.title, to.title);
     let op = write_note(root, opts, &path, new_text, &summary)?;
     Ok((LinkRemoveResponse { removed: true }, op))
@@ -262,14 +290,25 @@ pub fn set_icon(
     let path = meta.path.clone();
     let raw = read_note(root, &path)?;
     let parsed = parser::parse_note(&raw)?;
-    let mut fm = parsed.frontmatter;
-    set_extra_str(&mut fm.extra, "icon", params.icon.as_deref());
-    set_extra_str(&mut fm.extra, "icon_color", params.color.as_deref());
-    fm.extra.remove("iconColor");
-    let new_text = format!("{}{}", parser::serialize_frontmatter(&fm)?, parsed.body);
-    let op = write_note(root, opts, &path, new_text, &format!("Иконка «{}»", meta.title))?;
-    let icon = extra_str(&fm.extra, "icon");
-    let color = extra_str(&fm.extra, "icon_color");
+    ensure_frontmatter_ok(&parsed)?;
+    let icon = clean_opt(params.icon.as_deref());
+    let color = clean_opt(params.color.as_deref());
+    let mut target = parsed.frontmatter.clone();
+    apply_extra_opt(&mut target.extra, "icon", icon.as_deref());
+    apply_extra_opt(&mut target.extra, "icon_color", color.as_deref());
+    target.extra.remove("iconColor");
+    let edits = [
+        ("icon", extra_edit("icon", icon.as_deref())?),
+        ("icon_color", extra_edit("icon_color", color.as_deref())?),
+        ("iconColor", FmSet::Remove),
+    ];
+    let new_text = patch_or_serialize(&raw, &parsed, &target, &edits)?;
+    let summary = format!("Иконка «{}»", meta.title);
+    let op = if new_text == raw {
+        commit_empty(root, opts, &summary)?
+    } else {
+        write_note(root, opts, &path, new_text, &summary)?
+    };
     Ok((SetIconResponse { icon, color }, op))
 }
 
@@ -285,20 +324,32 @@ pub fn note_pin(
     let path = meta.path.clone();
     let raw = read_note(root, &path)?;
     let parsed = parser::parse_note(&raw)?;
-    let mut fm = parsed.frontmatter;
-    if params.pinned {
-        fm.extra
+    ensure_frontmatter_ok(&parsed)?;
+    let mut target = parsed.frontmatter.clone();
+    let edit = if params.pinned {
+        target
+            .extra
             .insert("pinned".to_string(), serde_yml::Value::Bool(true));
+        FmSet::Set(render_key_lines(|f| {
+            f.extra
+                .insert("pinned".to_string(), serde_yml::Value::Bool(true));
+        })?)
     } else {
-        fm.extra.remove("pinned");
-    }
-    let new_text = format!("{}{}", parser::serialize_frontmatter(&fm)?, parsed.body);
+        target.extra.remove("pinned");
+        FmSet::Remove
+    };
+    let edits = [("pinned", edit)];
+    let new_text = patch_or_serialize(&raw, &parsed, &target, &edits)?;
     let summary = if params.pinned {
         format!("Закреплено «{}»", meta.title)
     } else {
         format!("Откреплено «{}»", meta.title)
     };
-    let op = write_note(root, opts, &path, new_text, &summary)?;
+    let op = if new_text == raw {
+        commit_empty(root, opts, &summary)?
+    } else {
+        write_note(root, opts, &path, new_text, &summary)?
+    };
     Ok((
         NotePinResponse {
             pinned: params.pinned,
@@ -334,18 +385,267 @@ fn commit_empty(root: &Path, opts: &TxnOpts, summary: &str) -> Result<JournalOp,
     txn::begin(root, opts.actor, opts.tool.clone(), opts.session.clone())?.commit(summary)
 }
 
+/// Реальный построчный diff (LCS): вставка/удаление строки в начале или
+/// середине не рассинхронизирует хвост, поэтому plus/minus не завышаются.
 fn line_diff(old: &str, new: &str) -> DiffStat {
     let old_lines: Vec<&str> = old.lines().collect();
     let new_lines: Vec<&str> = new.lines().collect();
-    let common = old_lines
-        .iter()
-        .zip(new_lines.iter())
-        .filter(|(a, b)| a == b)
-        .count();
+    let common = lcs_len(&old_lines, &new_lines);
     DiffStat {
         plus: new_lines.len().saturating_sub(common) as u32,
         minus: old_lines.len().saturating_sub(common) as u32,
     }
+}
+
+/// Длина наибольшей общей подпоследовательности строк (rolling-DP, O(n·m)).
+fn lcs_len(a: &[&str], b: &[&str]) -> usize {
+    if a.is_empty() || b.is_empty() {
+        return 0;
+    }
+    let mut prev = vec![0usize; b.len() + 1];
+    let mut curr = vec![0usize; b.len() + 1];
+    for &ai in a {
+        for (j, &bj) in b.iter().enumerate() {
+            curr[j + 1] = if ai == bj {
+                prev[j] + 1
+            } else {
+                curr[j].max(prev[j + 1])
+            };
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
+/// Отвергает изменение метаданных при повреждённом frontmatter: парсер при
+/// битом YAML отдаёт тело целиком (`body_offset` в начало текста), и пересборка
+/// продублировала бы блок `---…---`, осиротев старые поля в теле.
+fn ensure_frontmatter_ok(parsed: &parser::ParsedNote) -> Result<(), VaultError> {
+    if parsed.frontmatter_error.is_some() {
+        return Err(VaultError::Validation(
+            "frontmatter повреждён — исправьте YAML перед изменением метаданных".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Правка одного ключа frontmatter в строковом виде.
+enum FmSet {
+    /// Заменить/вставить блок строк ключа (значение отрендерено сериализатором).
+    Set(Vec<String>),
+    /// Удалить ключ вместе с его отступным блоком-продолжением.
+    Remove,
+}
+
+/// Патчит frontmatter точечно и сверяет результат: если строковый патч даёт
+/// валидный YAML, семантически равный целевому, берётся он (порядок ключей и
+/// комментарии сохранены, поля не переставлены); иначе — безопасная полная
+/// пересборка через сериализатор (как раньше).
+fn patch_or_serialize(
+    raw: &str,
+    parsed: &parser::ParsedNote,
+    target: &Frontmatter,
+    edits: &[(&str, FmSet)],
+) -> Result<String, VaultError> {
+    let patched = patch_note_frontmatter(raw, parsed.body_offset, edits);
+    let faithful = match parser::parse_note(&patched) {
+        Ok(reparsed) => reparsed.frontmatter_error.is_none() && &reparsed.frontmatter == target,
+        Err(_) => false,
+    };
+    if faithful {
+        Ok(patched)
+    } else {
+        Ok(format!(
+            "{}{}",
+            parser::serialize_frontmatter(target)?,
+            parsed.body
+        ))
+    }
+}
+
+/// Строки одного ключа frontmatter ровно как их выдал бы сериализатор: строится
+/// frontmatter с единственным заполненным ключом и берётся его тело.
+fn render_key_lines(build: impl FnOnce(&mut Frontmatter)) -> Result<Vec<String>, VaultError> {
+    let mut fm = Frontmatter::default();
+    build(&mut fm);
+    let serialized = parser::serialize_frontmatter(&fm)?;
+    if serialized.is_empty() {
+        return Ok(Vec::new());
+    }
+    let inner = serialized
+        .strip_prefix("---\n")
+        .and_then(|s| s.strip_suffix("---\n"))
+        .unwrap_or(serialized.as_str());
+    Ok(inner
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_string)
+        .collect())
+}
+
+/// Правка `extra`-скаляра: значение → установить строку, пусто → удалить ключ.
+fn extra_edit(key: &str, value: Option<&str>) -> Result<FmSet, VaultError> {
+    match value {
+        Some(v) => {
+            let key = key.to_string();
+            let value = v.to_string();
+            Ok(FmSet::Set(render_key_lines(move |fm| {
+                fm.extra.insert(key, serde_yml::Value::String(value));
+            })?))
+        }
+        None => Ok(FmSet::Remove),
+    }
+}
+
+/// Правка `rel:`: непустая карта → блок, пустая → удалить ключ.
+fn rel_edit(rel: &BTreeMap<String, Vec<String>>) -> Result<FmSet, VaultError> {
+    if rel.is_empty() {
+        return Ok(FmSet::Remove);
+    }
+    let rel = rel.clone();
+    Ok(FmSet::Set(render_key_lines(move |fm| fm.rel = rel)?))
+}
+
+fn clean_opt(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn apply_extra_opt(extra: &mut BTreeMap<String, serde_yml::Value>, key: &str, value: Option<&str>) {
+    match value {
+        Some(v) => {
+            extra.insert(key.to_string(), serde_yml::Value::String(v.to_string()));
+        }
+        None => {
+            extra.remove(key);
+        }
+    }
+}
+
+/// Строковый патч блока `---…---`: правит только строки указанных ключей,
+/// сохраняя прочие ключи, их порядок и комментарии; тело не трогается. При
+/// отсутствии frontmatter `Set`-правки создают новый блок.
+fn patch_note_frontmatter(raw: &str, body_offset: usize, edits: &[(&str, FmSet)]) -> String {
+    let region = &raw[..body_offset];
+    let body = &raw[body_offset..];
+    let eol = if raw.contains("\r\n") { "\r\n" } else { "\n" };
+    let (bom, rest) = match region.strip_prefix('\u{feff}') {
+        Some(stripped) => ("\u{feff}", stripped),
+        None => ("", region),
+    };
+    let mut lines: Vec<String> = rest.split_inclusive('\n').map(str::to_string).collect();
+    let has_open = lines.first().map(|line| is_fm_delim(line)).unwrap_or(false);
+    let close = if has_open {
+        lines
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, line)| is_fm_delim(line))
+            .map(|(i, _)| i)
+    } else {
+        None
+    };
+    let Some(mut close) = close else {
+        let mut fresh: Vec<String> = Vec::new();
+        for (_, set) in edits {
+            if let FmSet::Set(block) = set {
+                fresh.extend(block.iter().cloned());
+            }
+        }
+        if fresh.is_empty() {
+            return raw.to_string();
+        }
+        let mut out = String::with_capacity(raw.len() + 32);
+        out.push_str(bom);
+        out.push_str("---");
+        out.push_str(eol);
+        for line in &fresh {
+            out.push_str(line);
+            out.push_str(eol);
+        }
+        out.push_str("---");
+        out.push_str(eol);
+        out.push_str(body);
+        return out;
+    };
+    for (key, set) in edits {
+        apply_fm_edit(&mut lines, &mut close, key, set, eol);
+    }
+    let mut out = String::with_capacity(raw.len() + 32);
+    out.push_str(bom);
+    for line in &lines {
+        out.push_str(line);
+    }
+    out.push_str(body);
+    out
+}
+
+fn apply_fm_edit(lines: &mut Vec<String>, close: &mut usize, key: &str, set: &FmSet, eol: &str) {
+    let found = (1..*close).find(|&i| is_top_level_key(&lines[i], key));
+    match set {
+        FmSet::Remove => {
+            if let Some(i) = found {
+                let end = fm_block_end(lines, i, *close);
+                lines.drain(i..end);
+                *close -= end - i;
+            }
+        }
+        FmSet::Set(block) => {
+            let new_lines: Vec<String> = block.iter().map(|b| format!("{b}{eol}")).collect();
+            let added = new_lines.len();
+            match found {
+                Some(i) => {
+                    let end = fm_block_end(lines, i, *close);
+                    let removed = end - i;
+                    let _: Vec<String> = lines.splice(i..end, new_lines).collect();
+                    *close = *close + added - removed;
+                }
+                None => {
+                    for (k, line) in new_lines.into_iter().enumerate() {
+                        lines.insert(*close + k, line);
+                    }
+                    *close += added;
+                }
+            }
+        }
+    }
+}
+
+/// Индекс строки за блоком ключа: сам ключ плюс последующие отступные строки.
+fn fm_block_end(lines: &[String], key_line: usize, close: usize) -> usize {
+    let mut end = key_line + 1;
+    while end < close {
+        let body = fm_line_body(&lines[end]);
+        if body.starts_with(' ') || body.starts_with('\t') {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    end
+}
+
+fn is_top_level_key(line: &str, key: &str) -> bool {
+    let body = fm_line_body(line);
+    if body.starts_with(' ') || body.starts_with('\t') {
+        return false;
+    }
+    match body.strip_prefix(key).and_then(|rest| rest.strip_prefix(':')) {
+        Some(rest) => rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t'),
+        None => false,
+    }
+}
+
+fn fm_line_body(line: &str) -> &str {
+    line.trim_end_matches(['\r', '\n'])
+}
+
+/// Разделитель frontmatter — как в парсере (`trim_end() == "---"`), допускает
+/// хвостовые пробелы и любой стиль концов строк.
+fn is_fm_delim(line: &str) -> bool {
+    line.trim_end() == "---"
 }
 
 fn edit_summary(title: &str, ops: &[NoteEditOp]) -> String {
@@ -498,6 +798,7 @@ fn set_frontmatter_op(
     value: &serde_json::Value,
 ) -> Result<String, VaultError> {
     let parsed = parser::parse_note(text)?;
+    ensure_frontmatter_ok(&parsed)?;
     let mut fm = parsed.frontmatter;
     apply_fm_key(&mut fm, key, value);
     Ok(format!("{}{}", parser::serialize_frontmatter(&fm)?, parsed.body))
@@ -647,21 +948,6 @@ fn as_rel_map(value: &serde_yml::Value) -> Option<BTreeMap<String, Vec<String>>>
     Some(out)
 }
 
-fn set_extra_str(extra: &mut BTreeMap<String, serde_yml::Value>, key: &str, value: Option<&str>) {
-    match value {
-        Some(s) if !s.trim().is_empty() => {
-            extra.insert(key.to_string(), serde_yml::Value::String(s.to_string()));
-        }
-        _ => {
-            extra.remove(key);
-        }
-    }
-}
-
-fn extra_str(extra: &BTreeMap<String, serde_yml::Value>, key: &str) -> Option<String> {
-    extra.get(key).and_then(|v| v.as_str()).map(str::to_string)
-}
-
 /// Проверяет, ведёт ли запись `rel:` в заметку `target`. Битая/неоднозначная
 /// цель трактуется как «не та» (для set-семантики link_add/link_remove).
 fn link_points_to(index: &Index, from: &NoteId, entry: &str, target: &NoteId) -> bool {
@@ -686,5 +972,65 @@ fn preview(text: &str) -> String {
         format!("{head}…")
     } else {
         head
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn body_offset(raw: &str) -> usize {
+        crate::parser::parse_note(raw).unwrap().body_offset
+    }
+
+    #[test]
+    fn line_diff_prepend_counts_single_line() {
+        let d = line_diff("a\nb\nc", "x\na\nb\nc");
+        assert_eq!((d.plus, d.minus), (1, 0));
+    }
+
+    #[test]
+    fn line_diff_middle_insert_not_inflated() {
+        let d = line_diff("a\nb\nc\nd", "a\nb\nZ\nc\nd");
+        assert_eq!((d.plus, d.minus), (1, 0));
+    }
+
+    #[test]
+    fn patch_replaces_scalar_and_keeps_order() {
+        let raw = "---\nid: 01\nstatus: active\nicon: rocket\n---\nтело\n";
+        let edits = [("status", FmSet::Set(vec!["status: done".to_string()]))];
+        let out = patch_note_frontmatter(raw, body_offset(raw), &edits);
+        assert!(out.contains("status: done"));
+        assert!(out.contains("icon: rocket"));
+        assert!(out.find("status:").unwrap() < out.find("icon:").unwrap());
+        assert!(out.ends_with("тело\n"));
+    }
+
+    #[test]
+    fn patch_preserves_comment_and_crlf() {
+        let raw = "---\r\nid: 01\r\n# заметка автора\r\nstatus: active\r\n---\r\nтело\r\n";
+        let edits = [("status", FmSet::Set(vec!["status: done".to_string()]))];
+        let out = patch_note_frontmatter(raw, body_offset(raw), &edits);
+        assert!(out.contains("# заметка автора"));
+        assert!(out.contains("status: done\r\n"));
+        assert!(out.ends_with("тело\r\n"));
+    }
+
+    #[test]
+    fn patch_removes_key_block() {
+        let raw = "---\nid: 01\npinned: true\nstatus: active\n---\nx\n";
+        let edits = [("pinned", FmSet::Remove)];
+        let out = patch_note_frontmatter(raw, body_offset(raw), &edits);
+        assert!(!out.contains("pinned"));
+        assert!(out.contains("status: active"));
+    }
+
+    #[test]
+    fn patch_creates_frontmatter_when_absent() {
+        let raw = "просто текст\n";
+        let edits = [("pinned", FmSet::Set(vec!["pinned: true".to_string()]))];
+        let out = patch_note_frontmatter(raw, body_offset(raw), &edits);
+        assert!(out.starts_with("---\npinned: true\n---\n"));
+        assert!(out.ends_with("просто текст\n"));
     }
 }

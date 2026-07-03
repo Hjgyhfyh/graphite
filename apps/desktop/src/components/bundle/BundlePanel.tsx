@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
-import { AnimatePresence, Reorder, motion, useDragControls } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import * as Popover from '@radix-ui/react-popover';
-import { Crown, GripVertical, Layers, Plus, Search, Sparkles, X } from 'lucide-react';
+import { Crown, Layers, Plus, Search, Sparkles, X } from 'lucide-react';
 import { Button } from '@graphite/ui';
-import { commands, isGraphiteError } from '@graphite/bindings';
-import type { NoteRef, RelType, SearchHit } from '@graphite/bindings';
+import { commands, isGraphiteError, isTauriAvailable, GRAPHITE_EVENT } from '@graphite/bindings';
+import type { LinkIn, NoteChangedEvent, NoteRef, RelType, SearchHit } from '@graphite/bindings';
+import { listen } from '@tauri-apps/api/event';
 import { springSnappy, springStandard, usePrefersReducedMotion } from '../../motion';
 import { titleFromRef } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -23,14 +23,34 @@ interface NoteMini {
   color?: string;
 }
 
+interface Composition {
+  refs: NoteRef[];
+  types: Record<NoteRef, RelType>;
+}
+
+const BUNDLE_RELS: RelType[] = ['part_of', 'collected_in'];
+
 const TYPE_LABEL: Record<string, string> = {
   part_of: 'часть',
   collected_in: 'в бандле',
   related: 'связано',
 };
 
+function collectMembers(edges: LinkIn[]): Composition {
+  const seen = new Set<NoteRef>();
+  const refs: NoteRef[] = [];
+  const types: Record<NoteRef, RelType> = {};
+  for (const edge of edges) {
+    if (!seen.has(edge.from)) {
+      seen.add(edge.from);
+      refs.push(edge.from);
+      types[edge.from] = edge.type;
+    }
+  }
+  return { refs, types };
+}
+
 interface MemberRowProps {
-  value: NoteRef;
   title: string;
   icon?: string;
   color?: string;
@@ -41,26 +61,16 @@ interface MemberRowProps {
   onRemove: () => void;
 }
 
-function MemberRow({ value, title, icon, color, typeLabel, reduced, onOpen, onPrimary, onRemove }: MemberRowProps) {
-  const controls = useDragControls();
+function MemberRow({ title, icon, color, typeLabel, reduced, onOpen, onPrimary, onRemove }: MemberRowProps) {
   return (
-    <Reorder.Item
-      value={value}
-      dragListener={false}
-      dragControls={controls}
+    <motion.li
+      layout={!reduced}
       initial={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
+      exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
       transition={springSnappy}
       className="group flex items-center gap-1.5 rounded-s border border-stroke-0 bg-bg-2 px-1.5 py-1.5"
     >
-      <button
-        type="button"
-        aria-label="Перетащить"
-        onPointerDown={(event: ReactPointerEvent) => controls.start(event)}
-        className="shrink-0 cursor-grab touch-none text-text-3 outline-none hover:text-text-1 active:cursor-grabbing"
-      >
-        <GripVertical size={14} strokeWidth={1.75} />
-      </button>
       <NoteIcon
         icon={icon}
         color={color}
@@ -95,7 +105,7 @@ function MemberRow({ value, title, icon, color, typeLabel, reduced, onOpen, onPr
           <X size={13} strokeWidth={1.75} />
         </button>
       </div>
-    </Reorder.Item>
+    </motion.li>
   );
 }
 
@@ -136,20 +146,11 @@ export function BundlePanel({ noteRef }: BundlePanelProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const links = await commands.linksGet({ ref: noteRef, direction: 'in', types: ['part_of', 'collected_in'] });
+        const links = await commands.linksGet({ ref: noteRef, direction: 'in', types: BUNDLE_RELS });
         if (!cancelled) {
-          const seen = new Set<NoteRef>();
-          const refs: NoteRef[] = [];
-          const types: Record<NoteRef, RelType> = {};
-          for (const edge of links.in) {
-            if (!seen.has(edge.from)) {
-              seen.add(edge.from);
-              refs.push(edge.from);
-              types[edge.from] = edge.type;
-            }
-          }
-          setMembers(refs);
-          setTypeByRef(types);
+          const composition = collectMembers(links.in);
+          setMembers(composition.refs);
+          setTypeByRef(composition.types);
         }
       } catch {
         // ядро ещё не подключено — начинаем с пустого состава
@@ -169,6 +170,35 @@ export function BundlePanel({ noteRef }: BundlePanelProps) {
       cancelled = true;
     };
   }, [noteRef]);
+
+  useEffect(() => {
+    if (!isTauriAvailable() || primaryRef === undefined) {
+      return;
+    }
+    let alive = true;
+    const reload = async () => {
+      try {
+        const links = await commands.linksGet({ ref: primaryRef, direction: 'in', types: BUNDLE_RELS });
+        if (!alive) {
+          return;
+        }
+        const composition = collectMembers(links.in);
+        setMembers(composition.refs);
+        setTypeByRef(composition.types);
+      } catch {
+        // связь недоступна — оставляем текущий состав
+      }
+    };
+    const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
+      if (event.payload.ref === primaryRef) {
+        void reload();
+      }
+    });
+    return () => {
+      alive = false;
+      void subscription.then((unlisten) => unlisten());
+    };
+  }, [primaryRef]);
 
   useEffect(() => {
     const text = query.trim();
@@ -225,6 +255,7 @@ export function BundlePanel({ noteRef }: BundlePanelProps) {
     setTypeByRef((prev) => ({ ...prev, [ref]: 'collected_in' }));
     setAddOpen(false);
     setQuery('');
+    setHits([]);
     void syncLink('add', ref, primaryRef, 'collected_in');
   };
 
@@ -243,11 +274,24 @@ export function BundlePanel({ noteRef }: BundlePanelProps) {
     }
     const previous = primaryRef;
     const previousType = typeByRef[ref] ?? 'collected_in';
+    const others = members.filter((r) => r !== ref);
     setPrimaryRef(ref);
-    setMembers((prev) => [previous, ...prev.filter((r) => r !== ref)]);
-    setTypeByRef((prev) => ({ ...prev, [previous]: 'collected_in' }));
+    setMembers([previous, ...others]);
+    setTypeByRef((prev) => {
+      const next = { ...prev };
+      delete next[ref];
+      next[previous] = 'collected_in';
+      for (const member of others) {
+        next[member] = 'collected_in';
+      }
+      return next;
+    });
     void syncLink('remove', ref, previous, previousType);
     void syncLink('add', previous, ref, 'collected_in');
+    for (const member of others) {
+      void syncLink('remove', member, previous, typeByRef[member] ?? 'collected_in');
+      void syncLink('add', member, ref, 'collected_in');
+    }
   };
 
   const saveCollection = () => {
@@ -324,25 +368,26 @@ export function BundlePanel({ noteRef }: BundlePanelProps) {
           <span className="text-micro text-text-3">{members.length}</span>
         </div>
         {members.length > 0 ? (
-          <Reorder.Group axis="y" values={members} onReorder={setMembers} className="flex flex-col gap-1">
-            {members.map((ref) => {
-              const info = iconOf(ref);
-              return (
-                <MemberRow
-                  key={ref}
-                  value={ref}
-                  title={titleOf(ref)}
-                  icon={info.icon}
-                  color={info.color}
-                  typeLabel={TYPE_LABEL[typeByRef[ref] ?? 'collected_in'] ?? 'связано'}
-                  reduced={reduced}
-                  onOpen={() => useVaultStore.getState().openNote(ref)}
-                  onPrimary={() => makePrimary(ref)}
-                  onRemove={() => detach(ref)}
-                />
-              );
-            })}
-          </Reorder.Group>
+          <ul className="flex flex-col gap-1">
+            <AnimatePresence initial={false}>
+              {members.map((ref) => {
+                const info = iconOf(ref);
+                return (
+                  <MemberRow
+                    key={ref}
+                    title={titleOf(ref)}
+                    icon={info.icon}
+                    color={info.color}
+                    typeLabel={TYPE_LABEL[typeByRef[ref] ?? 'collected_in'] ?? 'связано'}
+                    reduced={reduced}
+                    onOpen={() => useVaultStore.getState().openNote(ref)}
+                    onPrimary={() => makePrimary(ref)}
+                    onRemove={() => detach(ref)}
+                  />
+                );
+              })}
+            </AnimatePresence>
+          </ul>
         ) : (
           <p className="rounded-s border border-dashed border-stroke-0 px-2.5 py-3 text-center text-caption text-text-2">
             Пока только основной файл. Добавьте связанные заметки ниже.
@@ -350,7 +395,16 @@ export function BundlePanel({ noteRef }: BundlePanelProps) {
         )}
       </div>
 
-      <Popover.Root open={addOpen} onOpenChange={setAddOpen}>
+      <Popover.Root
+        open={addOpen}
+        onOpenChange={(open) => {
+          setAddOpen(open);
+          if (!open) {
+            setQuery('');
+            setHits([]);
+          }
+        }}
+      >
         <Popover.Trigger asChild>
           <button
             type="button"

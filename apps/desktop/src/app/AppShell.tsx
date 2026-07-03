@@ -3,14 +3,21 @@ import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { SquareKanban, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Button, MOTION, TooltipProvider, cx } from '@graphite/ui';
 import { commands, GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
-import type { IndexProgressEvent, NoteChangedEvent, NoteRef, UiOpenNoteEvent } from '@graphite/bindings';
+import type {
+  IndexProgressEvent,
+  NoteChangedEvent,
+  NoteRef,
+  UiFlashNoteEvent,
+  UiOpenNoteEvent,
+} from '@graphite/bindings';
 import { CommandPalette } from '../components/palette/CommandPalette';
 import { QuickSwitcher } from '../components/palette/QuickSwitcher';
 import { FloatingCapture } from '../components/capture/FloatingCapture';
 import { WELCOME_NOTE_REF } from '../components/editor/EditorPane';
+import { KanbanView } from '../components/kanban/KanbanView';
 import { Rail } from '../components/rail/Rail';
 import { RightPanel } from '../components/right/RightPanel';
 import { SearchPanel } from '../components/search/SearchPanel';
@@ -126,16 +133,6 @@ function ToastViewport() {
   );
 }
 
-function KanbanPlaceholder() {
-  return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-bg-0 text-center">
-      <SquareKanban size={26} strokeWidth={1.75} className="text-text-3" />
-      <p className="text-ui text-text-1">Канбан — скоро</p>
-      <p className="text-caption text-text-2">Доска планов появится в следующей версии.</p>
-    </main>
-  );
-}
-
 function VaultGate() {
   const openVault = useVaultStore((s) => s.openVault);
   const createVault = useVaultStore((s) => s.createVault);
@@ -204,7 +201,7 @@ function CenterView() {
     view = <TasksView />;
   } else if (railView === 'plan') {
     viewKey = 'plan';
-    view = <KanbanPlaceholder />;
+    view = <KanbanView />;
   } else {
     viewKey = 'notes';
     view = <SplitView />;
@@ -255,6 +252,9 @@ export function AppShell() {
       }),
       listen<UiOpenNoteEvent>(GRAPHITE_EVENT.uiOpenNote, (event) => {
         useVaultStore.getState().openNote(event.payload.ref);
+      }),
+      listen<UiFlashNoteEvent>(GRAPHITE_EVENT.uiFlashNote, (event) => {
+        useVaultStore.getState().flashNote(event.payload.ref);
       }),
     ];
     return () => {

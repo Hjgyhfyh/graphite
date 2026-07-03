@@ -20,6 +20,8 @@ export interface TabBarProps {
   trailing?: ReactNode;
 }
 
+export const TAB_DND_TYPE = 'application/x-graphite-tab';
+
 const FULL_TAB =
   'group relative flex h-7 w-full items-center gap-1.5 rounded-s px-2.5 text-ui transition-colors duration-[120ms]';
 const PIN_TAB =
@@ -104,9 +106,12 @@ function TabItem({
     normalizeOrder(paneId);
   };
   const detach = () => {
-    commands.openNoteWindow(tab.noteRef).catch(() => {
-      useUiStore.getState().pushToast({ kind: 'info', text: 'Отдельное окно недоступно вне приложения' });
-    });
+    commands
+      .openNoteWindow(tab.noteRef)
+      .then(() => close(tab.id))
+      .catch(() => {
+        useUiStore.getState().pushToast({ kind: 'info', text: 'Отдельное окно недоступно вне приложения' });
+      });
   };
 
   return (
@@ -309,7 +314,7 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
   const groupsInPane = useMemo(() => {
     const ids = new Set<string>();
     for (const tab of paneTabs) {
-      if (tab.groupId !== undefined) {
+      if (!tab.pinned && tab.groupId !== undefined) {
         ids.add(tab.groupId);
       }
     }
@@ -338,11 +343,14 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
   }, []);
 
   const applyDrop = useCallback(
-    (target: DropTarget) => {
-      const id = draggedId.current;
+    (id: string, target: DropTarget) => {
       clearDrag();
-      if (id === undefined) {
+      const dragged = useTabsStore.getState().tabs.find((tab) => tab.id === id);
+      if (dragged === undefined) {
         return;
+      }
+      if (dragged.paneId !== paneId) {
+        usePanesStore.getState().moveTabToPane(id, paneId);
       }
       const state = useTabsStore.getState();
       const current = state.tabs.filter((tab) => tab.paneId === paneId);
@@ -350,11 +358,11 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
       if (plan === null) {
         return;
       }
-      const dragged = current.find((tab) => tab.id === id);
+      const draggedNow = current.find((tab) => tab.id === id);
       if (plan.unpin) {
         state.togglePin(id);
       }
-      if (plan.nextGroupId !== dragged?.groupId) {
+      if (plan.nextGroupId !== draggedNow?.groupId) {
         if (plan.nextGroupId !== undefined) {
           state.addToGroup(id, plan.nextGroupId);
         } else {
@@ -367,14 +375,21 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
     [clearDrag, paneId],
   );
 
+  const draggedFrom = (event: ReactDragEvent<HTMLDivElement>): string | undefined => {
+    const fromData = event.dataTransfer.getData(TAB_DND_TYPE);
+    return fromData !== '' ? fromData : draggedId.current;
+  };
+  const accepts = (event: ReactDragEvent<HTMLDivElement>): boolean =>
+    event.dataTransfer.types.includes(TAB_DND_TYPE);
+
   const handleDragStart = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
     draggedId.current = id;
     setDragging(id);
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', id);
+    event.dataTransfer.setData(TAB_DND_TYPE, id);
   };
   const handleTabDragOver = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
-    if (draggedId.current === undefined) {
+    if (!accepts(event)) {
       return;
     }
     event.preventDefault();
@@ -384,16 +399,20 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
     setDropTarget({ type: 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
   };
   const handleTabDrop = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
-    if (draggedId.current === undefined) {
+    if (!accepts(event)) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
+    const draggedTabId = draggedFrom(event);
+    if (draggedTabId === undefined) {
+      return;
+    }
     const rect = event.currentTarget.getBoundingClientRect();
-    applyDrop({ type: 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
+    applyDrop(draggedTabId, { type: 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
   };
   const handleGroupDragOver = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
-    if (draggedId.current === undefined) {
+    if (!accepts(event)) {
       return;
     }
     event.preventDefault();
@@ -402,15 +421,19 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
     setDropTarget({ type: 'group', groupId });
   };
   const handleGroupDrop = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
-    if (draggedId.current === undefined) {
+    if (!accepts(event)) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    applyDrop({ type: 'group', groupId });
+    const draggedTabId = draggedFrom(event);
+    if (draggedTabId === undefined) {
+      return;
+    }
+    applyDrop(draggedTabId, { type: 'group', groupId });
   };
   const handleEndDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (draggedId.current === undefined) {
+    if (!accepts(event)) {
       return;
     }
     event.preventDefault();
@@ -418,11 +441,15 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
     setDropTarget({ type: 'end' });
   };
   const handleEndDrop = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (draggedId.current === undefined) {
+    if (!accepts(event)) {
       return;
     }
     event.preventDefault();
-    applyDrop({ type: 'end' });
+    const draggedTabId = draggedFrom(event);
+    if (draggedTabId === undefined) {
+      return;
+    }
+    applyDrop(draggedTabId, { type: 'end' });
   };
 
   const closeOthers = (keepId: string) => {

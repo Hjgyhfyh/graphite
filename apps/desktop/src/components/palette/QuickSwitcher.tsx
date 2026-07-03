@@ -48,12 +48,16 @@ function subtitleFor(ref: string, kind: TabKind): string {
   return ref.startsWith('path:') ? folderOf(ref.slice('path:'.length)) : '';
 }
 
+function foldText(value: string): string {
+  return value.toLowerCase().replace(/ё/g, 'е');
+}
+
 function matches(query: string, ...fields: string[]): boolean {
-  const q = query.trim().toLowerCase();
+  const q = foldText(query.trim());
   if (q.length === 0) {
     return true;
   }
-  const hay = fields.filter((field) => field.length > 0).join(' ').toLowerCase();
+  const hay = foldText(fields.filter((field) => field.length > 0).join(' '));
   if (hay.includes(q)) {
     return true;
   }
@@ -176,6 +180,7 @@ export function QuickSwitcher() {
   const armedRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   openRef.current = open;
   indexRef.current = index;
   holdModeRef.current = holdMode;
@@ -186,6 +191,7 @@ export function QuickSwitcher() {
     openRef.current = false;
     holdModeRef.current = false;
     armedRef.current = false;
+    restoreFocusRef.current = null;
     setOpen(false);
     setHoldMode(false);
     setQuery('');
@@ -222,6 +228,11 @@ export function QuickSwitcher() {
     setOpen(false);
     setHoldMode(false);
     setQuery('');
+    const previous = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    if (previous !== null && previous.isConnected) {
+      previous.focus();
+    }
   }, [setOpen]);
 
   useEffect(() => {
@@ -246,13 +257,14 @@ export function QuickSwitcher() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Tab') {
+      const chordAction = useKeybindingsStore.getState().matchEvent(event);
+      if (chordAction === 'tab.next' || chordAction === 'tab.prev') {
         if (useUiStore.getState().paletteOpen) {
           return;
         }
         event.preventDefault();
         event.stopImmediatePropagation();
-        const backward = event.shiftKey;
+        const backward = chordAction === 'tab.prev';
         if (!openRef.current) {
           const list = buildItems(
             '',
@@ -306,12 +318,16 @@ export function QuickSwitcher() {
           cancel();
           break;
         case 'Home':
-          event.preventDefault();
-          setIndex(0);
+          if (holdModeRef.current || document.activeElement !== inputRef.current) {
+            event.preventDefault();
+            setIndex(0);
+          }
           break;
         case 'End':
-          event.preventDefault();
-          setIndex(Math.max(0, itemsRef.current.length - 1));
+          if (holdModeRef.current || document.activeElement !== inputRef.current) {
+            event.preventDefault();
+            setIndex(Math.max(0, itemsRef.current.length - 1));
+          }
           break;
         default:
           if (holdModeRef.current && /^[1-9]$/.test(event.key)) {
@@ -347,6 +363,8 @@ export function QuickSwitcher() {
       armedRef.current = false;
       return;
     }
+    const active = document.activeElement;
+    restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
     if (armedRef.current) {
       armedRef.current = false;
       return;

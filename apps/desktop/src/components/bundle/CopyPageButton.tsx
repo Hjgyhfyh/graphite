@@ -3,7 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ChevronDown, Copy, FileText, Layers, Loader2, Sparkles } from 'lucide-react';
 import { cx } from '@graphite/ui';
 import { commands, isGraphiteError } from '@graphite/bindings';
-import type { NoteRef } from '@graphite/bindings';
+import type { NoteRef, RelType } from '@graphite/bindings';
 import { titleFromRef } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
 
@@ -51,19 +51,17 @@ export function CopyPageButton({ noteRef, className, label = 'Copy Page' }: Copy
   const [busy, setBusy] = useState(false);
   const pushToast = useUiStore((s) => s.pushToast);
 
-  const composeFallback = async (includeLinked: boolean): Promise<{ text: string; count: number }> => {
+  const composeFallback = async (mode: CopyMode): Promise<{ text: string; count: number }> => {
     const main = await commands.noteRead({ ref: noteRef });
     const sections = [renderSection(noteRef, main.frontmatter.title ?? titleFromRef(noteRef), main.content, '#')];
     const seen = new Set<NoteRef>([noteRef]);
     let count = 1;
-    if (includeLinked) {
+    if (mode !== 'main') {
+      const types: RelType[] =
+        mode === 'prompt' ? ['part_of', 'collected_in', 'related'] : ['part_of', 'collected_in'];
       let linked: NoteRef[] = [];
       try {
-        const links = await commands.linksGet({
-          ref: noteRef,
-          direction: 'both',
-          types: ['part_of', 'collected_in', 'related'],
-        });
+        const links = await commands.linksGet({ ref: noteRef, direction: 'both', types });
         linked = [...links.in.map((edge) => edge.from), ...links.out.map((edge) => edge.to)];
       } catch {
         linked = [];
@@ -86,7 +84,14 @@ export function CopyPageButton({ noteRef, className, label = 'Copy Page' }: Copy
   };
 
   const build = async (mode: CopyMode): Promise<{ text: string; count: number }> => {
-    const includeLinked = mode !== 'main';
+    if (mode === 'main') {
+      const main = await commands.noteRead({ ref: noteRef });
+      return {
+        text: renderSection(noteRef, main.frontmatter.title ?? titleFromRef(noteRef), main.content, '#'),
+        count: 1,
+      };
+    }
+    const includeLinked = mode === 'prompt';
     let result: { text: string; count: number };
     try {
       const response = await commands.bundleCompose({ ref: noteRef, includeLinked });
@@ -95,7 +100,7 @@ export function CopyPageButton({ noteRef, className, label = 'Copy Page' }: Copy
       if (!isUnavailable(error)) {
         throw error;
       }
-      result = await composeFallback(includeLinked);
+      result = await composeFallback(mode);
     }
     if (mode === 'prompt') {
       return { text: `${PROMPT_INTRO}\n\n<context>\n${result.text}\n</context>`, count: result.count };

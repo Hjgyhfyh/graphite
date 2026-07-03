@@ -1,16 +1,29 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::MutexGuard;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use tauri::Emitter;
 
 use crate::state::{CoreState, core_cell};
 use crate::dto::*;
+use crate::events::{IndexProgressEvent, JournalOpEvent, NoteChangeKind, NoteChangedEvent};
 use vault_core::indexer::Index;
 use vault_core::txn::TxnOpts;
 use vault_core::vault::{ai, crud, history, planning, query};
 use vault_core::{parser, writer};
+
+/// Захват мьютекса ядра, переживающий отравление: паника под локом (индекс/
+/// парсер) не должна валить все последующие команды и watcher-супервизор.
+/// Восстанавливаем внутреннее значение, как это делает `EchoSet` писателя.
+pub fn lock_core() -> MutexGuard<'static, Option<CoreState>> {
+    match core_cell().lock() {
+        Ok(guard) => guard,
+        Err(poison) => poison.into_inner(),
+    }
+}
 
 fn gerr(code: GraphiteErrorCode, message: impl Into<String>, hint: Option<&str>) -> GraphiteError {
     GraphiteError {
@@ -45,15 +58,13 @@ fn not_mounted() -> GraphiteError {
 
 /// Эксклюзивный доступ к смонтированному ядру (один писатель).
 fn with_core<T>(f: impl FnOnce(&mut CoreState) -> Result<T, GraphiteError>) -> Result<T, GraphiteError> {
-    let mut guard = core_cell().lock().unwrap();
+    let mut guard = lock_core();
     let state = guard.as_mut().ok_or_else(not_mounted)?;
     f(state)
 }
 
 fn current_root() -> Result<PathBuf, GraphiteError> {
-    core_cell()
-        .lock()
-        .unwrap()
+    lock_core()
         .as_ref()
         .map(|s| s.root.clone())
         .ok_or_else(not_mounted)
@@ -72,8 +83,13 @@ impl Drop for AssistantActorGuard {
     }
 }
 
+/// Поток обслуживает MCP-вызов (мутация атрибутируется ассистенту).
+fn actor_is_assistant() -> bool {
+    ASSISTANT_ACTOR.with(|a| a.get())
+}
+
 fn txn_opts() -> TxnOpts {
-    let actor = if ASSISTANT_ACTOR.with(|a| a.get()) {
+    let actor = if actor_is_assistant() {
         vault_core::Actor::Assistant
     } else {
         vault_core::Actor::User
@@ -85,11 +101,98 @@ fn txn_opts() -> TxnOpts {
     }
 }
 
-/// Пост-обработка мутации: запись в журнал и переиндексация затронутых файлов.
+/// Пост-обработка мутации: журнал + переиндексация затронутых файлов + трансляция
+/// изменений в окно (открытые вкладки перечитывают файл, лента активности живёт).
 fn after_mutation(state: &mut CoreState, op: &vault_core::JournalOp) {
     let _ = history::record(&state.root, op);
     let paths: Vec<String> = op.files.iter().map(|c| c.path.clone()).collect();
     let _ = state.index.reindex_paths(&state.root, &paths);
+    emit_mutation_events(op, NoteChangeKind::Modified);
+}
+
+/// Эмитит `note_changed` для каждого затронутого файла, ещё существующего на
+/// диске (правка/создание), и одну запись `journal_op` для ленты активности.
+/// Удаления (`after: None`) не рассылаются как note_changed — их инициатор уже
+/// закрыл вкладку, а перечитывание несуществующего файла дало бы NotFound.
+fn emit_mutation_events(op: &vault_core::JournalOp, kind: NoteChangeKind) {
+    let Some(app) = crate::runtime::app_handle() else {
+        return;
+    };
+    let actor = if actor_is_assistant() { Actor::Assistant } else { Actor::User };
+    for change in &op.files {
+        let Some(after) = &change.after else { continue };
+        let rev = after
+            .strip_prefix("blake3:")
+            .unwrap_or(after)
+            .chars()
+            .take(16)
+            .collect::<String>();
+        let _ = app.emit(
+            "note_changed",
+            NoteChangedEvent {
+                r#ref: NoteRef(format!("path:{}", change.path)),
+                rev: Rev(rev),
+                actor,
+                kind: Some(kind),
+                from: None,
+            },
+        );
+    }
+    if let Ok(dto_op) = convert::<_, JournalOp>(op) {
+        let _ = app.emit("journal_op", JournalOpEvent { op: dto_op });
+    }
+}
+
+/// Сообщает окну о ходе (пере)индексации: `total==done` → индекс свеж,
+/// `done<total` → идёт индексация (StatusBar/настройки следят за этим).
+fn emit_index_progress(done: u32, total: u32) {
+    if let Some(app) = crate::runtime::app_handle() {
+        let _ = app.emit("index_progress", IndexProgressEvent { done, total });
+    }
+}
+
+/// Транслирует `note_changed` для набора путей (восстановление undo). Пути,
+/// которых уже нет на диске (откат создания = удаление), пропускаются — иначе
+/// открытая вкладка попыталась бы перечитать несуществующий файл.
+fn emit_paths_changed(root: &Path, paths: &[String]) {
+    let Some(app) = crate::runtime::app_handle() else {
+        return;
+    };
+    let actor = if actor_is_assistant() { Actor::Assistant } else { Actor::User };
+    for path in paths {
+        let abs = root.join(path);
+        let Ok(bytes) = fs::read(&abs) else { continue };
+        let _ = app.emit(
+            "note_changed",
+            NoteChangedEvent {
+                r#ref: NoteRef(format!("path:{path}")),
+                rev: Rev(writer::compute_rev(&bytes).0),
+                actor,
+                kind: Some(NoteChangeKind::Modified),
+                from: None,
+            },
+        );
+    }
+}
+
+/// Пути файлов операции журнала (для рассылки note_changed после undo).
+fn op_paths(root: &Path, op_id: &str) -> Vec<String> {
+    let dir = history::journal_dir(root);
+    ::history::read_op(&dir, op_id)
+        .map(|op| op.files.iter().map(|f| f.path.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Пути файлов всех операций сессии (для рассылки note_changed после undo).
+fn session_paths(root: &Path, session: &str) -> Vec<String> {
+    let dir = history::journal_dir(root);
+    ::history::read_session_ops(&dir, session)
+        .map(|ops| {
+            ops.iter()
+                .flat_map(|op| op.files.iter().map(|f| f.path.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Регистрирует только что созданную заметку в индексе, чтобы она сразу
@@ -97,6 +200,52 @@ fn after_mutation(state: &mut CoreState, op: &vault_core::JournalOp) {
 fn reindex_new(rel: &str) {
     let paths = [rel.to_string()];
     let _ = with_core(|s| s.index.reindex_paths(&s.root, &paths).map_err(core_err));
+}
+
+/// Журналирует создание заметки: `after`-снапшот содержимого кладётся в
+/// объектное хранилище (через `history::record` → `snapshot_after`), поэтому
+/// `before`-снапшот первой же правки этого файла находится и её undo работает.
+/// Само создание тоже становится откатываемой операцией. Реиндексацию делает
+/// отдельный `reindex_new`, поэтому здесь только журнал и трансляция события.
+fn record_create(rel: &str, text: &str) {
+    let hash = ::history::snapshot::labeled_hash(text.as_bytes());
+    let actor = if actor_is_assistant() {
+        vault_core::Actor::Assistant
+    } else {
+        vault_core::Actor::User
+    };
+    let op = vault_core::JournalOp {
+        op_id: ulid::Ulid::new().to_string(),
+        ts: writer::now_iso_utc(),
+        actor,
+        session: None,
+        tool: None,
+        summary: format!("Создание заметки: {rel}"),
+        files: vec![vault_core::FileChange {
+            path: rel.to_string(),
+            before: None,
+            after: Some(hash),
+        }],
+        undone: false,
+    };
+    let _ = with_core(|s| history::record(&s.root, &op).map_err(core_err));
+    emit_mutation_events(&op, NoteChangeKind::Created);
+}
+
+/// Полная переиндексация vault на отдельном соединении, БЕЗ удержания мьютекса
+/// ядра: тяжёлый rescan не должен блокировать остальные команды/MCP/watcher.
+/// Смонтированное соединение видит закоммиченный результат (WAL), отдельный swap
+/// не нужен.
+fn rebuild_off_lock(root: &Path) -> Result<(), GraphiteError> {
+    let mut files = Vec::new();
+    walk_md_files(root, "", &mut files);
+    let total = files.len() as u32;
+    emit_index_progress(0, total.max(1));
+    let db = root.join(".graphite").join("index.db");
+    let mut index = Index::open(db.as_path()).map_err(core_err)?;
+    index.rebuild(root).map_err(core_err)?;
+    emit_index_progress(total, total);
+    Ok(())
 }
 
 fn ref_to_rel(r: &str) -> Result<String, GraphiteError> {
@@ -112,6 +261,22 @@ fn ref_to_rel(r: &str) -> Result<String, GraphiteError> {
         return Err(gerr(GraphiteErrorCode::Validation, "путь выходит за пределы хранилища", None));
     }
     Ok(rel.trim_matches('/').to_string())
+}
+
+/// Резолвит ссылку в относительный путь. `path:` — чистой строковой логикой
+/// (работает и для ещё не проиндексированных файлов). Прочие формы (`id:`,
+/// заголовок, alias) резолвятся через индекс — так `search → note_read`, а также
+/// `id:`-родитель/корень работают единообразно (иначе VALIDATION на любом `id:`).
+fn resolve_rel(r: &str) -> Result<String, GraphiteError> {
+    if r.starts_with("path:") {
+        return ref_to_rel(r);
+    }
+    with_core(|s| {
+        s.index
+            .note_by_ref(&vault_core::NoteRef(r.to_string()))
+            .map(|meta| meta.path)
+            .map_err(core_err)
+    })
 }
 
 fn is_service_dir(name: &str) -> bool {
@@ -181,9 +346,13 @@ fn vault_info_impl() -> Result<VaultInfoResponse, GraphiteError> {
             }
         }
         if let Ok(raw) = fs::read_to_string(&abs) {
-            let head: String = raw.chars().take(600).collect();
-            if head.starts_with("---") && head.contains("type: plan") {
-                plans += 1;
+            // План определяем по типу во frontmatter, а не по подстроке «type: plan»
+            // в первых 600 символах: иначе упоминание в теле давало ложный +1
+            // (наблюдалось «Планы 2» при единственном плане).
+            if let Ok((fm, _)) = parser::parse_frontmatter(&raw) {
+                if fm.r#type == Some(vault_core::NoteType::Plan) {
+                    plans += 1;
+                }
             }
             tasks_open += raw.matches("- [ ]").count() as u32;
         }
@@ -221,10 +390,16 @@ fn mount_vault(path: &str, create: bool) -> Result<VaultInfoResponse, GraphiteEr
         let _ = fs::create_dir_all(root.join(dir));
     }
     let db = root.join(".graphite").join("index.db");
-    let mut index = Index::open(&db).map_err(core_err)?;
-    index.rebuild(&root).map_err(core_err)?;
+    let index = Index::open(&db).map_err(core_err)?;
     crate::runtime::save_last_vault(&root);
-    *core_cell().lock().unwrap() = Some(CoreState { root, index });
+    *lock_core() = Some(CoreState { root: root.clone(), index });
+    // Тёплый полный rebuild — в фоне: окно не блокируется на «тысячах файлов».
+    // Дерево и счётчики (обход ФС) корректны сразу; поиск/задачи/связи работают
+    // на сохранённом индексе и догоняются фоном. Смонтированное соединение видит
+    // результат по WAL.
+    std::thread::spawn(move || {
+        let _ = rebuild_off_lock(&root);
+    });
     vault_info_impl()
 }
 
@@ -232,7 +407,7 @@ fn mount_vault(path: &str, create: bool) -> Result<VaultInfoResponse, GraphiteEr
 /// отсутствие сохранённого пути или недоступную папку, чтобы старт без vault
 /// не падал — ядро просто ждёт выбора.
 pub fn mount_saved_vault() {
-    if core_cell().lock().unwrap().is_some() {
+    if lock_core().is_some() {
         return;
     }
     if let Some(path) = crate::runtime::load_last_vault() {
@@ -385,7 +560,7 @@ fn node_for(rel: &str, fallback_title: &str, abs: &Path, children_count: u32) ->
     }
 }
 
-fn build_tree(root: &Path, dir_rel: &str, out: &mut Vec<TreeNode>) {
+fn build_tree(root: &Path, dir_rel: &str, depth: Option<u32>, out: &mut Vec<TreeNode>) {
     let abs = if dir_rel.is_empty() { root.to_path_buf() } else { root.join(dir_rel) };
     let Ok(entries) = fs::read_dir(&abs) else { return };
     let mut dirs: Vec<String> = Vec::new();
@@ -416,7 +591,9 @@ fn build_tree(root: &Path, dir_rel: &str, out: &mut Vec<TreeNode>) {
         if index_abs.is_file() {
             out.push(node_for(&index_rel, &name, &index_abs, count_md_children(&abs_dir)));
         }
-        build_tree(root, &rel, out);
+        if depth.map(|d| d > 1).unwrap_or(true) {
+            build_tree(root, &rel, depth.map(|d| d - 1), out);
+        }
     }
     for name in files {
         let rel = if dir_rel.is_empty() { name.clone() } else { format!("{dir_rel}/{name}") };
@@ -460,10 +637,10 @@ fn note_create_impl(
     status: Option<Status>,
     tags: Option<Vec<String>>,
     content: Option<String>,
-) -> Result<NoteCreateResponse, GraphiteError> {
+) -> Result<(NoteCreateResponse, String), GraphiteError> {
     let root = current_root()?;
     let mut parent_rel = match parent {
-        Some(r) => ref_to_rel(&r)?,
+        Some(r) => resolve_rel(&r)?,
         None => "Входящие".to_string(),
     };
     if let Some(stripped) = parent_rel.strip_suffix("/_index.md") {
@@ -509,11 +686,12 @@ fn note_create_impl(
     let body = content.unwrap_or_default();
     let text = format!("{fm}{body}");
     let rev = writer::create_atomic(&root, &rel, &text).map_err(core_err)?;
-    Ok(NoteCreateResponse {
+    let resp = NoteCreateResponse {
         r#ref: NoteRef(format!("path:{rel}")),
         path: rel,
         rev: Rev(rev.0),
-    })
+    };
+    Ok((resp, text))
 }
 
 #[tauri::command]
@@ -528,43 +706,147 @@ pub fn vault_tree(params: VaultTreeParams) -> Result<VaultTreeResponse, Graphite
     let root = current_root()?;
     let start_rel = match params.root {
         Some(r) => {
-            let rel = ref_to_rel(&r.0)?;
+            let rel = resolve_rel(&r.0)?;
             rel.strip_suffix("/_index.md").map(|s| s.to_string()).unwrap_or(rel)
         }
         None => String::new(),
     };
     let mut nodes = Vec::new();
-    build_tree(&root, &start_rel, &mut nodes);
+    build_tree(&root, &start_rel, params.depth, &mut nodes);
+    if let Some(types) = &params.types {
+        if !types.is_empty() {
+            nodes.retain(|n| types.contains(&n.r#type));
+        }
+    }
     let total = nodes.len() as u32;
+    let offset = params.offset.unwrap_or(0) as usize;
     let limit = params.limit.unwrap_or(500).min(500) as usize;
-    nodes.truncate(limit);
-    Ok(VaultTreeResponse { nodes, total })
+    let page = if offset >= nodes.len() {
+        Vec::new()
+    } else {
+        let end = offset.saturating_add(limit).min(nodes.len());
+        nodes[offset..end].to_vec()
+    };
+    Ok(VaultTreeResponse { nodes: page, total })
+}
+
+/// Формирует поле `content` ответа. Без section/offset/maxChars — весь файл как
+/// есть (редактор гоняет его байт-в-байт через buffer_save, усечение недопустимо).
+/// С `section` — срез тела по заголовку (фронтматтер не попадает, он в отдельном
+/// поле). `offset`/`maxChars` считаются в символах (безопасно для кириллицы) и
+/// выставляют `truncated`.
+fn shape_note_content(raw: &str, body: &str, params: &NoteReadParams) -> (String, Option<bool>) {
+    let (base, mut sliced) = match &params.section {
+        Some(section) => {
+            let text = match parser::find_section(body, section) {
+                Ok(Some((start, end))) => body[start..end].to_string(),
+                _ => String::new(),
+            };
+            (text, true)
+        }
+        None => (raw.to_string(), false),
+    };
+    if params.offset.is_none() && params.max_chars.is_none() {
+        return (base, if sliced { Some(true) } else { None });
+    }
+    let chars: Vec<char> = base.chars().collect();
+    let total = chars.len();
+    let offset = (params.offset.unwrap_or(0) as usize).min(total);
+    let take = params.max_chars.map(|m| m as usize).unwrap_or(total - offset);
+    let end = offset.saturating_add(take).min(total);
+    if offset > 0 || end < total {
+        sliced = true;
+    }
+    let out: String = chars[offset..end].iter().collect();
+    (out, if sliced { Some(true) } else { None })
+}
+
+type NoteIncludes = (
+    Option<Vec<LinkEdge>>,
+    Option<Vec<LinkEdge>>,
+    Option<Vec<TreeNode>>,
+    Option<Vec<TaskItem>>,
+);
+
+/// Резолвит запрошенные include-срезы через индекс. Не в индексе (свежий файл)
+/// или ядро не смонтировано — мягко пусто, а не ошибка.
+fn read_includes(root: &Path, rel: &str, include: Option<&[NoteReadInclude]>) -> NoteIncludes {
+    let Some(include) = include.filter(|i| !i.is_empty()) else {
+        return (None, None, None, None);
+    };
+    let want = |kind: NoteReadInclude| include.contains(&kind);
+    with_core(|s| {
+        let Ok(meta) = s.index.note_by_ref(&vault_core::NoteRef(format!("path:{rel}"))) else {
+            return Ok((None, None, None, None));
+        };
+        let links = if want(NoteReadInclude::Links) {
+            let edges = vault_core::resolver::outgoing(&s.index, &meta.id).map_err(core_err)?;
+            Some(convert::<_, Vec<LinkEdge>>(&edges)?)
+        } else {
+            None
+        };
+        let backlinks = if want(NoteReadInclude::Backlinks) {
+            let edges = vault_core::resolver::backlinks(&s.index, &meta.id).map_err(core_err)?;
+            Some(convert::<_, Vec<LinkEdge>>(&edges)?)
+        } else {
+            None
+        };
+        let children = if want(NoteReadInclude::Children) {
+            let kids = s.index.children_of(&meta.id).map_err(core_err)?;
+            Some(kids.iter().map(|m| child_node(root, m)).collect::<Vec<TreeNode>>())
+        } else {
+            None
+        };
+        let tasks = if want(NoteReadInclude::Tasks) {
+            let items = s.index.tasks_for_note(&meta.id).map_err(core_err)?;
+            Some(convert::<_, Vec<TaskItem>>(&items)?)
+        } else {
+            None
+        };
+        Ok((links, backlinks, children, tasks))
+    })
+    .unwrap_or((None, None, None, None))
+}
+
+fn child_node(root: &Path, meta: &vault_core::NoteMeta) -> TreeNode {
+    let abs = root.join(&meta.path);
+    let count = if meta.path.ends_with("/_index.md") || meta.path == "_index.md" {
+        count_md_children(abs.parent().unwrap_or(root))
+    } else {
+        0
+    };
+    node_for(&meta.path, &meta.title, &abs, count)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn note_read(params: NoteReadParams) -> Result<NoteReadResponse, GraphiteError> {
     let root = current_root()?;
-    let rel = ref_to_rel(&params.r#ref.0)?;
+    let rel = resolve_rel(&params.r#ref.0)?;
     let abs = root.join(&rel);
     if !abs.is_file() {
         return Err(gerr(GraphiteErrorCode::NotFound, format!("заметка не найдена: {rel}"), None));
     }
     let raw = fs::read_to_string(&abs)
         .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("не удалось прочитать файл: {e}"), None))?;
-    let fm = parser::parse_frontmatter(&raw)
-        .map(|(fm, _)| frontmatter_to_dto(&fm))
-        .unwrap_or_else(|_| frontmatter_to_dto(&vault_core::Frontmatter::default()));
     let rev = writer::compute_rev(raw.as_bytes());
+    let parsed = parser::parse_note(&raw).ok();
+    let fm = parsed
+        .as_ref()
+        .map(|p| frontmatter_to_dto(&p.frontmatter))
+        .unwrap_or_else(|| frontmatter_to_dto(&vault_core::Frontmatter::default()));
+    let body_src: &str = parsed.as_ref().map(|p| p.body.as_str()).unwrap_or(raw.as_str());
+    let (content, truncated) = shape_note_content(&raw, body_src, &params);
+    let (links, backlinks, children, tasks) = read_includes(&root, &rel, params.include.as_deref());
     Ok(NoteReadResponse {
         frontmatter: fm,
-        content: raw,
+        content,
         rev: Rev(rev.0),
-        truncated: None,
-        links: None,
-        backlinks: None,
-        children: None,
-        tasks: None,
+        truncated,
+        links,
+        backlinks,
+        children,
+        tasks,
     })
 }
 
@@ -610,7 +892,7 @@ pub fn context_briefing() -> Result<ContextBriefingResponse, GraphiteError> {
 #[tauri::command]
 #[specta::specta]
 pub fn note_create(params: NoteCreateParams) -> Result<NoteCreateResponse, GraphiteError> {
-    let resp = note_create_impl(
+    let (resp, text) = note_create_impl(
         params.parent.map(|r| r.0),
         &params.title,
         params.r#type,
@@ -619,6 +901,7 @@ pub fn note_create(params: NoteCreateParams) -> Result<NoteCreateResponse, Graph
         params.content,
     )?;
     reindex_new(&resp.path);
+    record_create(&resp.path, &text);
     Ok(resp)
 }
 
@@ -804,6 +1087,13 @@ pub fn buffer_save(params: BufferSaveParams) -> Result<NoteEditResponse, Graphit
         return Err(err);
     }
     let rev_new = writer::write_atomic(&root, &rel, params.content.as_bytes()).map_err(core_err)?;
+    // Запись редактора эхо-гасится watcher-ом, поэтому индекс обновляем здесь —
+    // иначе поиск/бэклинки/задачи по правке остаются устаревшими до reindex.
+    let _ = with_core(|s| {
+        s.index
+            .reindex_paths(&s.root, std::slice::from_ref(&rel))
+            .map_err(core_err)
+    });
     let old_lines: Vec<&str> = old.lines().collect();
     let new_lines: Vec<&str> = params.content.lines().collect();
     let common = old_lines.iter().zip(new_lines.iter()).filter(|(a, b)| a == b).count();
@@ -829,31 +1119,59 @@ pub fn index_status() -> Result<IndexStatus, GraphiteError> {
 #[specta::specta]
 pub fn reindex(full: bool) -> Result<(), GraphiteError> {
     let _ = full;
-    with_core(|s| s.index.rebuild(&s.root).map_err(core_err))
+    let root = current_root()?;
+    rebuild_off_lock(&root)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn undo_op(op_id: String) -> Result<UndoResult, GraphiteError> {
-    with_core(|s| {
+    let root = current_root()?;
+    let paths = op_paths(&root, &op_id);
+    let res: UndoResult = with_core(|s| {
         let res = history::undo_op(&s.root, &mut s.index, &op_id).map_err(core_err)?;
         convert(&res)
-    })
+    })?;
+    if res.restored_files > 0 {
+        emit_paths_changed(&root, &paths);
+    }
+    Ok(res)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn undo_session(session: String) -> Result<UndoResult, GraphiteError> {
-    with_core(|s| {
+    let root = current_root()?;
+    let paths = session_paths(&root, &session);
+    let res: UndoResult = with_core(|s| {
         let res = history::undo_session(&s.root, &mut s.index, &session).map_err(core_err)?;
         convert(&res)
-    })
+    })?;
+    if res.restored_files > 0 {
+        emit_paths_changed(&root, &paths);
+    }
+    Ok(res)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn journal_list(params: ActivityGetParams) -> Result<Vec<JournalOp>, GraphiteError> {
     with_core(|s| {
+        let mut params = params;
+        // Пустой since = «вся история»: иначе resolve_since('') → Validation, и
+        // панель журнала не может попросить полный список.
+        if params.since.trim().is_empty() {
+            params.since = "1970-01-01T00:00:00Z".to_string();
+        }
+        // id-scope резолвим в path заранее (как это делает activity_get), иначе
+        // фильтр журнала отклонит его как Invalid.
+        if let Some(scope) = params.scope.clone() {
+            if !scope.0.starts_with("path:") {
+                if let Ok(meta) = s.index.note_by_ref(&vault_core::NoteRef(scope.0)) {
+                    params.scope = Some(NoteRef(format!("path:{}", meta.path)));
+                }
+            }
+        }
         let p: vault_core::ActivityGetParams = convert(&params)?;
         let ops = history::journal_list(&s.root, &p).map_err(core_err)?;
         convert(&ops)
@@ -900,8 +1218,9 @@ pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> 
     } else {
         first.chars().take(60).collect()
     };
-    let resp = note_create_impl(None, &title, None, None, None, Some(trimmed.to_string()))?;
+    let (resp, text) = note_create_impl(None, &title, None, None, None, Some(trimmed.to_string()))?;
     reindex_new(&resp.path);
+    record_create(&resp.path, &text);
     Ok(resp)
 }
 

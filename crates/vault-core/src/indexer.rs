@@ -94,13 +94,13 @@ impl Index {
         self.resolve_links(&records)
     }
 
-    /// Второй проход: резолвит `dst_raw` каждой заметки в `dst_id` и переписывает
-    /// исходящие рёбра одной транзакцией. Цели резолвятся по единожды собранной
-    /// в память карте (иначе полный скан на каждое ребро не уложится в бюджет).
+    /// Второй проход: резолвит `dst_raw` затронутых заметок в `dst_id` и
+    /// переписывает их исходящие рёбра одной транзакцией. Тем же проходом
+    /// перерезолвятся ранее «висячие» входящие рёбра (`dst_id IS NULL`) от других
+    /// заметок — так свежесозданная/переименованная заметка сразу набирает
+    /// бэклинки без полного пересбора. Цели резолвятся по единожды собранной в
+    /// память карте (иначе полный скан на каждое ребро не уложится в бюджет).
     fn resolve_links(&mut self, records: &[NoteRecord]) -> Result<(), VaultError> {
-        if records.is_empty() {
-            return Ok(());
-        }
         let targets = LinkTargets::load(&self.conn)?;
         let mut resolved: Vec<ResolvedEdge> = Vec::new();
         for record in records {
@@ -119,6 +119,7 @@ impl Index {
         for edge in &resolved {
             insert_edge(&tx, edge)?;
         }
+        resolve_dangling(&tx, &targets)?;
         tx.commit().map_err(index_err)?;
         Ok(())
     }
@@ -210,6 +211,8 @@ impl Index {
                 },
             )?;
         }
+        let targets = LinkTargets::load(&tx)?;
+        resolve_dangling(&tx, &targets)?;
         let mut dirs = HashSet::new();
         dirs.insert(container_dir(&meta.path).to_string());
         dirs.insert(represented_dir(&meta.path));
@@ -336,7 +339,9 @@ impl Index {
         )
     }
 
-    /// Задачи по фильтрам scope/status/due/overdue/plan.
+    /// Задачи по фильтрам scope/status/due/overdue/plan. При `limit: None`
+    /// набор не усекается — верхний слой сам применяет свой предел уже к
+    /// отфильтрованному множеству.
     pub fn tasks_query(&self, params: &TasksQueryParams) -> Result<Vec<TaskItem>, VaultError> {
         let mut tasks = self.all_tasks()?;
         if let Some(scope) = &params.scope {
@@ -373,11 +378,9 @@ impl Index {
                 !t.done && t.due.as_deref().map(|d| d < today.as_str()).unwrap_or(false)
             });
         }
-        let limit = params
-            .limit
-            .map(|l| l as usize)
-            .unwrap_or(crate::model::limits::TASKS_LIMIT_DEFAULT as usize);
-        tasks.truncate(limit);
+        if let Some(limit) = params.limit {
+            tasks.truncate(limit as usize);
+        }
         Ok(tasks)
     }
 
@@ -664,6 +667,44 @@ fn insert_edge(tx: &rusqlite::Transaction<'_>, edge: &ResolvedEdge) -> Result<()
         ],
     )
     .map_err(index_err)?;
+    Ok(())
+}
+
+/// Перерезолвит «висячие» рёбра (`dst_id IS NULL`) по свежей карте целей: после
+/// появления/переименования заметки ранее нерезолвленные входящие ссылки на неё
+/// получают корректный `dst_id`. Без этого прохода бэклинки новой заметки не
+/// находятся (`backlinks`/`links_get` фильтруют по `dst_id`) вплоть до полного
+/// пересбора индекса.
+fn resolve_dangling(
+    tx: &rusqlite::Transaction<'_>,
+    targets: &LinkTargets,
+) -> Result<(), VaultError> {
+    let dangling: Vec<(i64, String, String)> = {
+        let mut stmt = tx
+            .prepare("SELECT rowid, src_id, dst_raw FROM links WHERE dst_id IS NULL")
+            .map_err(index_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(index_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(index_err)?;
+        rows
+    };
+    for (rowid, src_id, dst_raw) in dangling {
+        if let Some(dst_id) = targets.resolve(&src_id, &dst_raw) {
+            tx.execute(
+                "UPDATE links SET dst_id = ?1 WHERE rowid = ?2",
+                params![dst_id, rowid],
+            )
+            .map_err(index_err)?;
+        }
+    }
     Ok(())
 }
 
@@ -1489,7 +1530,7 @@ mod search {
         for word in &query.words {
             let token = safe_token(word);
             if !token.is_empty() {
-                parts.push(format!("{token}*"));
+                parts.push(format!("\"{token}\"*"));
             }
         }
         if parts.is_empty() {
@@ -1499,7 +1540,7 @@ mod search {
         for exclude in &query.excludes {
             let token = safe_token(exclude);
             if !token.is_empty() {
-                expr.push_str(&format!(" NOT {token}*"));
+                expr.push_str(&format!(" NOT \"{token}\"*"));
             }
         }
         Some(expr)

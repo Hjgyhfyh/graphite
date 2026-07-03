@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Flag, ListChecks, Plus, Sparkles, Wand2, X } from 'lucide-react';
 import { Button, Input } from '@graphite/ui';
 import { commands, isGraphiteError } from '@graphite/bindings';
-import type { IdeaToTaskDraft, NoteRef, PlanCreateParams, Priority } from '@graphite/bindings';
+import type { ClaudeCliInfo, IdeaToTaskDraft, NoteRef, PlanCreateParams, Priority } from '@graphite/bindings';
 import { useUiStore } from '../../stores/uiStore';
 import { useTasksStore } from '../../stores/tasksStore';
 import { useVaultStore } from '../../stores/vaultStore';
@@ -20,11 +20,11 @@ interface EditableDraft {
   priority?: Priority;
 }
 
-const PRIORITY_CYCLE: ReadonlyArray<Priority | undefined> = [undefined, 'high', 'urgent'];
+const PRIORITY_CYCLE: ReadonlyArray<Priority | undefined> = [undefined, 'low', 'normal', 'high', 'urgent'];
 
 const DUE_PATTERNS: ReadonlyArray<RegExp> = [
   /@?due[:(]?\s*(\d{4}-\d{2}-\d{2})\)?/i,
-  /\bдо\s+(\d{4}-\d{2}-\d{2})\b/i,
+  /(?:^|\s)до\s+(\d{4}-\d{2}-\d{2})/i,
   /\((\d{4}-\d{2}-\d{2})\)/,
   /\b(\d{4}-\d{2}-\d{2})\b/,
 ];
@@ -88,9 +88,19 @@ function toEditable(draft: IdeaToTaskDraft): EditableDraft {
   return { key: crypto.randomUUID(), text: draft.text, due: draft.due, priority: draft.priority };
 }
 
+function splitIdeaItems(text: string): string[] {
+  const items: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    for (const part of line.split(/\s+(?=\d{1,3}\s*[.)\-–—:]\s)/)) {
+      items.push(part);
+    }
+  }
+  return items;
+}
+
 function parseIdeaLocally(text: string): IdeaToTaskDraft[] {
   const drafts: IdeaToTaskDraft[] = [];
-  for (const raw of text.split(/\r?\n/)) {
+  for (const raw of splitIdeaItems(text)) {
     let body = raw
       .trim()
       .replace(/^[-*•▪·]\s+/, '')
@@ -129,8 +139,17 @@ function parseIdeaLocally(text: string): IdeaToTaskDraft[] {
   return drafts;
 }
 
-function assistCommand(noteRef?: NoteRef): string {
-  return noteRef !== undefined ? `claude "/graphite:distill ref:${noteRef}"` : 'claude "/graphite:distill"';
+function distillCommand(ref: NoteRef): string {
+  return `claude "/graphite:distill ref:${ref}"`;
+}
+
+async function copyToClipboard(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function IdeaToTasks({ noteRef }: IdeaToTasksProps) {
@@ -180,29 +199,60 @@ export function IdeaToTasks({ noteRef }: IdeaToTasksProps) {
 
   const improveWithAssistant = async () => {
     setAssisting(true);
-    const command = assistCommand(noteRef);
-    let found: boolean | undefined;
     try {
-      found = (await commands.detectClaudeCli()).found;
-    } catch {
-      found = undefined;
-    }
-    try {
-      await navigator.clipboard.writeText(command);
-    } catch {
-      pushToast({ kind: 'error', text: 'Не удалось скопировать команду' });
-      setAssisting(false);
-      return;
-    }
-    if (found === false) {
+      let cli: ClaudeCliInfo | undefined;
+      try {
+        cli = await commands.detectClaudeCli();
+      } catch {
+        cli = undefined;
+      }
+
+      if (cli !== undefined && !cli.found) {
+        const copied = await copyToClipboard(cli.mcpAddCommand);
+        pushToast(
+          copied
+            ? {
+                kind: 'info',
+                text: 'Claude Code не найден. Скопирована команда подключения — вставьте её в терминал.',
+              }
+            : { kind: 'error', text: 'Не удалось скопировать команду' },
+        );
+        return;
+      }
+
+      let ref = noteRef;
+      let captured = false;
+      if (ref === undefined) {
+        const body = text.trim();
+        if (body.length === 0) {
+          pushToast({ kind: 'info', text: 'Сначала запишите идею — ассистенту нужен её текст.' });
+          return;
+        }
+        try {
+          const created = await commands.quickCapture(body);
+          ref = created.ref;
+          captured = true;
+          void useVaultStore.getState().loadTree();
+        } catch (error) {
+          pushToast({ kind: 'error', text: reason(error, 'Не удалось сохранить идею для ассистента') });
+          return;
+        }
+      }
+
+      const copied = await copyToClipboard(distillCommand(ref));
+      if (!copied) {
+        pushToast({ kind: 'error', text: 'Не удалось скопировать команду' });
+        return;
+      }
       pushToast({
-        kind: 'info',
-        text: 'Claude Code не найден. Команда скопирована — установите ассистента и вставьте её в терминал.',
+        kind: 'success',
+        text: captured
+          ? 'Идея сохранена во «Входящие». Команда скопирована — вставьте её ассистенту в терминал.'
+          : 'Команда скопирована — вставьте её ассистенту в терминал.',
       });
-    } else {
-      pushToast({ kind: 'success', text: 'Команда скопирована — вставьте её в терминал с ассистентом.' });
+    } finally {
+      setAssisting(false);
     }
-    setAssisting(false);
   };
 
   const updateDraft = (key: string, patch: Partial<EditableDraft>) => {
@@ -219,8 +269,19 @@ export function IdeaToTasks({ noteRef }: IdeaToTasksProps) {
 
   const createPlan = async () => {
     const stageTasks = drafts
-      .map((draft) => ({ text: draft.text.trim(), due: draft.due?.trim() ? draft.due.trim() : undefined }))
-      .filter((task) => task.text.length > 0);
+      .map((draft) => ({
+        base: draft.text.trim(),
+        due: draft.due?.trim() ? draft.due.trim() : undefined,
+        priority: draft.priority,
+      }))
+      .filter((draft) => draft.base.length > 0)
+      .map((draft) => ({
+        text:
+          draft.priority !== undefined && !/@p\(/i.test(draft.base)
+            ? `${draft.base} @p(${draft.priority})`
+            : draft.base,
+        due: draft.due,
+      }));
     if (stageTasks.length === 0) {
       pushToast({ kind: 'info', text: 'Добавьте хотя бы одну задачу' });
       return;

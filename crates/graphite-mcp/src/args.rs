@@ -150,7 +150,8 @@ pub struct SearchFiltersArg {
 pub struct SearchArgs {
     /// Запрос; операторы: "фраза", -минус, tag:, type:, status:.
     pub query: String,
-    /// По умолчанию keyword; semantic|hybrid требуют capability semantic_search.
+    /// Пока поддерживается только keyword; semantic|hybrid вернут VALIDATION
+    /// до появления capability semantic_search.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SearchModeArg>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -533,10 +534,12 @@ pub struct UiNoteArgs {
 pub struct SetIconArgs {
     /// Адрес заметки: "id:…" или "path:…".
     pub r#ref: String,
-    /// Имя иконки lucide (например "rocket"); пропуск — снять иконку.
+    /// Имя иконки lucide (например "rocket"). Пропуск поля — оставить текущее
+    /// значение; пустая строка — снять иконку.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// Цвет иконки — токен палитры или hex; пропуск — снять цвет.
+    /// Цвет иконки — токен палитры или hex. Пропуск поля — оставить текущий
+    /// цвет; пустая строка — снять его.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
 }

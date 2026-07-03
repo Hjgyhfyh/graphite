@@ -1,11 +1,15 @@
+import { useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { PanelRightClose } from 'lucide-react';
 import { cx } from '@graphite/ui';
+import type { NoteRef } from '@graphite/bindings';
 import { Presence, Fade, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useUiStore } from '../../stores/uiStore';
 import type { RightPanelTab } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { usePanesStore } from '../../stores/panesStore';
+import { useTabsStore } from '../../stores/tabsStore';
 import { BundlePanel } from '../bundle/BundlePanel';
 import { AiFeedTab } from './AiFeedTab';
 import { BacklinksTab } from './BacklinksTab';
@@ -37,27 +41,55 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const currentRef = useVaultStore((s) => s.currentRef);
+  const panes = usePanesStore((s) => s.panes);
+  const activePaneId = usePanesStore((s) => s.activePaneId);
+  const tabs = useTabsStore((s) => s.tabs);
   const reduced = usePrefersReducedMotion();
+
+  const activeRef = useMemo<NoteRef | undefined>(() => {
+    const pane = panes.find((p) => p.id === activePaneId) ?? panes[0];
+    const tabId = pane?.activeTabId;
+    const editorTab = tabId !== undefined ? tabs.find((t) => t.id === tabId) : undefined;
+    if (editorTab !== undefined && editorTab.kind === 'editor') {
+      return editorTab.noteRef;
+    }
+    return currentRef;
+  }, [panes, activePaneId, tabs, currentRef]);
+
+  const resizeCleanup = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      resizeCleanup.current?.();
+      resizeCleanup.current = null;
+    },
+    [],
+  );
 
   const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    resizeCleanup.current?.();
     const startX = event.clientX;
     const startWidth = width;
     const onMove = (moveEvent: PointerEvent) => {
       onWidthChange(startWidth + (startX - moveEvent.clientX));
     };
-    const onUp = () => {
+    const finish = () => {
       window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      resizeCleanup.current = null;
     };
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    resizeCleanup.current = finish;
   };
 
   const renderTab = () => {
     if (tab === 'properties') {
-      return currentRef !== undefined ? (
-        <PropertiesTab noteRef={currentRef} />
+      return activeRef !== undefined ? (
+        <PropertiesTab key={activeRef} noteRef={activeRef} />
       ) : (
         <NoNote>Откройте заметку, чтобы увидеть её свойства</NoNote>
       );
@@ -66,18 +98,18 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
       return <AiFeedTab />;
     }
     if (tab === 'links') {
-      return currentRef !== undefined ? (
-        <div className="flex flex-col">
-          <LinksTab noteRef={currentRef} />
+      return activeRef !== undefined ? (
+        <div key={activeRef} className="flex flex-col">
+          <LinksTab noteRef={activeRef} />
           <div className="border-t border-stroke-0" />
-          <BundlePanel noteRef={currentRef} />
+          <BundlePanel noteRef={activeRef} />
         </div>
       ) : (
         <NoNote>Откройте заметку, чтобы увидеть её связи</NoNote>
       );
     }
-    return currentRef !== undefined ? (
-      <BacklinksTab noteRef={currentRef} />
+    return activeRef !== undefined ? (
+      <BacklinksTab key={activeRef} noteRef={activeRef} />
     ) : (
       <NoNote>Откройте заметку, чтобы увидеть бэклинки</NoNote>
     );

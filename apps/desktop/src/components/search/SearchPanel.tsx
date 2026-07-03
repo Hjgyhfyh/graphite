@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   Clock,
+  File as FileIcon,
   FileText,
   FolderClosed,
   FolderKanban,
@@ -121,7 +122,8 @@ interface FilterChip {
   id: string;
   kind: ChipKind;
   label: string;
-  token: string;
+  start: number;
+  end: number;
   dot?: string;
 }
 
@@ -251,20 +253,21 @@ function parseQuery(raw: string): ParsedQuery {
   let chipSeq = 0;
 
   const text = raw
-    .replace(OPERATOR_RE, (match: string, key: string, rawValue: string) => {
+    .replace(OPERATOR_RE, (match: string, key: string, rawValue: string, offset: number) => {
       const value = unquote(rawValue).trim();
       if (value.length === 0) {
         return match;
       }
       const kind = key.toLowerCase() as ChipKind;
-      const token = match.trim();
+      const start = offset;
+      const end = offset + match.length;
       if (kind === 'tag') {
         const tag = value.replace(/^#/, '');
         if (tag.length === 0) {
           return match;
         }
         tags.push(tag);
-        chips.push({ id: `chip-${chipSeq++}`, kind, label: tag, token });
+        chips.push({ id: `chip-${chipSeq++}`, kind, label: tag, start, end });
         return ' ';
       }
       if (kind === 'status') {
@@ -273,7 +276,7 @@ function parseQuery(raw: string): ParsedQuery {
           return match;
         }
         filters.status = status;
-        chips.push({ id: `chip-${chipSeq++}`, kind, label: STATUS_LABEL[status], token, dot: STATUS_DOT[status] });
+        chips.push({ id: `chip-${chipSeq++}`, kind, label: STATUS_LABEL[status], start, end, dot: STATUS_DOT[status] });
         return ' ';
       }
       if (kind === 'type') {
@@ -282,12 +285,12 @@ function parseQuery(raw: string): ParsedQuery {
           return match;
         }
         filters.type = type;
-        chips.push({ id: `chip-${chipSeq++}`, kind, label: TYPE_LABEL[type], token });
+        chips.push({ id: `chip-${chipSeq++}`, kind, label: TYPE_LABEL[type], start, end });
         return ' ';
       }
       if (kind === 'path') {
         filters.path = value;
-        chips.push({ id: `chip-${chipSeq++}`, kind, label: value, token });
+        chips.push({ id: `chip-${chipSeq++}`, kind, label: value, start, end });
         return ' ';
       }
       const updated = parseUpdated(value);
@@ -300,7 +303,7 @@ function parseQuery(raw: string): ParsedQuery {
       if (updated.before !== undefined) {
         filters.updatedBefore = updated.before;
       }
-      chips.push({ id: `chip-${chipSeq++}`, kind, label: updated.label, token });
+      chips.push({ id: `chip-${chipSeq++}`, kind, label: updated.label, start, end });
       return ' ';
     })
     .replace(/\s+/g, ' ')
@@ -337,6 +340,10 @@ function highlightSnippet(text: string, terms: string[]): ReactNode {
       <Fragment key={index}>{part}</Fragment>
     ),
   );
+}
+
+function refToPath(ref: string): string | undefined {
+  return ref.startsWith('path:') ? ref.slice('path:'.length) : undefined;
 }
 
 function parentDir(path: string | undefined): string | undefined {
@@ -448,6 +455,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const lastViewRef = useRef<View>('idle');
+  const indexBuildingRef = useRef(false);
 
   const parsed = useMemo(() => parseQuery(query), [query]);
   const nodeByRef = useMemo(() => {
@@ -528,13 +536,28 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
     itemRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex, hits]);
 
+  useEffect(() => {
+    if (indexBuildingRef.current && !indexBuilding && parsed.hasQuery) {
+      setNonce((value) => value + 1);
+    }
+    indexBuildingRef.current = indexBuilding;
+  }, [indexBuilding, parsed.hasQuery]);
+
+  useEffect(
+    () => () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    },
+    [],
+  );
+
   const clearQuery = () => {
     setQuery('');
     inputRef.current?.focus();
   };
 
-  const removeChip = (token: string) => {
-    setQuery((current) => current.split(token).join(' ').replace(/\s+/g, ' ').trim());
+  const removeChip = (chip: FilterChip) => {
+    setQuery((current) => `${current.slice(0, chip.start)} ${current.slice(chip.end)}`.replace(/\s+/g, ' ').trim());
     inputRef.current?.focus();
   };
 
@@ -561,11 +584,18 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
       event.preventDefault();
       setSelectedIndex((index) => Math.max(index - 1, 0));
     } else if (event.key === 'Home') {
-      event.preventDefault();
-      setSelectedIndex(0);
+      const input = event.currentTarget;
+      if (input.selectionStart === 0 && input.selectionEnd === 0) {
+        event.preventDefault();
+        setSelectedIndex(0);
+      }
     } else if (event.key === 'End') {
-      event.preventDefault();
-      setSelectedIndex(hits.length - 1);
+      const input = event.currentTarget;
+      const caretEnd = input.value.length;
+      if (input.selectionStart === caretEnd && input.selectionEnd === caretEnd) {
+        event.preventDefault();
+        setSelectedIndex(hits.length - 1);
+      }
     } else if (event.key === 'Enter') {
       event.preventDefault();
       const target = hits[selectedIndex] ?? hits[0];
@@ -577,17 +607,29 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
 
   const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    const handle = event.currentTarget;
+    const { pointerId } = event;
     const startX = event.clientX;
     const startWidth = width;
+    handle.setPointerCapture(pointerId);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
     const onMove = (moveEvent: PointerEvent) => {
       onWidthChange(startWidth + (moveEvent.clientX - startX));
     };
     const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      if (handle.hasPointerCapture(pointerId)) {
+        handle.releasePointerCapture(pointerId);
+      }
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   };
 
   let view: View;
@@ -601,8 +643,12 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
     view = 'skeleton';
   } else if (phase === 'ready') {
     view = hits.length > 0 ? 'results' : indexBuilding ? 'building' : 'empty';
+  } else if (hits.length > 0) {
+    view = 'results';
+  } else if (lastViewRef.current === 'error' || lastViewRef.current === 'empty') {
+    view = 'skeleton';
   } else {
-    view = hits.length > 0 ? 'results' : lastViewRef.current;
+    view = lastViewRef.current;
   }
   lastViewRef.current = view;
 
@@ -636,7 +682,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
           autoComplete="off"
           role="combobox"
           aria-expanded={view === 'results'}
-          aria-controls="search-results-list"
+          aria-controls={view === 'results' ? 'search-results-list' : undefined}
           aria-activedescendant={activeOptionId}
           className="h-7 w-full min-w-0 bg-transparent text-ui text-text-0 outline-none placeholder:text-text-2"
         />
@@ -672,7 +718,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                 <span className="truncate">{chip.label}</span>
                 <button
                   type="button"
-                  onClick={() => removeChip(chip.token)}
+                  onClick={() => removeChip(chip)}
                   aria-label={`Убрать фильтр ${chip.label}`}
                   className="grid size-4 shrink-0 place-items-center rounded-full text-text-3 transition-colors hover:bg-bg-3 hover:text-text-1"
                 >
@@ -706,9 +752,9 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
               >
                 {hits.map((hit, index) => {
                   const node = nodeByRef.get(hit.ref);
-                  const TypeIcon = TYPE_ICON[node?.type ?? 'note'];
+                  const TypeIcon = node !== undefined ? TYPE_ICON[node.type] : FileIcon;
                   const status = node?.status;
-                  const dir = parentDir(node?.path);
+                  const dir = node !== undefined ? parentDir(node.path) : parentDir(refToPath(hit.ref));
                   const date = formatUpdated(hit.updated);
                   const snippets = hit.snippets.filter((s) => s.trim().length > 0).slice(0, 3);
                   const selected = index === selectedIndex;
