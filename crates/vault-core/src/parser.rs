@@ -187,7 +187,8 @@ pub fn serialize_frontmatter(frontmatter: &Frontmatter) -> Result<String, VaultE
     }
     let yaml = serde_yml::to_string(&serde_yml::Value::Mapping(mapping))
         .map_err(|err| VaultError::Validation(format!("сериализация frontmatter: {err}")))?;
-    Ok(format!("---\n{yaml}---\n"))
+    let yaml = yaml.trim_end_matches('\n');
+    Ok(format!("---\n{yaml}\n---\n"))
 }
 
 pub fn extract_headings(body: &str) -> Result<Vec<Heading>, VaultError> {

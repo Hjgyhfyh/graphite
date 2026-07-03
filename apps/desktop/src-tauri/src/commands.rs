@@ -1,16 +1,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
+use crate::state::{CoreState, core_cell};
 use crate::dto::*;
+use vault_core::indexer::Index;
+use vault_core::txn::TxnOpts;
+use vault_core::vault::{ai, crud, history, planning, query};
 use vault_core::{parser, writer};
-
-static VAULT_ROOT: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
-
-fn root_cell() -> &'static Mutex<Option<PathBuf>> {
-    VAULT_ROOT.get_or_init(|| Mutex::new(None))
-}
 
 fn gerr(code: GraphiteErrorCode, message: impl Into<String>, hint: Option<&str>) -> GraphiteError {
     GraphiteError {
@@ -22,15 +22,56 @@ fn gerr(code: GraphiteErrorCode, message: impl Into<String>, hint: Option<&str>)
 }
 
 fn core_err(e: vault_core::VaultError) -> GraphiteError {
-    gerr(GraphiteErrorCode::Unavailable, e.to_string(), None)
+    let rpc_err: vault_core::GraphiteError = e.into();
+    convert(&rpc_err).unwrap_or_else(|_| gerr(GraphiteErrorCode::Unavailable, "ошибка ядра", None))
+}
+
+/// Перегоняет один сериализуемый тип в другой с идентичной формой serde
+/// (dto ↔ канонические типы ядра). Оба набора используют camelCase на границе.
+fn convert<A: Serialize, B: DeserializeOwned>(value: &A) -> Result<B, GraphiteError> {
+    let json = serde_json::to_value(value)
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("сериализация: {e}"), None))?;
+    serde_json::from_value(json)
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("десериализация: {e}"), None))
+}
+
+fn not_mounted() -> GraphiteError {
+    gerr(
+        GraphiteErrorCode::Unavailable,
+        "хранилище не открыто",
+        Some("сначала вызови vault_open"),
+    )
+}
+
+/// Эксклюзивный доступ к смонтированному ядру (один писатель).
+fn with_core<T>(f: impl FnOnce(&mut CoreState) -> Result<T, GraphiteError>) -> Result<T, GraphiteError> {
+    let mut guard = core_cell().lock().unwrap();
+    let state = guard.as_mut().ok_or_else(not_mounted)?;
+    f(state)
 }
 
 fn current_root() -> Result<PathBuf, GraphiteError> {
-    root_cell()
+    core_cell()
         .lock()
         .unwrap()
-        .clone()
-        .ok_or_else(|| gerr(GraphiteErrorCode::Unavailable, "хранилище не открыто", Some("сначала вызови vault_open")))
+        .as_ref()
+        .map(|s| s.root.clone())
+        .ok_or_else(not_mounted)
+}
+
+fn txn_opts() -> TxnOpts {
+    TxnOpts {
+        actor: vault_core::Actor::User,
+        tool: None,
+        session: None,
+    }
+}
+
+/// Пост-обработка мутации: запись в журнал и переиндексация затронутых файлов.
+fn after_mutation(state: &mut CoreState, op: &vault_core::JournalOp) {
+    let _ = history::record(&state.root, op);
+    let paths: Vec<String> = op.files.iter().map(|c| c.path.clone()).collect();
+    let _ = state.index.reindex_paths(&state.root, &paths);
 }
 
 fn ref_to_rel(r: &str) -> Result<String, GraphiteError> {
@@ -154,7 +195,10 @@ fn mount_vault(path: &str, create: bool) -> Result<VaultInfoResponse, GraphiteEr
     for dir in [".graphite", ".trash", "_assets"] {
         let _ = fs::create_dir_all(root.join(dir));
     }
-    *root_cell().lock().unwrap() = Some(root);
+    let db = root.join(".graphite").join("index.db");
+    let mut index = Index::open(&db).map_err(core_err)?;
+    index.rebuild(&root).map_err(core_err)?;
+    *core_cell().lock().unwrap() = Some(CoreState { root, index });
     vault_info_impl()
 }
 
@@ -173,19 +217,48 @@ fn count_md_children(abs_dir: &Path) -> u32 {
         .count() as u32
 }
 
-fn node_for(rel: &str, title: &str, abs: &Path, children_count: u32) -> TreeNode {
+fn read_fm(abs: &Path) -> vault_core::Frontmatter {
+    fs::read_to_string(abs)
+        .ok()
+        .and_then(|raw| parser::parse_frontmatter(&raw).ok())
+        .map(|(fm, _)| fm)
+        .unwrap_or_default()
+}
+
+fn yml_str(fm: &vault_core::Frontmatter, key: &str) -> Option<String> {
+    fm.extra.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+fn note_type_dto(t: Option<vault_core::NoteType>) -> NoteType {
+    t.and_then(|t| convert::<_, NoteType>(&t).ok()).unwrap_or(NoteType::Note)
+}
+
+fn status_dto(s: Option<vault_core::Status>) -> Option<Status> {
+    s.and_then(|s| convert::<_, Status>(&s).ok())
+}
+
+fn node_for(rel: &str, fallback_title: &str, abs: &Path, children_count: u32) -> TreeNode {
     let updated = fs::metadata(abs)
         .and_then(|m| m.modified())
         .map(iso_from_systime)
         .unwrap_or_else(|_| writer::now_iso_utc());
+    let fm = read_fm(abs);
+    let title = fm
+        .title
+        .clone()
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| fallback_title.to_string());
     TreeNode {
         r#ref: NoteRef(format!("path:{rel}")),
         path: rel.to_string(),
-        title: title.to_string(),
-        r#type: NoteType::Note,
-        status: None,
+        title,
+        r#type: note_type_dto(fm.r#type),
+        status: status_dto(fm.status),
         children_count,
         updated,
+        icon: yml_str(&fm, "icon"),
+        icon_color: yml_str(&fm, "icon_color").or_else(|| yml_str(&fm, "iconColor")),
+        pinned: fm.extra.get("pinned").and_then(|v| v.as_bool()),
     }
 }
 
@@ -216,8 +289,9 @@ fn build_tree(root: &Path, dir_rel: &str, out: &mut Vec<TreeNode>) {
         let rel = if dir_rel.is_empty() { name.clone() } else { format!("{dir_rel}/{name}") };
         let abs_dir = root.join(&rel);
         let index_rel = format!("{rel}/_index.md");
-        if root.join(&index_rel).is_file() {
-            out.push(node_for(&index_rel, &name, &abs_dir, count_md_children(&abs_dir)));
+        let index_abs = root.join(&index_rel);
+        if index_abs.is_file() {
+            out.push(node_for(&index_rel, &name, &index_abs, count_md_children(&abs_dir)));
         }
         build_tree(root, &rel, out);
     }
@@ -229,10 +303,20 @@ fn build_tree(root: &Path, dir_rel: &str, out: &mut Vec<TreeNode>) {
 }
 
 fn frontmatter_to_dto(fm: &vault_core::Frontmatter) -> Frontmatter {
-    serde_json::to_value(fm)
+    let mut dto: Frontmatter = serde_json::to_value(fm)
         .ok()
         .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_else(|| serde_json::from_value(serde_json::json!({})).expect("пустой frontmatter"))
+        .unwrap_or_default();
+    if dto.icon.is_none() {
+        dto.icon = yml_str(fm, "icon");
+    }
+    if dto.icon_color.is_none() {
+        dto.icon_color = yml_str(fm, "icon_color").or_else(|| yml_str(fm, "iconColor"));
+    }
+    dto.extra.remove("icon");
+    dto.extra.remove("icon_color");
+    dto.extra.remove("iconColor");
+    dto
 }
 
 fn yaml_quote(s: &str) -> String {
@@ -364,25 +448,40 @@ pub fn note_read(params: NoteReadParams) -> Result<NoteReadResponse, GraphiteErr
 #[tauri::command]
 #[specta::specta]
 pub fn search(params: SearchParams) -> Result<SearchResponse, GraphiteError> {
-    unavailable(params, "search")
+    with_core(|s| {
+        let p: vault_core::SearchParams = convert(&params)?;
+        let resp = query::search(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn links_get(params: LinksGetParams) -> Result<LinksGetResponse, GraphiteError> {
-    unavailable(params, "links_get")
+    with_core(|s| {
+        let p: vault_core::LinksGetParams = convert(&params)?;
+        let resp = query::links_get(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn activity_get(params: ActivityGetParams) -> Result<ActivityGetResponse, GraphiteError> {
-    unavailable(params, "activity_get")
+    with_core(|s| {
+        let p: vault_core::ActivityGetParams = convert(&params)?;
+        let resp = query::activity_get(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn context_briefing() -> Result<ContextBriefingResponse, GraphiteError> {
-    unavailable((), "context_briefing")
+    with_core(|s| {
+        let resp = ai::context_briefing(&s.root, &s.index).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
@@ -401,79 +500,142 @@ pub fn note_create(params: NoteCreateParams) -> Result<NoteCreateResponse, Graph
 #[tauri::command]
 #[specta::specta]
 pub fn note_edit(params: NoteEditParams) -> Result<NoteEditResponse, GraphiteError> {
-    unavailable(params, "note_edit")
+    with_core(|s| {
+        let p: vault_core::NoteEditParams = convert(&params)?;
+        let (resp, op) = crud::note_edit(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn note_move(params: NoteMoveParams) -> Result<NoteMoveResponse, GraphiteError> {
-    unavailable(params, "note_move")
+    with_core(|s| {
+        let p: vault_core::NoteMoveParams = convert(&params)?;
+        let (resp, op) = crud::note_move(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn note_rename(params: NoteRenameParams) -> Result<NoteRenameResponse, GraphiteError> {
-    unavailable(params, "note_rename")
+    with_core(|s| {
+        let p: vault_core::NoteRenameParams = convert(&params)?;
+        let (resp, op) = crud::note_rename(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn note_delete(params: NoteDeleteParams) -> Result<NoteDeleteResponse, GraphiteError> {
-    unavailable(params, "note_delete")
+    with_core(|s| {
+        let p: vault_core::NoteDeleteParams = convert(&params)?;
+        let (resp, op) = crud::note_delete(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn note_restore(params: NoteRestoreParams) -> Result<NoteRestoreResponse, GraphiteError> {
-    unavailable(params, "note_restore")
+    with_core(|s| {
+        let p: vault_core::NoteRestoreParams = convert(&params)?;
+        let (resp, op) = crud::note_restore(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn set_status(params: SetStatusParams) -> Result<SetStatusResponse, GraphiteError> {
-    unavailable(params, "set_status")
+    with_core(|s| {
+        let p: vault_core::SetStatusParams = convert(&params)?;
+        let (resp, op) = crud::set_status(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn link_add(params: LinkAddParams) -> Result<LinkAddResponse, GraphiteError> {
-    unavailable(params, "link_add")
+    with_core(|s| {
+        let p: vault_core::LinkAddParams = convert(&params)?;
+        let (resp, op) = crud::link_add(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn link_remove(params: LinkRemoveParams) -> Result<LinkRemoveResponse, GraphiteError> {
-    unavailable(params, "link_remove")
+    with_core(|s| {
+        let p: vault_core::LinkRemoveParams = convert(&params)?;
+        let (resp, op) = crud::link_remove(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn tasks_query(params: TasksQueryParams) -> Result<TasksQueryResponse, GraphiteError> {
-    unavailable(params, "tasks_query")
+    with_core(|s| {
+        let p: vault_core::TasksQueryParams = convert(&params)?;
+        let resp = query::tasks_query(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn task_check(params: TaskCheckParams) -> Result<TaskCheckResponse, GraphiteError> {
-    unavailable(params, "task_check")
+    with_core(|s| {
+        let p: vault_core::TaskCheckParams = convert(&params)?;
+        let (resp, op) = query::task_check(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn plan_create(params: PlanCreateParams) -> Result<PlanCreateResponse, GraphiteError> {
-    unavailable(params, "plan_create")
+    with_core(|s| {
+        let p: vault_core::PlanCreateParams = convert(&params)?;
+        let (resp, op) = planning::plan_create(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn plan_update(params: PlanUpdateParams) -> Result<PlanUpdateResponse, GraphiteError> {
-    unavailable(params, "plan_update")
+    with_core(|s| {
+        let p: vault_core::PlanUpdateParams = convert(&params)?;
+        let (resp, op) = planning::plan_update(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn plan_progress(params: PlanProgressParams) -> Result<PlanProgressResponse, GraphiteError> {
-    unavailable(params, "plan_progress")
+    with_core(|s| {
+        let p: vault_core::PlanProgressParams = convert(&params)?;
+        let resp = planning::plan_progress(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
@@ -481,13 +643,22 @@ pub fn plan_progress(params: PlanProgressParams) -> Result<PlanProgressResponse,
 pub fn distill_context(
     params: DistillContextParams,
 ) -> Result<DistillContextResponse, GraphiteError> {
-    unavailable(params, "distill_context")
+    with_core(|s| {
+        let p: vault_core::DistillContextParams = convert(&params)?;
+        let resp = ai::distill_context(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn distill_save(params: DistillSaveParams) -> Result<DistillSaveResponse, GraphiteError> {
-    unavailable(params, "distill_save")
+    with_core(|s| {
+        let p: vault_core::DistillSaveParams = convert(&params)?;
+        let (resp, op) = ai::distill_save(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
 }
 
 #[tauri::command]
@@ -523,31 +694,45 @@ pub fn buffer_save(params: BufferSaveParams) -> Result<NoteEditResponse, Graphit
 #[tauri::command]
 #[specta::specta]
 pub fn index_status() -> Result<IndexStatus, GraphiteError> {
-    unavailable((), "index_status")
+    with_core(|s| {
+        let st = s.index.status().map_err(core_err)?;
+        convert(&st)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn reindex(full: bool) -> Result<(), GraphiteError> {
-    unavailable(full, "reindex")
+    let _ = full;
+    with_core(|s| s.index.rebuild(&s.root).map_err(core_err))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn undo_op(op_id: String) -> Result<UndoResult, GraphiteError> {
-    unavailable(op_id, "undo_op")
+    with_core(|s| {
+        let res = history::undo_op(&s.root, &mut s.index, &op_id).map_err(core_err)?;
+        convert(&res)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn undo_session(session: String) -> Result<UndoResult, GraphiteError> {
-    unavailable(session, "undo_session")
+    with_core(|s| {
+        let res = history::undo_session(&s.root, &mut s.index, &session).map_err(core_err)?;
+        convert(&res)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn journal_list(params: ActivityGetParams) -> Result<Vec<JournalOp>, GraphiteError> {
-    unavailable(params, "journal_list")
+    with_core(|s| {
+        let p: vault_core::ActivityGetParams = convert(&params)?;
+        let ops = history::journal_list(&s.root, &p).map_err(core_err)?;
+        convert(&ops)
+    })
 }
 
 #[tauri::command]
@@ -565,7 +750,11 @@ pub fn vault_create(path: String) -> Result<VaultInfoResponse, GraphiteError> {
 #[tauri::command]
 #[specta::specta]
 pub fn detect_claude_cli() -> Result<ClaudeCliInfo, GraphiteError> {
-    unavailable((), "detect_claude_cli")
+    Ok(ClaudeCliInfo {
+        found: false,
+        path: None,
+        mcp_add_command: "claude mcp add graphite --transport stdio -- graphite-mcp".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -589,12 +778,58 @@ pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> 
     note_create_impl(None, &title, None, None, None, Some(trimmed.to_string()))
 }
 
-fn unavailable<P, T>(params: P, tool: &str) -> Result<T, GraphiteError> {
-    let _ = params;
-    Err(GraphiteError {
-        code: GraphiteErrorCode::Unavailable,
-        message: format!("{tool}: будет в следующей версии ядра"),
-        hint: Some("core_not_mounted".into()),
-        data: None,
+#[tauri::command]
+#[specta::specta]
+pub fn set_icon(params: SetIconParams) -> Result<SetIconResponse, GraphiteError> {
+    with_core(|s| {
+        let p: crud::SetIconParams = convert(&params)?;
+        let (resp, op) = crud::set_icon(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn note_pin(params: NotePinParams) -> Result<NotePinResponse, GraphiteError> {
+    with_core(|s| {
+        let p: crud::NotePinParams = convert(&params)?;
+        let (resp, op) = crud::note_pin(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn bundle_compose(params: BundleComposeParams) -> Result<BundleComposeResponse, GraphiteError> {
+    with_core(|s| {
+        let p: ai::BundleComposeParams = convert(&params)?;
+        let resp = ai::bundle_compose(&s.root, &s.index, &p).map_err(core_err)?;
+        convert(&resp)
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn bundle_create(params: BundleCreateParams) -> Result<BundleCreateResponse, GraphiteError> {
+    with_core(|s| {
+        let p: ai::BundleCreateParams = convert(&params)?;
+        let (resp, op) = ai::bundle_create(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;
+        after_mutation(s, &op);
+        convert(&resp)
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn idea_to_tasks(params: IdeaToTasksParams) -> Result<IdeaToTasksResponse, GraphiteError> {
+    with_core(|s| {
+        let p: ai::IdeaToTasksParams = convert(&params)?;
+        let resp = ai::idea_to_tasks(&s.root, &s.index, &p).map_err(core_err)?;
+        if p.create_plan == Some(true) {
+            let _ = s.index.rebuild(&s.root);
+        }
+        convert(&resp)
     })
 }

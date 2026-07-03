@@ -5051,6 +5051,7 @@ dependencies = [
  "blake3",
  "comrak",
  "fd-lock",
+ "history",
  "notify",
  "notify-debouncer-full",
  "rpc",

@@ -1,6 +1,7 @@
 mod commands;
 mod dto;
 mod events;
+mod state;
 
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -41,6 +42,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::vault_create,
             commands::detect_claude_cli,
             commands::quick_capture,
+            commands::set_icon,
+            commands::note_pin,
+            commands::bundle_compose,
+            commands::bundle_create,
+            commands::idea_to_tasks,
         ])
         .events(collect_events![
             events::NoteChangedEvent,
