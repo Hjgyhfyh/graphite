@@ -59,9 +59,27 @@ fn current_root() -> Result<PathBuf, GraphiteError> {
         .ok_or_else(not_mounted)
 }
 
+thread_local! {
+    /// Помечает поток, обслуживающий MCP-вызов (dispatch), чтобы мутации
+    /// атрибутировались ассистенту, а не пользователю (Р27, лента ИИ).
+    static ASSISTANT_ACTOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct AssistantActorGuard;
+impl Drop for AssistantActorGuard {
+    fn drop(&mut self) {
+        ASSISTANT_ACTOR.with(|a| a.set(false));
+    }
+}
+
 fn txn_opts() -> TxnOpts {
+    let actor = if ASSISTANT_ACTOR.with(|a| a.get()) {
+        vault_core::Actor::Assistant
+    } else {
+        vault_core::Actor::User
+    };
     TxnOpts {
-        actor: vault_core::Actor::User,
+        actor,
         tool: None,
         session: None,
     }
@@ -248,6 +266,8 @@ fn ser<T: Serialize>(value: T) -> Result<serde_json::Value, GraphiteError> {
 /// путь для Tauri-обёрток (через свои сигнатуры) и pipe-Handler (по имени).
 /// `hello`, `ui_open_note`, `ui_flash_note` обслуживает приложение, не ядро.
 pub fn dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::Value, GraphiteError> {
+    ASSISTANT_ACTOR.with(|a| a.set(true));
+    let _actor_guard = AssistantActorGuard;
     match method {
         "vault_info" => ser(vault_info()?),
         "vault_tree" => ser(vault_tree(de(params)?)?),
