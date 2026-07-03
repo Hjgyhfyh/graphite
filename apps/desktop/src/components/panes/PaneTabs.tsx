@@ -22,6 +22,7 @@ export function PaneTabs({ paneId }: PaneTabsProps) {
   const removePane = usePanesStore((s) => s.removePane);
   const moveTabToPane = usePanesStore((s) => s.moveTabToPane);
   const close = useTabsStore((s) => s.close);
+  const removeFromGroup = useTabsStore((s) => s.removeFromGroup);
   const pushToast = useUiStore((s) => s.pushToast);
 
   const splitActiveToPane = () => {
@@ -35,6 +36,7 @@ export function PaneTabs({ paneId }: PaneTabsProps) {
       return;
     }
     moveTabToPane(activeTabId, newPaneId);
+    removeFromGroup(activeTabId);
   };
 
   const detachActive = () => {

@@ -112,7 +112,11 @@ export const useTabsStore = create<TabsStore>()((set, get) => ({
       return;
     }
     const sibling = siblingIn(get().tabs, closing.paneId, id);
-    set((s) => ({ tabs: s.tabs.filter((tab) => tab.id !== id) }));
+    set((s) => {
+      const tabs = s.tabs.filter((tab) => tab.id !== id);
+      const used = new Set(tabs.map((tab) => tab.groupId));
+      return { tabs, groups: s.groups.filter((group) => used.has(group.id)) };
+    });
     const panes = usePanesStore.getState();
     const pane = panes.panes.find((p) => p.id === closing.paneId);
     if (pane?.activeTabId === id) {
@@ -137,7 +141,15 @@ export const useTabsStore = create<TabsStore>()((set, get) => ({
     }));
   },
   togglePin: (id) => {
-    set((s) => ({ tabs: s.tabs.map((tab) => (tab.id === id ? { ...tab, pinned: !tab.pinned } : tab)) }));
+    set((s) => ({
+      tabs: s.tabs.map((tab) => {
+        if (tab.id !== id) {
+          return tab;
+        }
+        const pinned = !tab.pinned;
+        return pinned ? { ...tab, pinned, groupId: undefined } : { ...tab, pinned };
+      }),
+    }));
   },
   reorder: (paneId, orderedIds) => {
     set((s) => ({

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'motion/react';
 import { Tree } from 'react-arborist';
@@ -205,10 +205,11 @@ function EmptyState() {
 }
 
 function useElementSize() {
-  const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  useLayoutEffect(() => {
-    const el = ref.current;
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const callbackRef = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
     if (el === null) {
       return;
     }
@@ -219,9 +220,9 @@ function useElementSize() {
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
-    return () => observer.disconnect();
+    observerRef.current = observer;
   }, []);
-  return [ref, size] as const;
+  return [callbackRef, size] as const;
 }
 
 function RenameInput({ node }: { node: NodeApi<ArNode> }) {
@@ -569,6 +570,9 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   );
 
   const handleRename = useCallback<RenameHandler<ArNode>>(({ node, name }) => {
+    if (node.data.virtual === true) {
+      return;
+    }
     const next = name.trim();
     if (next.length > 0 && next !== node.data.name) {
       void useVaultStore.getState().rename(node.data.ref, next);
@@ -614,7 +618,11 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   );
 
   useActionHandler('note.rename', () => {
-    const target = treeRef.current?.focusedNode?.data.ref ?? currentRef;
+    const focused = treeRef.current?.focusedNode;
+    if (focused?.data.virtual === true) {
+      return;
+    }
+    const target = focused?.data.ref ?? currentRef;
     if (target !== undefined) {
       void treeRef.current?.edit(target);
     }

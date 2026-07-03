@@ -395,6 +395,10 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
+    if (paneTabs.find((tab) => tab.id === id)?.pinned === true) {
+      setDropTarget(undefined);
+      return;
+    }
     const rect = event.currentTarget.getBoundingClientRect();
     setDropTarget({ type: 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
   };

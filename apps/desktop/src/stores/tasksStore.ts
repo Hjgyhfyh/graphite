@@ -22,9 +22,12 @@ function paramsFor(filter: TaskFilter): TasksQueryParams {
     return { status: 'open', overdue: true };
   }
   if (filter === 'today') {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return { status: 'open', dueBefore: tomorrow.toISOString().slice(0, 10) };
+    const now = new Date();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const year = tomorrow.getFullYear();
+    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const day = String(tomorrow.getDate()).padStart(2, '0');
+    return { status: 'open', dueBefore: `${year}-${month}-${day}` };
   }
   return { status: 'open' };
 }

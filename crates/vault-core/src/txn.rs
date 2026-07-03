@@ -549,22 +549,32 @@ pub fn mv(
     let parent_dir = if is_root_parent(&params.new_parent) {
         String::new()
     } else {
-        let parent = resolver::resolve(index, &params.new_parent)?;
-        if parent.id == meta.id {
-            return Err(VaultError::Validation(
-                "нельзя перенести заметку в саму себя".to_string(),
-            ));
-        }
-        if is_folder_note(&parent.path) {
-            folder_dir(&parent.path).to_string()
-        } else {
-            let dir = strip_md(&parent.path).to_string();
-            promotion = Some((
-                parent.id.0.clone(),
-                parent.path.clone(),
-                format!("{dir}/{INDEX_FILE}"),
-            ));
-            dir
+        match resolver::resolve(index, &params.new_parent) {
+            Ok(parent) => {
+                if parent.id == meta.id {
+                    return Err(VaultError::Validation(
+                        "нельзя перенести заметку в саму себя".to_string(),
+                    ));
+                }
+                if is_folder_note(&parent.path) {
+                    folder_dir(&parent.path).to_string()
+                } else {
+                    let dir = strip_md(&parent.path).to_string();
+                    promotion = Some((
+                        parent.id.0.clone(),
+                        parent.path.clone(),
+                        format!("{dir}/{INDEX_FILE}"),
+                    ));
+                    dir
+                }
+            }
+            Err(err @ VaultError::NotFound(_)) => {
+                match existing_dir_parent(vault_root, &params.new_parent) {
+                    Some(dir) => dir,
+                    None => return Err(err),
+                }
+            }
+            Err(err) => return Err(err),
         }
     };
     if folder && (parent_dir == old_root || parent_dir.starts_with(&format!("{old_root}/"))) {
@@ -1000,6 +1010,18 @@ fn is_root_parent(note_ref: &NoteRef) -> bool {
         .strip_prefix(resolver::REF_PATH_PREFIX)
         .map(|rest| matches!(rest.trim(), "" | "/" | "."))
         .unwrap_or(false)
+}
+
+/// `new_parent` в форме `path:<dir>`, указывающей на реально существующий
+/// каталог под корнем vault: относительный путь к нему. Так перенос в
+/// «виртуальную» папку (каталог без `_index.md`, например «Входящие») не падает
+/// с NotFound — каталог трактуется как родитель напрямую, без promotion.
+fn existing_dir_parent(vault_root: &Path, new_parent: &NoteRef) -> Option<String> {
+    let ParsedRef::Path(path) = resolver::parse_ref(new_parent).ok()? else {
+        return None;
+    };
+    let abs = writer::vault_abs_path(vault_root, &path).ok()?;
+    abs.is_dir().then_some(path)
 }
 
 fn rewrite_content(

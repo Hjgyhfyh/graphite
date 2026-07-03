@@ -9,24 +9,30 @@ import { REDUCED_CROSSFADE, springStandard } from '../../motion';
 import { formatUpdated, typeFallbackIcon, typeLabel } from './columns';
 import type { KanbanCardData } from './columns';
 
-const tagCache = new Map<string, string[]>();
-let coreOffline = false;
+interface TagCacheEntry {
+  updated: string;
+  tags: string[];
+}
 
-function tagKey(ref: string, updated: string): string {
-  return `${ref}@${updated}`;
+const tagCache = new Map<string, TagCacheEntry>();
+const CORE_RETRY_MS = 15_000;
+let coreOfflineUntil = 0;
+
+function cachedTags(ref: string, updated: string): string[] | undefined {
+  const entry = tagCache.get(ref);
+  return entry !== undefined && entry.updated === updated ? entry.tags : undefined;
 }
 
 function useCardTags(ref: string, updated: string, elementRef: RefObject<HTMLElement | null>): string[] {
-  const key = tagKey(ref, updated);
-  const [tags, setTags] = useState<string[]>(() => tagCache.get(key) ?? []);
+  const [tags, setTags] = useState<string[]>(() => cachedTags(ref, updated) ?? []);
 
   useEffect(() => {
-    const cached = tagCache.get(key);
+    const cached = cachedTags(ref, updated);
     if (cached !== undefined) {
       setTags(cached);
       return;
     }
-    if (coreOffline) {
+    if (Date.now() < coreOfflineUntil) {
       return;
     }
     const element = elementRef.current;
@@ -37,7 +43,7 @@ function useCardTags(ref: string, updated: string, elementRef: RefObject<HTMLEle
     let started = false;
 
     const load = async () => {
-      if (started || coreOffline) {
+      if (started || Date.now() < coreOfflineUntil) {
         return;
       }
       started = true;
@@ -45,15 +51,15 @@ function useCardTags(ref: string, updated: string, elementRef: RefObject<HTMLEle
         const response = await commands.noteRead({ ref, maxChars: 1 });
         const raw = response.frontmatter.tags;
         const list = Array.isArray(raw) ? raw.filter((tag): tag is string => typeof tag === 'string') : [];
-        tagCache.set(key, list);
+        tagCache.set(ref, { updated, tags: list });
         if (!cancelled) {
           setTags(list);
         }
       } catch (error) {
         if (isGraphiteError(error) && error.code === 'UNAVAILABLE') {
-          coreOffline = true;
+          coreOfflineUntil = Date.now() + CORE_RETRY_MS;
         } else {
-          tagCache.set(key, []);
+          tagCache.set(ref, { updated, tags: [] });
         }
       }
     };
@@ -75,7 +81,7 @@ function useCardTags(ref: string, updated: string, elementRef: RefObject<HTMLEle
       cancelled = true;
       observer.disconnect();
     };
-  }, [key, ref, elementRef]);
+  }, [ref, updated, elementRef]);
 
   return tags;
 }

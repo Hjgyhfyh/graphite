@@ -1272,9 +1272,9 @@ pub fn bundle_create(params: BundleCreateParams) -> Result<BundleCreateResponse,
 pub fn idea_to_tasks(params: IdeaToTasksParams) -> Result<IdeaToTasksResponse, GraphiteError> {
     with_core(|s| {
         let p: ai::IdeaToTasksParams = convert(&params)?;
-        let resp = ai::idea_to_tasks(&s.root, &s.index, &p).map_err(core_err)?;
-        if p.create_plan == Some(true) {
-            let _ = s.index.rebuild(&s.root);
+        let (resp, plan_op) = ai::idea_to_tasks(&s.root, &s.index, &p).map_err(core_err)?;
+        if let Some(op) = plan_op {
+            after_mutation(s, &op);
         }
         convert(&resp)
     })

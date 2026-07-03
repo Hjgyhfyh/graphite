@@ -565,7 +565,7 @@ pub fn idea_to_tasks(
     root: &Path,
     index: &Index,
     params: &IdeaToTasksParams,
-) -> Result<IdeaToTasksResponse, VaultError> {
+) -> Result<(IdeaToTasksResponse, Option<JournalOp>), VaultError> {
     let (source_text, source) = if let Some(text) = &params.text {
         (text.clone(), None)
     } else if let Some(r) = &params.r#ref {
@@ -580,20 +580,20 @@ pub fn idea_to_tasks(
 
     let tasks = parse_idea_lines(&source_text);
 
-    let plan_ref = if params.create_plan.unwrap_or(false) && !tasks.is_empty() {
+    let (plan_ref, plan_op) = if params.create_plan.unwrap_or(false) && !tasks.is_empty() {
         let plan_params = idea_plan_params(&tasks, source.as_ref());
         let opts = TxnOpts {
             actor: Actor::Assistant,
             tool: Some("idea_to_tasks".to_string()),
             session: None,
         };
-        let (resp, _op) = super::planning::plan_create(root, index, &plan_params, &opts)?;
-        Some(resp.r#ref)
+        let (resp, op) = super::planning::plan_create(root, index, &plan_params, &opts)?;
+        (Some(resp.r#ref), Some(op))
     } else {
-        None
+        (None, None)
     };
 
-    Ok(IdeaToTasksResponse { tasks, plan_ref })
+    Ok((IdeaToTasksResponse { tasks, plan_ref }, plan_op))
 }
 
 /// Параметры плана из черновиков идеи: одна стадия «План» с задачами и связь
@@ -701,7 +701,7 @@ fn upsert_section(
 ) -> Result<String, VaultError> {
     let clean = normalize_block_content(content, eol);
     let block = format!("## {heading}{eol}{eol}{clean}{eol}");
-    match parser::find_section(&body, heading)? {
+    match find_h2_section(&body, heading)? {
         Some((start, end)) => {
             let mut out = String::with_capacity(body.len() + block.len());
             out.push_str(&body[..start]);
@@ -727,6 +727,28 @@ fn upsert_section(
             Ok(out)
         }
     }
+}
+
+/// Границы существующей секции строго по H2-заголовку: совпадение по `level==2`
+/// и нормализованному тексту, а не по любому заголовку/подстроке в теле — иначе
+/// одноимённый H1/H3 или слово «Цель»/«Риски» в тексте дали бы ложную цель
+/// апсерта. Конец секции — следующий заголовок уровня ≤2 (или конец тела).
+fn find_h2_section(body: &str, heading: &str) -> Result<Option<(usize, usize)>, VaultError> {
+    let headings = parser::extract_headings(body)?;
+    let wanted = parser::normalize_for_compare(heading);
+    let Some(pos) = headings
+        .iter()
+        .position(|h| h.level == 2 && parser::normalize_for_compare(&h.text) == wanted)
+    else {
+        return Ok(None);
+    };
+    let start = headings[pos].pos as usize;
+    let end = headings[pos + 1..]
+        .iter()
+        .find(|h| h.level <= 2)
+        .map(|h| h.pos as usize)
+        .unwrap_or(body.len());
+    Ok(Some((start, end)))
 }
 
 fn normalize_block_content(content: &str, eol: &str) -> String {

@@ -65,6 +65,9 @@ pub fn tasks_query(
     let limit = params
         .limit
         .unwrap_or(crate::model::limits::TASKS_LIMIT_DEFAULT) as usize;
+    if limit == 0 {
+        return Ok(TasksQueryResponse { tasks: Vec::new() });
+    }
 
     let mut hits = Vec::new();
     for task in all {

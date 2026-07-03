@@ -420,6 +420,11 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       }
     })();
     pendingSaves.set(noteRef, run);
+    void run.finally(() => {
+      if (pendingSaves.get(noteRef) === run) {
+        pendingSaves.delete(noteRef);
+      }
+    });
     await run;
   }, [isWelcome, noteRef, tabId, setDirty, reconcileConflict]);
 
@@ -584,7 +589,6 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
             applyDisk(res.content, res.rev, true);
             return;
           }
-          baseRevRef.current = res.rev;
           useUiStore.getState().pushToast({
             kind: 'info',
             text: `«${titleFromRef(noteRef)}» изменена извне`,

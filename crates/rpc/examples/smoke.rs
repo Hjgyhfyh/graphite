@@ -79,6 +79,7 @@ async fn main() {
     call(&mut c, "link_add", json!({ "from": cref, "to": "path:Проекты/Блог/_index.md", "type": "related", "context": "смоук" })).await;
     call(&mut c, "link_remove", json!({ "from": cref, "to": "path:Проекты/Блог/_index.md", "type": "related" })).await;
     call(&mut c, "note_rename", json!({ "ref": cref, "newTitle": "Смоук заметка 2" })).await;
+    call(&mut c, "note_move", json!({ "ref": "path:Входящие/Смоук заметка 2.md", "newParent": "path:Проекты" })).await;
 
     println!("\n== задачи ==");
     call(&mut c, "task_check", json!({ "tasks": [{ "id": "t-a1b2", "done": true }] })).await;
