@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { createEditor } from '@graphite/editor';
+import { commands, isGraphiteError } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
 import { titleFromRef, useTabsStore } from '../../stores/tabsStore';
+import { useUiStore } from '../../stores/uiStore';
 
 export const WELCOME_NOTE_REF: NoteRef = 'path:Добро пожаловать.md';
 
@@ -13,7 +15,7 @@ markdown-файлами в вашей папке — без облака и по
 ## С чего начать
 
 - Нажмите \`Ctrl+K\` — командная палитра
-- \`Ctrl+Alt+Space\` — быстрая заметка из любого места
+- Кнопка «+» над деревом — новая заметка
 - Связывайте мысли двойными скобками: [[Моя первая заметка]]
 
 ## Задачи
@@ -39,16 +41,64 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
     if (host === null) {
       return;
     }
-    const initialDoc = noteRef === WELCOME_NOTE_REF ? WELCOME_DOC : `# ${titleFromRef(noteRef)}\n\n`;
-    const editor = createEditor(host, {
-      initialDoc,
-      onChange: (doc) => {
-        setDirty(tabId, doc !== initialDoc);
-      },
-    });
-    editor.focus();
+    let disposed = false;
+    let editor: ReturnType<typeof createEditor> | undefined;
+    let saveTimer: number | undefined;
+    let baseRev = '';
+    const isWelcome = noteRef === WELCOME_NOTE_REF;
+
+    const save = async (doc: string) => {
+      try {
+        const res = await commands.bufferSave({ ref: noteRef, baseRev, content: doc });
+        baseRev = res.revNew;
+        setDirty(tabId, false);
+      } catch (error) {
+        useUiStore.getState().pushToast({
+          kind: 'error',
+          text: isGraphiteError(error) ? error.message : 'Не удалось сохранить заметку',
+        });
+      }
+    };
+
+    const mount = (doc: string) => {
+      if (disposed) {
+        return;
+      }
+      editor = createEditor(host, {
+        initialDoc: doc,
+        onChange: (next) => {
+          if (isWelcome) {
+            return;
+          }
+          setDirty(tabId, true);
+          window.clearTimeout(saveTimer);
+          saveTimer = window.setTimeout(() => {
+            void save(next);
+          }, 600);
+        },
+      });
+      editor.focus();
+    };
+
+    if (isWelcome) {
+      mount(WELCOME_DOC);
+    } else {
+      commands.noteRead({ ref: noteRef }).then(
+        (res) => {
+          baseRev = res.rev;
+          mount(res.content);
+        },
+        (error: unknown) => {
+          const reason = isGraphiteError(error) ? error.message : 'не удалось прочитать заметку';
+          mount(`# ${titleFromRef(noteRef)}\n\n> ${reason}\n`);
+        },
+      );
+    }
+
     return () => {
-      editor.destroy();
+      disposed = true;
+      window.clearTimeout(saveTimer);
+      editor?.destroy();
     };
   }, [tabId, noteRef, setDirty]);
 

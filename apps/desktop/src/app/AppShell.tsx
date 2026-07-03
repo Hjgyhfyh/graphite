@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { X } from 'lucide-react';
-import { TooltipProvider, cx } from '@graphite/ui';
-import { GRAPHITE_EVENT, isTauriAvailable } from '@graphite/bindings';
+import { Button, TooltipProvider, cx } from '@graphite/ui';
+import { GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { IndexProgressEvent, NoteChangedEvent, UiOpenNoteEvent } from '@graphite/bindings';
 import { CommandPalette } from '../components/palette/CommandPalette';
 import { EditorPane, WELCOME_NOTE_REF } from '../components/editor/EditorPane';
@@ -61,6 +62,57 @@ function EmptyCenter() {
   return <div className="flex flex-1 items-center justify-center text-ui text-text-2">Нет открытых вкладок</div>;
 }
 
+function VaultGate() {
+  const openVault = useVaultStore((s) => s.openVault);
+  const createVault = useVaultStore((s) => s.createVault);
+  const pushToast = useUiStore((s) => s.pushToast);
+
+  const pick = async (create: boolean) => {
+    try {
+      const selected = await invoke<string | null>('plugin:dialog|open', {
+        options: {
+          directory: true,
+          multiple: false,
+          title: create ? 'Где создать хранилище' : 'Папка с заметками',
+        },
+      });
+      if (typeof selected !== 'string') {
+        return;
+      }
+      if (create) {
+        await createVault(selected);
+      } else {
+        await openVault(selected);
+      }
+      pushToast({ kind: 'success', text: 'Хранилище подключено' });
+    } catch (error) {
+      pushToast({
+        kind: 'error',
+        text: isGraphiteError(error) ? error.message : 'Не удалось открыть хранилище',
+      });
+    }
+  };
+
+  return (
+    <main className="flex min-w-0 flex-1 flex-col items-center justify-center gap-6 bg-bg-0">
+      <div className="flex flex-col items-center gap-2.5 text-center">
+        <h1 className="text-[26px] font-semibold tracking-tight text-text-0">Graphite</h1>
+        <p className="max-w-sm text-ui leading-relaxed text-text-1">
+          Заметки живут обычными markdown-файлами в вашей папке. Выберите её — и поехали.
+        </p>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <Button variant="primary" onClick={() => void pick(true)}>
+          Создать хранилище
+        </Button>
+        <Button variant="ghost" onClick={() => void pick(false)}>
+          Открыть папку
+        </Button>
+      </div>
+    </main>
+  );
+}
+
 export function AppShell() {
   const treeWidth = useUiStore((s) => s.treeWidth);
   const setTreeWidth = useUiStore((s) => s.setTreeWidth);
@@ -69,6 +121,7 @@ export function AppShell() {
   const tabs = useTabsStore((s) => s.tabs);
   const activeId = useTabsStore((s) => s.activeId);
   const activeTab = tabs.find((tab) => tab.id === activeId);
+  const vaultInfo = useVaultStore((s) => s.info);
 
   useEffect(() => {
     useVaultStore.getState().openNote(WELCOME_NOTE_REF);
@@ -126,14 +179,18 @@ export function AppShell() {
         <div className="flex min-h-0 flex-1">
           <Rail />
           <TreePanel width={treeWidth} onWidthChange={setTreeWidth} />
-          <main className="flex min-w-0 flex-1 flex-col bg-bg-0">
-            <TabBar />
-            {activeTab !== undefined ? (
-              <EditorPane key={activeTab.id} tabId={activeTab.id} noteRef={activeTab.noteRef} />
-            ) : (
-              <EmptyCenter />
-            )}
-          </main>
+          {vaultInfo === undefined ? (
+            <VaultGate />
+          ) : (
+            <main className="flex min-w-0 flex-1 flex-col bg-bg-0">
+              <TabBar />
+              {activeTab !== undefined ? (
+                <EditorPane key={activeTab.id} tabId={activeTab.id} noteRef={activeTab.noteRef} />
+              ) : (
+                <EmptyCenter />
+              )}
+            </main>
+          )}
           {rightPanelOpen ? <RightPanel tab={rightPanelTab} /> : null}
         </div>
         <StatusBar />

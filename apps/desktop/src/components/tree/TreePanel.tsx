@@ -1,6 +1,7 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { FileText } from 'lucide-react';
+import { FileText, Plus } from 'lucide-react';
 import { Kbd } from '@graphite/ui';
+import { commands } from '@graphite/bindings';
 import { useVaultStore } from '../../stores/vaultStore';
 
 export interface TreePanelProps {
@@ -27,6 +28,17 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const tree = useVaultStore((s) => s.tree);
   const openNote = useVaultStore((s) => s.openNote);
   const currentRef = useVaultStore((s) => s.currentRef);
+  const vaultReady = useVaultStore((s) => s.info !== undefined);
+
+  const createNote = async () => {
+    try {
+      const res = await commands.noteCreate({ title: 'Новая заметка' });
+      await useVaultStore.getState().loadTree();
+      useVaultStore.getState().openNote(res.ref);
+    } catch {
+      // хранилище ещё не открыто — кнопка скрыта, сюда не попадаем
+    }
+  };
 
   const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -49,7 +61,19 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       style={{ width }}
       aria-label="Дерево заметок"
     >
-      <header className="flex h-9 shrink-0 items-center px-4 text-caption text-text-2">Заметки</header>
+      <header className="flex h-9 shrink-0 items-center justify-between px-4 text-caption text-text-2">
+        <span>Заметки</span>
+        {vaultReady ? (
+          <button
+            type="button"
+            aria-label="Новая заметка"
+            onClick={() => void createNote()}
+            className="rounded-xs p-1 text-text-2 hover:bg-bg-3 hover:text-text-0"
+          >
+            <Plus size={14} strokeWidth={1.75} />
+          </button>
+        ) : null}
+      </header>
       {tree.length === 0 ? (
         <EmptyState />
       ) : (

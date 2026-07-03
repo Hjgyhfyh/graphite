@@ -18,6 +18,8 @@ export interface VaultStore {
   indexStatus: IndexStatus;
   loadInfo(): Promise<void>;
   loadTree(root?: NoteRef): Promise<void>;
+  openVault(path: string): Promise<void>;
+  createVault(path: string): Promise<void>;
   openNote(ref: NoteRef): void;
   applyNoteChanged(e: NoteChangedEvent): void;
   setIndexStatus(s: IndexProgressEvent): void;
@@ -44,6 +46,16 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     } catch {
       set({ tree: [] });
     }
+  },
+  openVault: async (path) => {
+    const info = await commands.vaultOpen(path);
+    set({ info });
+    await get().loadTree();
+  },
+  createVault: async (path) => {
+    const info = await commands.vaultCreate(path);
+    set({ info });
+    await get().loadTree();
   },
   openNote: (ref) => {
     useTabsStore.getState().open(ref);

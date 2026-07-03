@@ -25,6 +25,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
+ulid = { workspace = true }
 vault-core = { path = "../../../crates/vault-core" }
 history = { path = "../../../crates/history" }
 rpc = { path = "../../../crates/rpc" }

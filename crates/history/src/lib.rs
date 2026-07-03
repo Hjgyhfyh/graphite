@@ -5,7 +5,10 @@ pub mod snapshot;
 pub mod undo;
 
 pub use error::HistoryError;
-pub use journal::{append_op, read_ops};
+pub use journal::{
+    activity, append_op, mark_undone, new_op_id, now_ts, read_op, read_ops, read_session_ops,
+    JournalFilter,
+};
 pub use model::{Actor, FileChange, JournalOp};
-pub use snapshot::snapshot_file;
-pub use undo::{undo_plan, FileRestore, UndoPlan};
+pub use snapshot::{hash_hex, labeled_hash};
+pub use undo::{undo_plan, undo_session_plan, FileRestore, UndoPlan};
