@@ -1,0 +1,878 @@
+{
+  "vault": "tests/fixtures/vault",
+  "format": "docs/vault-format.md (vault_format 1)",
+  "not_indexed": [
+    ".graphite/settings.json",
+    ".trash/Удалённая заметка.md",
+    "_assets/2026/07/01KWKKAGXGVRKTY26YE96NR3MS.png"
+  ],
+  "files": [
+    {
+      "file": "Входящие/Быстрая мысль.md",
+      "id": null,
+      "type": "note",
+      "status": "inbox",
+      "title": "Быстрая мысль",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Входящие/Совсем без frontmatter.md",
+      "id": null,
+      "type": "note",
+      "status": null,
+      "title": "Совсем без frontmatter",
+      "tasks": [
+        {
+          "anchor": null,
+          "text": "Разобрать эту заметку",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": "normal",
+          "every": null
+        }
+      ],
+      "links": [
+        {
+          "raw": "[[Тёмная тема]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Черновик без метаданных"
+        }
+      ],
+      "tags": [
+        "входящие"
+      ]
+    },
+    {
+      "file": "Проекты/_index.md",
+      "id": "01KWKK9KM07MQT3YZJZDBWJ647",
+      "type": "note",
+      "status": "active",
+      "title": "Проекты",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Приложение заметок]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Проекты"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Проекты/Приложение заметок/_index.md",
+      "id": "01KWKK9MK8AKM3AECZ8W7CGJZ9",
+      "type": "project",
+      "status": "active",
+      "title": "Приложение заметок",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[id:01KWKK9KM07MQT3YZJZDBWJ647|Проекты]]",
+          "form": "id|alias",
+          "rel": "part_of"
+        },
+        {
+          "raw": "[[План MVP]]",
+          "form": "title",
+          "rel": "depends_on"
+        },
+        {
+          "raw": "[[Идеи]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[План MVP]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Приложение заметок"
+        },
+        {
+          "level": 2,
+          "text": "Принципы"
+        }
+      ],
+      "tags": [
+        "проект/приложение",
+        "mvp"
+      ]
+    },
+    {
+      "file": "Проекты/Приложение заметок/Идеи/_index.md",
+      "id": "01KWKK9NJG948JCPED0Q3MNR6T",
+      "type": "note",
+      "status": "shaping",
+      "title": "Идеи",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Тёмная тема]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[Ёжик в тумане]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Идеи"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Проекты/Приложение заметок/Идеи/Тёмная тема.md",
+      "id": "01KWKK9PHRG3EBGPKXNQ3M2EP2",
+      "type": "note",
+      "status": "planned",
+      "title": "Тёмная тема",
+      "tasks": [],
+      "links": [],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Тёмная тема"
+        },
+        {
+          "level": 2,
+          "text": "Палитра"
+        },
+        {
+          "level": 2,
+          "text": "Триггеры"
+        }
+      ],
+      "tags": [
+        "дизайн"
+      ]
+    },
+    {
+      "file": "Проекты/Приложение заметок/Идеи/Ёжик в тумане.md",
+      "id": "01KWKK9QH06HS6C834FBREW50T",
+      "type": "note",
+      "status": "inbox",
+      "title": "Ёжик в тумане",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Тёмная тема#Палитра|про палитру]]",
+          "form": "title#heading|alias"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Ёжик в тумане"
+        }
+      ],
+      "tags": [
+        "метафоры"
+      ]
+    },
+    {
+      "file": "Проекты/Приложение заметок/План MVP.md",
+      "id": "01KWKK9RG8FSTPM4X2APC8X4AB",
+      "type": "plan",
+      "status": "active",
+      "title": "План MVP",
+      "tasks": [
+        {
+          "anchor": "t-8f2k",
+          "text": "Выбрать платформу",
+          "state": "todo",
+          "done": false,
+          "due": "2026-07-15",
+          "priority": "high",
+          "every": "mon"
+        },
+        {
+          "anchor": "t-9m3q",
+          "text": "Завести репозиторий",
+          "state": "done",
+          "done": true,
+          "due": null,
+          "priority": "normal",
+          "every": null
+        },
+        {
+          "anchor": "t-k7w2",
+          "text": "Индекс SQLite",
+          "state": "todo",
+          "done": false,
+          "due": "2026-07-20",
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": "t-cm6a",
+          "text": "Прототип CodeMirror",
+          "state": "doing",
+          "done": false,
+          "due": null,
+          "priority": "high",
+          "every": null
+        },
+        {
+          "anchor": "t-tp2x",
+          "text": "Вариант на TipTap",
+          "state": "dropped",
+          "done": false,
+          "due": null,
+          "priority": "low",
+          "every": null
+        }
+      ],
+      "links": [
+        {
+          "raw": "[[Приложение заметок]]",
+          "form": "title",
+          "rel": "part_of"
+        },
+        {
+          "raw": "[[Приложение заметок]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "План MVP"
+        },
+        {
+          "level": 2,
+          "text": "Этап 1 — каркас"
+        },
+        {
+          "level": 2,
+          "text": "Этап 2 — редактор"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Journal/2026/07/2026-07-03.md",
+      "id": "01KWKK9SFG6HCAAAGA4KKSS7M7",
+      "type": "journal",
+      "status": null,
+      "title": "2026-07-03",
+      "tasks": [
+        {
+          "anchor": null,
+          "text": "Записать итоги дня",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": "low",
+          "every": null
+        }
+      ],
+      "links": [
+        {
+          "raw": "[[План MVP|план]]",
+          "form": "title|alias"
+        },
+        {
+          "raw": "![[План MVP#^t-8f2k]]",
+          "form": "!title#^block"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "2026-07-03"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Статусы/Статус inbox.md",
+      "id": "01KWKK9TERBJP7YDMYS3EGTH2W",
+      "type": "note",
+      "status": "inbox",
+      "title": "Статус inbox",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Статусы/Статус shaping.md",
+      "id": "01KWKK9VE0BC9NBM0N6Z2XXHBP",
+      "type": "note",
+      "status": "shaping",
+      "title": "Статус shaping",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Статусы/Статус planned.md",
+      "id": "01KWKK9WD8P3R27CXVQMZYNZBC",
+      "type": "note",
+      "status": "planned",
+      "title": "Статус planned",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Статусы/Статус active.md",
+      "id": "01KWKK9XCGKGTV97QWSTPX0RWN",
+      "type": "note",
+      "status": "active",
+      "title": "Статус active",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Статусы/Статус done.md",
+      "id": "01KWKK9YBRMB8WZDZZX0MP07GG",
+      "type": "note",
+      "status": "done",
+      "title": "Статус done",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Статусы/Статус iced.md",
+      "id": "01KWKK9ZB0C0N8A2AZN0Q1G1N7",
+      "type": "note",
+      "status": "iced",
+      "title": "Статус iced",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Задачи/Задача-файл todo.md",
+      "id": "01KWKKA0A8AMGKB2FCS3SVA1CY",
+      "type": "task",
+      "status": "todo",
+      "title": "Задача-файл todo",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Задачи/Задача-файл doing.md",
+      "id": "01KWKKA19G7Z3A4QQ4KAXDJF3K",
+      "type": "task",
+      "status": "doing",
+      "title": "Задача-файл doing",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Задачи/Задача-файл done.md",
+      "id": "01KWKKA28RHKKA3ZNNDFXWCR18",
+      "type": "task",
+      "status": "done",
+      "title": "Задача-файл done",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Задачи/Задача-файл dropped.md",
+      "id": "01KWKKA3809DPPS2B91T7H6NFA",
+      "type": "task",
+      "status": "dropped",
+      "title": "Задача-файл dropped",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Задачи/Все аннотации.md",
+      "id": "01KWKKA4785PRE024EK6AZGNBE",
+      "type": "note",
+      "status": "active",
+      "title": "Все аннотации",
+      "tasks": [
+        {
+          "anchor": "t-fa11",
+          "text": "Полный набор",
+          "state": "todo",
+          "done": false,
+          "due": "2026-07-15",
+          "priority": "high",
+          "every": "mon"
+        },
+        {
+          "anchor": "t-dd42",
+          "text": "Только срок",
+          "state": "todo",
+          "done": false,
+          "due": "2026-07-10",
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": "t-pr9x",
+          "text": "Только приоритет",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": "urgent",
+          "every": null
+        },
+        {
+          "anchor": "t-ev7q",
+          "text": "Повтор по будням",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": null,
+          "every": "weekday"
+        },
+        {
+          "anchor": "t-md1e",
+          "text": "Согласовать бюджет на сервера",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": "high",
+          "every": null
+        },
+        {
+          "anchor": "t-rv3m",
+          "text": "Аннотации в обратном порядке",
+          "state": "todo",
+          "done": false,
+          "due": "2026-09-01",
+          "priority": "low",
+          "every": null
+        },
+        {
+          "anchor": "t-dn5k",
+          "text": "Выполнена с аннотациями",
+          "state": "done",
+          "done": true,
+          "due": "2026-07-01",
+          "priority": "normal",
+          "every": null
+        },
+        {
+          "anchor": null,
+          "text": "Без якоря",
+          "state": "todo",
+          "done": false,
+          "due": "2026-08-01",
+          "priority": "high",
+          "every": null
+        },
+        {
+          "anchor": null,
+          "text": "Совсем голая задача",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": null,
+          "every": null
+        }
+      ],
+      "links": [],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Задачи со всеми аннотациями"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Задачи/Вложенные чекбоксы.md",
+      "id": "01KWKKA56G5JV7554WZQ8DK17V",
+      "type": "note",
+      "status": "active",
+      "title": "Вложенные чекбоксы",
+      "tasks": [
+        {
+          "anchor": "t-r00t",
+          "text": "Родитель",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": "t-ch1d",
+          "text": "Ребёнок готов",
+          "state": "done",
+          "done": true,
+          "due": null,
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": null,
+          "text": "Ребёнок в очереди",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": null,
+          "text": "Внук без якоря",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": "low",
+          "every": null
+        },
+        {
+          "anchor": "t-st4r",
+          "text": "Маркер-звёздочка",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": null,
+          "text": "Маркер-плюс",
+          "state": "todo",
+          "done": false,
+          "due": null,
+          "priority": null,
+          "every": null
+        },
+        {
+          "anchor": "t-nm8b",
+          "text": "Нумерованная задача",
+          "state": "todo",
+          "done": false,
+          "due": "2026-07-30",
+          "priority": null,
+          "every": null
+        }
+      ],
+      "links": [],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Дерево задач"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Связи/Цель с алиасами.md",
+      "id": "01KWKKA65RNND71S1XYAXY74YT",
+      "type": "note",
+      "status": "shaping",
+      "title": "Цель с алиасами",
+      "tasks": [],
+      "links": [],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Цель с алиасами"
+        },
+        {
+          "level": 2,
+          "text": "Секция вторая"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Связи/Все формы ссылок.md",
+      "id": "01KWKKA7501B9KQJQHJG7GRSZH",
+      "type": "note",
+      "status": "shaping",
+      "title": "Все формы ссылок",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Тёмная тема]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[Тёмная тема#Палитра]]",
+          "form": "title#heading"
+        },
+        {
+          "raw": "[[Тёмная тема#^b3k9q]]",
+          "form": "title#^block"
+        },
+        {
+          "raw": "[[Тёмная тема|как красят тьму]]",
+          "form": "title|alias"
+        },
+        {
+          "raw": "[[id:01KWKK9PHRG3EBGPKXNQ3M2EP2|та же тема по id]]",
+          "form": "id|alias"
+        },
+        {
+          "raw": "[[id:01KWKK9PHRG3EBGPKXNQ3M2EP2]]",
+          "form": "id"
+        },
+        {
+          "raw": "[[поисковый-mvp]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[Проекты/Приложение заметок/План MVP|план по пути]]",
+          "form": "path|alias"
+        },
+        {
+          "raw": "[[Цель с алиасами#Секция вторая|про вторую секцию]]",
+          "form": "title#heading|alias"
+        },
+        {
+          "raw": "[[Цель с алиасами#^q7w8e|точный абзац]]",
+          "form": "title#^block|alias"
+        },
+        {
+          "raw": "![[Тёмная тема#Палитра]]",
+          "form": "!title#heading"
+        },
+        {
+          "raw": "![[Ёжик в тумане]]",
+          "form": "!title"
+        },
+        {
+          "raw": "[[Несуществующая заметка]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Все формы ссылок"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Связи/Ссылки с ё и регистром.md",
+      "id": "01KWKKA8484BMQJJBCCQNBGGYR",
+      "type": "note",
+      "status": "inbox",
+      "title": "Ссылки с ё и регистром",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Ежик в тумане]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[ТЁМНАЯ ТЕМА]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[ Тёмная тема ]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[тЁмНаЯ тЕмА|регистр не важен]]",
+          "form": "title|alias"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Нормализация при резолвинге"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Теги/Инлайн-теги.md",
+      "id": "01KWKKA93G41K5NYCFZQ3JZ7CR",
+      "type": "note",
+      "status": "inbox",
+      "title": "Инлайн-теги",
+      "tasks": [],
+      "links": [],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Теги"
+        }
+      ],
+      "tags": [
+        "из-frontmatter",
+        "тег",
+        "вложенный/тег",
+        "tag-mix_2"
+      ]
+    },
+    {
+      "file": "Край/Очень длинное имя заметки как файловая система и индексатор переживают больше ста символов кириллицы в имени файла.md",
+      "id": "01KWKKAA2RB3H3P3GJW5K74HF0",
+      "type": "note",
+      "status": "inbox",
+      "title": "Очень длинное имя заметки как файловая система и индексатор переживают больше ста символов кириллицы в имени файла",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Край/CRLF окончания строк.md",
+      "id": "01KWKKAB20V8SJ221R4HKHKJW1",
+      "type": "note",
+      "status": "shaping",
+      "title": "CRLF окончания строк",
+      "tasks": [
+        {
+          "anchor": "t-cr1f",
+          "text": "Задача внутри CRLF-файла",
+          "state": "todo",
+          "done": false,
+          "due": "2026-07-21",
+          "priority": null,
+          "every": null
+        }
+      ],
+      "links": [
+        {
+          "raw": "[[Тёмная тема]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Файл с CRLF"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Край/Пустой файл.md",
+      "id": null,
+      "type": "note",
+      "status": null,
+      "title": "Пустой файл",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": []
+    },
+    {
+      "file": "Край/Только frontmatter.md",
+      "id": "01KWKKAC18XFBNDG81BSSDEXRV",
+      "type": "note",
+      "status": "iced",
+      "title": "Только frontmatter",
+      "tasks": [],
+      "links": [],
+      "headings": [],
+      "tags": [
+        "пустое-тело"
+      ]
+    },
+    {
+      "file": "Край/Эмодзи в теле.md",
+      "id": "01KWKKAD0GA0MM22BBF81RTHRT",
+      "type": "note",
+      "status": "active",
+      "title": "Эмодзи в теле",
+      "tasks": [
+        {
+          "anchor": "t-em0j",
+          "text": "Отпраздновать релиз 🎉",
+          "state": "done",
+          "done": true,
+          "due": null,
+          "priority": null,
+          "every": null
+        }
+      ],
+      "links": [],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Планы 🚀"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Край/Таблица.md",
+      "id": "01KWKKADZR5WSJXZTGJWY7K64K",
+      "type": "note",
+      "status": "planned",
+      "title": "Таблица",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Тёмная тема]]",
+          "form": "title"
+        },
+        {
+          "raw": "[[Ёжик в тумане\\|ёж]]",
+          "form": "title|alias"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Сравнение"
+        }
+      ],
+      "tags": []
+    },
+    {
+      "file": "Край/Код-блок с не-ссылкой.md",
+      "id": "01KWKKAEZ04T84BFXF1Q4Z3D81",
+      "type": "note",
+      "status": "shaping",
+      "title": "Код-блок с не-ссылкой",
+      "tasks": [],
+      "links": [
+        {
+          "raw": "[[Цель с алиасами]]",
+          "form": "title"
+        }
+      ],
+      "headings": [
+        {
+          "level": 1,
+          "text": "Код и экранирование"
+        }
+      ],
+      "tags": [
+        "настоящий"
+      ]
+    }
+  ]
+}
