@@ -198,8 +198,95 @@ fn mount_vault(path: &str, create: bool) -> Result<VaultInfoResponse, GraphiteEr
     let db = root.join(".graphite").join("index.db");
     let mut index = Index::open(&db).map_err(core_err)?;
     index.rebuild(&root).map_err(core_err)?;
+    crate::runtime::save_last_vault(&root);
     *core_cell().lock().unwrap() = Some(CoreState { root, index });
     vault_info_impl()
+}
+
+/// Монтирует последний открытый vault на старте приложения. Тихо пропускает
+/// отсутствие сохранённого пути или недоступную папку, чтобы старт без vault
+/// не падал — ядро просто ждёт выбора.
+pub fn mount_saved_vault() {
+    if core_cell().lock().unwrap().is_some() {
+        return;
+    }
+    if let Some(path) = crate::runtime::load_last_vault() {
+        if path.is_dir() {
+            let _ = mount_vault(&path.to_string_lossy(), false);
+        }
+    }
+}
+
+fn de<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, GraphiteError> {
+    let params = if params.is_null() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        params
+    };
+    serde_json::from_value(params).map_err(|e| {
+        gerr(
+            GraphiteErrorCode::Validation,
+            format!("некорректные параметры: {e}"),
+            Some("проверь форму аргументов метода"),
+        )
+    })
+}
+
+fn ser<T: Serialize>(value: T) -> Result<serde_json::Value, GraphiteError> {
+    serde_json::to_value(value)
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("сериализация ответа: {e}"), None))
+}
+
+/// Единый диспетчер методов ядра: имя метода → типизированная команда. Общий
+/// путь для Tauri-обёрток (через свои сигнатуры) и pipe-Handler (по имени).
+/// `hello`, `ui_open_note`, `ui_flash_note` обслуживает приложение, не ядро.
+pub fn dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::Value, GraphiteError> {
+    match method {
+        "vault_info" => ser(vault_info()?),
+        "vault_tree" => ser(vault_tree(de(params)?)?),
+        "note_read" => ser(note_read(de(params)?)?),
+        "search" => ser(search(de(params)?)?),
+        "links_get" => ser(links_get(de(params)?)?),
+        "activity_get" => ser(activity_get(de(params)?)?),
+        "context_briefing" => ser(context_briefing()?),
+        "note_create" => ser(note_create(de(params)?)?),
+        "note_edit" => ser(note_edit(de(params)?)?),
+        "note_move" => ser(note_move(de(params)?)?),
+        "note_rename" => ser(note_rename(de(params)?)?),
+        "note_delete" => ser(note_delete(de(params)?)?),
+        "note_restore" => ser(note_restore(de(params)?)?),
+        "set_status" => ser(set_status(de(params)?)?),
+        "link_add" => ser(link_add(de(params)?)?),
+        "link_remove" => ser(link_remove(de(params)?)?),
+        "tasks_query" => ser(tasks_query(de(params)?)?),
+        "task_check" => ser(task_check(de(params)?)?),
+        "plan_create" => ser(plan_create(de(params)?)?),
+        "plan_update" => ser(plan_update(de(params)?)?),
+        "plan_progress" => ser(plan_progress(de(params)?)?),
+        "distill_context" => ser(distill_context(de(params)?)?),
+        "distill_save" => ser(distill_save(de(params)?)?),
+        "index_status" => ser(index_status()?),
+        "reindex" => {
+            let full = params.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
+            reindex(full)?;
+            ser(serde_json::json!({ "started": true }))
+        }
+        "set_icon" => ser(set_icon(de(params)?)?),
+        "note_pin" => ser(note_pin(de(params)?)?),
+        "bundle_compose" => ser(bundle_compose(de(params)?)?),
+        "bundle_create" => ser(bundle_create(de(params)?)?),
+        "idea_to_tasks" => ser(idea_to_tasks(de(params)?)?),
+        "hello" | "ui_open_note" | "ui_flash_note" => Err(gerr(
+            GraphiteErrorCode::Unavailable,
+            format!("метод «{method}» обслуживается приложением, не ядром"),
+            None,
+        )),
+        _ => Err(gerr(
+            GraphiteErrorCode::NotFound,
+            format!("неизвестный метод «{method}»"),
+            None,
+        )),
+    }
 }
 
 fn count_md_children(abs_dir: &Path) -> u32 {
@@ -832,4 +919,74 @@ pub fn idea_to_tasks(params: IdeaToTasksParams) -> Result<IdeaToTasksResponse, G
         }
         convert(&resp)
     })
+}
+
+/// Кодирует значение для query-строки URL (unreserved-символы RFC 3986 —
+/// как есть, остальные байты — в `%XX`). Ссылки содержат `:` `/` кириллицу.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// Стабильная ASCII-метка окна из ссылки: ярлыки Tauri допускают только
+/// `[a-zA-Z0-9-/:_]`, а ссылка может содержать кириллицу и пробелы.
+fn note_window_label(note_ref: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    note_ref.hash(&mut hasher);
+    format!("note-{:016x}", hasher.finish())
+}
+
+fn note_window_title(note_ref: &str) -> String {
+    let rel = note_ref.strip_prefix("path:").unwrap_or(note_ref);
+    let name = rel.rsplit(['/', '\\']).next().unwrap_or(rel);
+    let stem = name
+        .strip_suffix(".md")
+        .or_else(|| name.strip_suffix(".MD"))
+        .unwrap_or(name);
+    if stem.is_empty() {
+        "Graphite".to_string()
+    } else {
+        format!("{stem} — Graphite")
+    }
+}
+
+/// Выносит заметку в отдельное webview-окно (фича #16). Повторный вызов для той
+/// же ссылки фокусирует уже открытое окно, а не плодит дубликаты.
+#[tauri::command]
+#[specta::specta]
+pub fn open_note_window(app: tauri::AppHandle, note_ref: String) -> Result<(), GraphiteError> {
+    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+    let label = note_window_label(&note_ref);
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.unminimize();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url = format!("index.html?window=note&ref={}", percent_encode(&note_ref));
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+        .title(note_window_title(&note_ref))
+        .inner_size(760.0, 720.0)
+        .min_inner_size(420.0, 320.0)
+        .center()
+        .build()
+        .map_err(|e| {
+            gerr(
+                GraphiteErrorCode::Unavailable,
+                format!("не удалось открыть окно заметки: {e}"),
+                Some("проверь, что приложение запущено"),
+            )
+        })?;
+    Ok(())
 }

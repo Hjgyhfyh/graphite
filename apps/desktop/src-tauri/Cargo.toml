@@ -16,7 +16,7 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { workspace = true, features = ["specta"] }
+tauri = { workspace = true, features = ["specta", "tray-icon"] }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 tauri-plugin-global-shortcut = { workspace = true }

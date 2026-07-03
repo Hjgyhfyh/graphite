@@ -1,4 +1,4 @@
-//! Реестр методов IPC (CONTRACT §3 + §4.3): 25 инструментов и служебные методы.
+//! Реестр методов IPC (CONTRACT §3 + §4.3): 30 инструментов и служебные методы.
 //! Флаги RO/D/I — из таблицы §3; таймауты клиента — из §4.4.
 
 use std::time::Duration;
@@ -33,7 +33,7 @@ const fn service(name: &'static str, read_only: bool, idempotent: bool) -> Metho
     }
 }
 
-pub const METHODS: [MethodSpec; 28] = [
+pub const METHODS: [MethodSpec; 33] = [
     service("hello", false, true),
     service("index_status", true, true),
     service("reindex", false, false),
@@ -60,6 +60,11 @@ pub const METHODS: [MethodSpec; 28] = [
     tool("plan_progress", true, false, true),
     tool("distill_context", true, false, true),
     tool("distill_save", false, false, false),
+    tool("set_icon", false, false, true),
+    tool("note_pin", false, false, true),
+    tool("bundle_compose", true, false, true),
+    tool("bundle_create", false, false, false),
+    tool("idea_to_tasks", false, false, false),
     tool("ui_open_note", false, false, true),
     tool("ui_flash_note", false, false, true),
 ];
@@ -72,7 +77,7 @@ pub fn is_known(method: &str) -> bool {
     find(method).is_some()
 }
 
-/// Только 25 инструментов реестра, без служебных методов.
+/// Только 30 инструментов реестра, без служебных методов.
 pub fn tool_methods() -> impl Iterator<Item = &'static MethodSpec> {
     METHODS.iter().filter(|spec| !spec.service)
 }

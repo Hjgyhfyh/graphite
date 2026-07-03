@@ -526,3 +526,73 @@ pub struct UiNoteArgs {
     /// Адрес заметки: "id:…" или "path:…".
     pub r#ref: String,
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct SetIconArgs {
+    /// Адрес заметки: "id:…" или "path:…".
+    pub r#ref: String,
+    /// Имя иконки lucide (например "rocket"); пропуск — снять иконку.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Цвет иконки — токен палитры или hex; пропуск — снять цвет.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct NotePinArgs {
+    /// Адрес заметки: "id:…" или "path:…".
+    pub r#ref: String,
+    /// true — закрепить заметку в дереве/вкладках, false — открепить.
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct BundleComposeArgs {
+    /// Главный файл бандла: "id:…" или "path:…".
+    pub r#ref: String,
+    /// Подтянуть связанные (part_of/collected_in) как второстепенные; по умолчанию true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_linked: Option<bool>,
+    /// Бюджет символов итогового текста; по умолчанию — лимит ответа.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_chars: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct BundleCreateArgs {
+    /// Заголовок нового главного файла-инструкции бандла.
+    pub title: String,
+    /// Родитель: "id:…" или "path:…"; по умолчанию — корень.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// Второстепенные заметки — прикрепятся связью collected_in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<String>>,
+    /// Текст-инструкция главного файла: как трактовать второстепенные.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct IdeaToTasksArgs {
+    /// Заметка-источник: "id:…" или "path:…". Нужно одно из ref/text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+    /// Сырой текст идеи (строки "1 - …", "- …", "* …", "1. …"). Нужно одно из ref/text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Развернуть черновики в план со связью distilled_from; по умолчанию false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create_plan: Option<bool>,
+}

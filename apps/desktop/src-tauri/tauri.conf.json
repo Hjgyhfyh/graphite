@@ -19,10 +19,28 @@
         "resizable": true,
         "decorations": true,
         "backgroundColor": "#0D0E11"
+      },
+      {
+        "label": "capture",
+        "url": "index.html?window=capture",
+        "title": "Быстрая запись",
+        "width": 480,
+        "height": 184,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true,
+        "shadow": false
       }
     ],
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "icon": ["icons/icon.ico"]
   }
 }
