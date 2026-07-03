@@ -596,3 +596,19 @@ pub struct IdeaToTasksArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub create_plan: Option<bool>,
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct UndoOpArgs {
+    /// opId операции для отката (из journal_list).
+    pub op_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct UndoSessionArgs {
+    /// Идентификатор сессии для отката всех её операций (из journal_list).
+    pub session: String,
+}

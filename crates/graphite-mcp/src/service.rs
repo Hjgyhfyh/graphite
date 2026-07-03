@@ -395,6 +395,39 @@ impl GraphiteService {
     }
 
     #[tool(
+        name = "journal_list",
+        description = "Подробный журнал операций за период (before/after blake3 каждого файла) — детальнее activity_get. Даёт opId и session для undo.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn journal_list(
+        &self,
+        Parameters(args): Parameters<ActivityGetArgs>,
+    ) -> Result<String, ErrorData> {
+        self.proxy("journal_list", Self::to_params(&args)?).await
+    }
+
+    #[tool(
+        name = "undo_op",
+        description = "Откатывает одну операцию по opId (восстанавливает before-снапшоты её файлов). opId — из journal_list.",
+        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn undo_op(&self, Parameters(args): Parameters<UndoOpArgs>) -> Result<String, ErrorData> {
+        self.proxy("undo_op", Self::to_params(&args)?).await
+    }
+
+    #[tool(
+        name = "undo_session",
+        description = "Откатывает все операции сессии в обратном порядке одним действием. session — из journal_list.",
+        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn undo_session(
+        &self,
+        Parameters(args): Parameters<UndoSessionArgs>,
+    ) -> Result<String, ErrorData> {
+        self.proxy("undo_session", Self::to_params(&args)?).await
+    }
+
+    #[tool(
         name = "ui_open_note",
         description = "Открывает заметку в окне Graphite. GUI скрыт/закрыт → UNAVAILABLE (не ошибка сценария).",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)

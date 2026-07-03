@@ -33,7 +33,7 @@ const fn service(name: &'static str, read_only: bool, idempotent: bool) -> Metho
     }
 }
 
-pub const METHODS: [MethodSpec; 33] = [
+pub const METHODS: [MethodSpec; 36] = [
     service("hello", false, true),
     service("index_status", true, true),
     service("reindex", false, false),
@@ -65,6 +65,9 @@ pub const METHODS: [MethodSpec; 33] = [
     tool("bundle_compose", true, false, true),
     tool("bundle_create", false, false, false),
     tool("idea_to_tasks", false, false, false),
+    tool("journal_list", true, false, true),
+    tool("undo_op", false, true, true),
+    tool("undo_session", false, true, true),
     tool("ui_open_note", false, false, true),
     tool("ui_flash_note", false, false, true),
 ];

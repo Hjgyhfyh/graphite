@@ -303,6 +303,15 @@ pub fn dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::V
         "bundle_compose" => ser(bundle_compose(de(params)?)?),
         "bundle_create" => ser(bundle_create(de(params)?)?),
         "idea_to_tasks" => ser(idea_to_tasks(de(params)?)?),
+        "journal_list" => ser(journal_list(de(params)?)?),
+        "undo_op" => {
+            let op_id = params.get("opId").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            ser(undo_op(op_id)?)
+        }
+        "undo_session" => {
+            let session = params.get("session").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            ser(undo_session(session)?)
+        }
         "hello" | "ui_open_note" | "ui_flash_note" => Err(gerr(
             GraphiteErrorCode::Unavailable,
             format!("метод «{method}» обслуживается приложением, не ядром"),
