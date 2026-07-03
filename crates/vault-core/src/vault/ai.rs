@@ -490,7 +490,17 @@ pub fn bundle_create(
     }
 
     let parent_dir = match &params.parent {
-        Some(parent) => container_dir(&index.note_by_ref(parent)?.path),
+        Some(parent) => {
+            let bare = parent
+                .0
+                .strip_prefix("path:")
+                .map(|p| p.replace('\\', "/").trim_matches('/').to_string())
+                .filter(|p| !p.is_empty() && !p.to_lowercase().ends_with(".md") && root.join(p).is_dir());
+            match bare {
+                Some(dir) => dir,
+                None => container_dir(&index.note_by_ref(parent)?.path),
+            }
+        }
         None => String::new(),
     };
 
