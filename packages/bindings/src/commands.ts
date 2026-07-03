@@ -176,4 +176,7 @@ export const commands = {
   ideaToTasks(params: IdeaToTasksParams): Promise<IdeaToTasksResponse> {
     return invoke('idea_to_tasks', { params });
   },
+  openNoteWindow(noteRef: string): Promise<void> {
+    return invoke('open_note_window', { noteRef });
+  },
 } as const;

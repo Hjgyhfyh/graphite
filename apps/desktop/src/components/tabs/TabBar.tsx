@@ -5,6 +5,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ChevronDown, ChevronRight, Layers, Pin, PinOff, Plus, SquareArrowOutUpRight, X } from 'lucide-react';
 import { cx, springTransition } from '@graphite/ui';
+import { commands } from '@graphite/bindings';
 import { REDUCED_CROSSFADE, usePrefersReducedMotion } from '../../motion';
 import { usePanesStore } from '../../stores/panesStore';
 import { useTabsStore } from '../../stores/tabsStore';
@@ -103,7 +104,9 @@ function TabItem({
     normalizeOrder(paneId);
   };
   const detach = () => {
-    useUiStore.getState().pushToast({ kind: 'info', text: 'Отдельное окно — скоро' });
+    commands.openNoteWindow(tab.noteRef).catch(() => {
+      useUiStore.getState().pushToast({ kind: 'info', text: 'Отдельное окно недоступно вне приложения' });
+    });
   };
 
   return (

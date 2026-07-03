@@ -3,6 +3,7 @@ import type { DragEvent } from 'react';
 import { Columns2, PanelRightClose, Pin, SquareArrowOutUpRight, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Tooltip, cx, springTransition } from '@graphite/ui';
+import { commands } from '@graphite/bindings';
 import { MAX_PANES, usePanesStore } from '../../stores/panesStore';
 import { useTabsStore } from '../../stores/tabsStore';
 import type { Tab } from '../../stores/tabsStore';
@@ -133,22 +134,32 @@ export function PaneTabs({ paneId }: PaneTabsProps) {
     }
   };
 
+  const splitActiveToPane = () => {
+    if (activeTabId === undefined) {
+      return;
+    }
+    const newPaneId = addPane();
+    if (newPaneId === undefined) {
+      pushToast({ kind: 'info', text: `Достигнут предел областей (${MAX_PANES}).` });
+      return;
+    }
+    moveTabToPane(activeTabId, newPaneId);
+  };
+
   const detachActive = () => {
     if (activeTabId === undefined) {
       pushToast({ kind: 'info', text: 'Нет активной вкладки для выноса' });
       return;
     }
-    if (paneTabs.length <= 1) {
-      pushToast({ kind: 'info', text: 'Отдельное окно — скоро' });
+    const noteRef = paneTabs.find((tab) => tab.id === activeTabId)?.noteRef;
+    if (noteRef === undefined) {
+      splitActiveToPane();
       return;
     }
-    const newPaneId = addPane();
-    if (newPaneId === undefined) {
-      pushToast({ kind: 'info', text: `Отдельное окно — скоро. Достигнут предел областей (${MAX_PANES}).` });
-      return;
-    }
-    moveTabToPane(activeTabId, newPaneId);
-    pushToast({ kind: 'info', text: 'Отдельное окно — скоро. Пока вынес в новую область.' });
+    commands.openNoteWindow(noteRef).catch(() => {
+      splitActiveToPane();
+      pushToast({ kind: 'info', text: 'Отдельное окно недоступно — вынес в новую область' });
+    });
   };
 
   return (
