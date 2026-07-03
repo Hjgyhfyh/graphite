@@ -74,6 +74,13 @@ fn after_mutation(state: &mut CoreState, op: &vault_core::JournalOp) {
     let _ = state.index.reindex_paths(&state.root, &paths);
 }
 
+/// Регистрирует только что созданную заметку в индексе, чтобы она сразу
+/// резолвилась по ref (иначе последующие мутации возвращают NotFound).
+fn reindex_new(rel: &str) {
+    let paths = [rel.to_string()];
+    let _ = with_core(|s| s.index.reindex_paths(&s.root, &paths).map_err(core_err));
+}
+
 fn ref_to_rel(r: &str) -> Result<String, GraphiteError> {
     let Some(p) = r.strip_prefix("path:") else {
         return Err(gerr(
@@ -156,7 +163,7 @@ fn vault_info_impl() -> Result<VaultInfoResponse, GraphiteError> {
             }
         }
         if let Ok(raw) = fs::read_to_string(&abs) {
-            let head = &raw[..raw.len().min(600)];
+            let head: String = raw.chars().take(600).collect();
             if head.starts_with("---") && head.contains("type: plan") {
                 plans += 1;
             }
@@ -574,14 +581,16 @@ pub fn context_briefing() -> Result<ContextBriefingResponse, GraphiteError> {
 #[tauri::command]
 #[specta::specta]
 pub fn note_create(params: NoteCreateParams) -> Result<NoteCreateResponse, GraphiteError> {
-    note_create_impl(
+    let resp = note_create_impl(
         params.parent.map(|r| r.0),
         &params.title,
         params.r#type,
         params.status,
         params.tags,
         params.content,
-    )
+    )?;
+    reindex_new(&resp.path);
+    Ok(resp)
 }
 
 #[tauri::command]
@@ -862,7 +871,9 @@ pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> 
     } else {
         first.chars().take(60).collect()
     };
-    note_create_impl(None, &title, None, None, None, Some(trimmed.to_string()))
+    let resp = note_create_impl(None, &title, None, None, None, Some(trimmed.to_string()))?;
+    reindex_new(&resp.path);
+    Ok(resp)
 }
 
 #[tauri::command]
