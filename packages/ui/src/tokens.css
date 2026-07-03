@@ -75,10 +75,14 @@
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
   --animate-pop: gr-pop 150ms var(--ease-out) both;
+  --animate-fade-in: gr-fade-in 160ms var(--ease-out) both;
+  --animate-slide-up: gr-slide-up 200ms var(--ease-out) both;
   --animate-toast-in: gr-toast-in 200ms var(--ease-out) both;
   --animate-toast-out: gr-toast-out 160ms var(--ease-in) forwards;
   --animate-toast-progress: gr-toast-progress 4000ms linear forwards;
   --animate-shimmer: gr-shimmer 1300ms linear infinite;
+  --animate-ai-dim: gr-ai-dim 1400ms var(--ease-out) forwards;
+  --animate-pulse-mcp: gr-pulse-mcp 1200ms var(--ease-inout) infinite;
 
   @keyframes gr-pop {
     from {
@@ -124,6 +128,47 @@
     }
     to {
       background-position: -200% 0;
+    }
+  }
+
+  @keyframes gr-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes gr-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes gr-ai-dim {
+    from {
+      background-color: var(--color-ai-dim);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+
+  @keyframes gr-pulse-mcp {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.12);
     }
   }
 }

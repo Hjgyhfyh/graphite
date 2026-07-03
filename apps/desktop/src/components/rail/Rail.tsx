@@ -1,6 +1,7 @@
-import { FileText, Search, Settings, SquareKanban } from 'lucide-react';
+import { FileText, ListChecks, PanelLeft, PanelLeftClose, Search, Settings, SquareKanban } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Tooltip, cx } from '@graphite/ui';
+import { motion } from 'motion/react';
+import { Tooltip, cx, springTransition } from '@graphite/ui';
 import { useUiStore } from '../../stores/uiStore';
 import type { RailView } from '../../stores/uiStore';
 
@@ -13,6 +14,7 @@ interface RailItem {
 const MAIN_ITEMS: readonly RailItem[] = [
   { view: 'tree', label: 'Заметки', icon: FileText },
   { view: 'search', label: 'Поиск', icon: Search },
+  { view: 'tasks', label: 'Задачи', icon: ListChecks },
   { view: 'plan', label: 'Канбан — скоро', icon: SquareKanban },
 ];
 
@@ -35,16 +37,27 @@ function RailButton({ item, active, onSelect }: RailButtonProps) {
         onClick={() => onSelect(item.view)}
         className={cx(
           'relative flex size-9 items-center justify-center rounded-s transition-colors duration-[120ms]',
-          active ? 'bg-bg-3 text-text-0' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
+          active ? 'text-text-0' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
         )}
       >
         {active ? (
-          <span
-            aria-hidden
-            className="absolute -left-1.5 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-accent"
-          />
+          <>
+            <motion.span
+              aria-hidden
+              layoutId="rail-active-pill"
+              transition={springTransition('snappy')}
+              className="absolute inset-0 rounded-s bg-bg-3"
+            />
+            <motion.span
+              aria-hidden
+              layoutId="rail-active-marker"
+              transition={springTransition('snappy')}
+              style={{ top: 'calc(50% - 8px)' }}
+              className="pointer-events-none absolute -left-1.5 h-4 w-[3px] rounded-full bg-accent"
+            />
+          </>
         ) : null}
-        <Icon size={18} strokeWidth={1.75} />
+        <Icon size={18} strokeWidth={1.75} className="relative" />
       </button>
     </Tooltip>
   );
@@ -53,11 +66,30 @@ function RailButton({ item, active, onSelect }: RailButtonProps) {
 export function Rail() {
   const railView = useUiStore((s) => s.railView);
   const setRailView = useUiStore((s) => s.setRailView);
+  const sidebarHidden = useUiStore((s) => s.sidebarHidden);
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+
   return (
     <nav
       aria-label="Разделы"
       className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke-0 bg-bg-1 py-2"
     >
+      <Tooltip content={sidebarHidden ? 'Показать панель заметок' : 'Скрыть панель заметок'} side="right">
+        <button
+          type="button"
+          aria-label={sidebarHidden ? 'Показать панель заметок' : 'Скрыть панель заметок'}
+          aria-pressed={!sidebarHidden}
+          onClick={() => toggleSidebar()}
+          className="flex size-9 items-center justify-center rounded-s text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+        >
+          {sidebarHidden ? (
+            <PanelLeft size={18} strokeWidth={1.75} />
+          ) : (
+            <PanelLeftClose size={18} strokeWidth={1.75} />
+          )}
+        </button>
+      </Tooltip>
+      <span aria-hidden className="my-1 h-px w-5 rounded-full bg-stroke-0" />
       {MAIN_ITEMS.map((item) => (
         <RailButton key={item.view} item={item} active={railView === item.view} onSelect={setRailView} />
       ))}

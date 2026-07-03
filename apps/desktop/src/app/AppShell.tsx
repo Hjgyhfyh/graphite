@@ -1,18 +1,37 @@
 import { useEffect } from 'react';
+import type { ReactNode } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { X } from 'lucide-react';
-import { Button, TooltipProvider, cx } from '@graphite/ui';
-import { GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
-import type { IndexProgressEvent, NoteChangedEvent, UiOpenNoteEvent } from '@graphite/bindings';
+import { SquareKanban, X } from 'lucide-react';
+import { Button, MOTION, TooltipProvider, cx } from '@graphite/ui';
+import { commands, GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
+import type { IndexProgressEvent, NoteChangedEvent, NoteRef, UiOpenNoteEvent } from '@graphite/bindings';
 import { CommandPalette } from '../components/palette/CommandPalette';
-import { EditorPane, WELCOME_NOTE_REF } from '../components/editor/EditorPane';
+import { QuickSwitcher } from '../components/palette/QuickSwitcher';
+import { FloatingCapture } from '../components/capture/FloatingCapture';
+import { WELCOME_NOTE_REF } from '../components/editor/EditorPane';
 import { Rail } from '../components/rail/Rail';
 import { RightPanel } from '../components/right/RightPanel';
+import { SearchPanel } from '../components/search/SearchPanel';
+import { SettingsView } from '../components/settings/SettingsView';
+import { SplitView } from '../components/panes/SplitView';
 import { StatusBar } from '../components/statusbar/StatusBar';
-import { TabBar } from '../components/tabs/TabBar';
+import { TasksView } from '../components/tasks/TasksView';
 import { TreePanel } from '../components/tree/TreePanel';
-import { useTabsStore } from '../stores/tabsStore';
+import { Keymap, useActionHandler } from './Keymap';
+import {
+  AppLaunch,
+  AppMotionConfig,
+  CollapsibleColumn,
+  PanelItem,
+  PanelStagger,
+  REDUCED_CROSSFADE,
+  ViewSwap,
+  springSnappy,
+  springStandard,
+  usePrefersReducedMotion,
+} from '../motion';
 import { useUiStore } from '../stores/uiStore';
 import type { Toast } from '../stores/uiStore';
 import { useVaultStore } from '../stores/vaultStore';
@@ -23,43 +42,98 @@ const TOAST_DOT: Record<Toast['kind'], string> = {
   error: 'bg-danger',
 };
 
+const TOAST_PROGRESS_S = MOTION.M10.durationsMs.progress / 1000;
+
+async function copyPage(ref: NoteRef): Promise<void> {
+  const ui = useUiStore.getState();
+  try {
+    const response = await commands.bundleCompose({ ref, includeLinked: true });
+    await navigator.clipboard.writeText(response.text);
+    ui.pushToast({ kind: 'success', text: `Скопировано для ИИ · ${response.members.length} файлов` });
+  } catch (error) {
+    ui.pushToast({ kind: 'error', text: isGraphiteError(error) ? error.message : 'Не удалось скопировать страницу' });
+  }
+}
+
 function ToastViewport() {
   const toasts = useUiStore((s) => s.toasts);
   const dismissToast = useUiStore((s) => s.dismissToast);
-  if (toasts.length === 0) {
-    return null;
-  }
+  const reduced = usePrefersReducedMotion();
   return (
     <div
       role="region"
       aria-label="Уведомления"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-10 right-4 z-50 flex w-80 flex-col gap-2"
+      className="pointer-events-none fixed bottom-10 right-4 z-50 flex w-80 flex-col items-stretch gap-2"
     >
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          role="status"
-          className="animate-toast-in pointer-events-auto flex items-start gap-2.5 rounded-m border border-stroke-0 bg-bg-2 px-3.5 py-3 shadow-2"
-        >
-          <span aria-hidden className={cx('mt-[7px] size-1.5 shrink-0 rounded-full', TOAST_DOT[toast.kind])} />
-          <div className="min-w-0 flex-1 text-ui text-text-0">{toast.text}</div>
-          <button
-            type="button"
-            aria-label="Закрыть уведомление"
-            onClick={() => dismissToast(toast.id)}
-            className="rounded-xs p-0.5 text-text-2 hover:bg-bg-3 hover:text-text-0"
+      <AnimatePresence initial={false}>
+        {toasts.map((toast) => (
+          <motion.div
+            key={toast.id}
+            role="status"
+            layout={!reduced}
+            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
+            animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+            exit={
+              reduced
+                ? { opacity: 0 }
+                : { opacity: 0, y: 6, scale: 0.985, transition: { duration: 0.16, ease: 'easeIn' } }
+            }
+            transition={
+              reduced
+                ? REDUCED_CROSSFADE
+                : { layout: springSnappy, default: springStandard, opacity: { duration: 0.16 } }
+            }
+            className="pointer-events-auto relative overflow-hidden rounded-m border border-stroke-0 bg-bg-2 shadow-2 inset-shadow-hairline"
           >
-            <X size={13} strokeWidth={1.75} />
-          </button>
-        </div>
-      ))}
+            <div className="flex items-start gap-2.5 px-3.5 py-3">
+              <span aria-hidden className={cx('mt-[7px] size-1.5 shrink-0 rounded-full', TOAST_DOT[toast.kind])} />
+              <div className="min-w-0 flex-1 text-ui text-text-0">{toast.text}</div>
+              {toast.action !== undefined ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    toast.action?.run();
+                    dismissToast(toast.id);
+                  }}
+                  className="shrink-0 rounded-xs px-1.5 py-0.5 text-ui text-accent transition-colors duration-[120ms] hover:bg-bg-3"
+                >
+                  {toast.action.label}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                aria-label="Закрыть уведомление"
+                onClick={() => dismissToast(toast.id)}
+                className="shrink-0 rounded-xs p-0.5 text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+              >
+                <X size={13} strokeWidth={1.75} />
+              </button>
+            </div>
+            {reduced ? null : (
+              <motion.span
+                aria-hidden
+                className={cx('absolute inset-x-0 bottom-0 h-0.5 origin-left', TOAST_DOT[toast.kind])}
+                initial={{ scaleX: 1 }}
+                animate={{ scaleX: 0 }}
+                transition={{ duration: TOAST_PROGRESS_S, ease: 'linear' }}
+              />
+            )}
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
 
-function EmptyCenter() {
-  return <div className="flex flex-1 items-center justify-center text-ui text-text-2">Нет открытых вкладок</div>;
+function KanbanPlaceholder() {
+  return (
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-bg-0 text-center">
+      <SquareKanban size={26} strokeWidth={1.75} className="text-text-3" />
+      <p className="text-ui text-text-1">Канбан — скоро</p>
+      <p className="text-caption text-text-2">Доска планов появится в следующей версии.</p>
+    </main>
+  );
 }
 
 function VaultGate() {
@@ -94,7 +168,7 @@ function VaultGate() {
   };
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col items-center justify-center gap-6 bg-bg-0">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-6 bg-bg-0">
       <div className="flex flex-col items-center gap-2.5 text-center">
         <h1 className="text-[26px] font-semibold tracking-tight text-text-0">Graphite</h1>
         <p className="max-w-sm text-ui leading-relaxed text-text-1">
@@ -113,15 +187,54 @@ function VaultGate() {
   );
 }
 
+function CenterView() {
+  const railView = useUiStore((s) => s.railView);
+  const vaultReady = useVaultStore((s) => s.info !== undefined);
+
+  let viewKey: string;
+  let view: ReactNode;
+  if (!vaultReady) {
+    viewKey = 'gate';
+    view = <VaultGate />;
+  } else if (railView === 'settings') {
+    viewKey = 'settings';
+    view = <SettingsView />;
+  } else if (railView === 'tasks') {
+    viewKey = 'tasks';
+    view = <TasksView />;
+  } else if (railView === 'plan') {
+    viewKey = 'plan';
+    view = <KanbanPlaceholder />;
+  } else {
+    viewKey = 'notes';
+    view = <SplitView />;
+  }
+
+  return <ViewSwap viewKey={viewKey}>{view}</ViewSwap>;
+}
+
 export function AppShell() {
+  const railView = useUiStore((s) => s.railView);
+  const sidebarHidden = useUiStore((s) => s.sidebarHidden);
   const treeWidth = useUiStore((s) => s.treeWidth);
   const setTreeWidth = useUiStore((s) => s.setTreeWidth);
+  const rightWidth = useUiStore((s) => s.rightWidth);
+  const setRightWidth = useUiStore((s) => s.setRightWidth);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
-  const tabs = useTabsStore((s) => s.tabs);
-  const activeId = useTabsStore((s) => s.activeId);
-  const activeTab = tabs.find((tab) => tab.id === activeId);
-  const vaultInfo = useVaultStore((s) => s.info);
+
+  useActionHandler('note.delete', () => {
+    const ref = useVaultStore.getState().currentRef;
+    if (ref !== undefined) {
+      void useVaultStore.getState().remove(ref);
+    }
+  });
+  useActionHandler('note.copyPage', () => {
+    const ref = useVaultStore.getState().currentRef;
+    if (ref !== undefined) {
+      void copyPage(ref);
+    }
+  });
 
   useEffect(() => {
     useVaultStore.getState().openNote(WELCOME_NOTE_REF);
@@ -151,52 +264,42 @@ export function AppShell() {
     };
   }, []);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const mod = event.ctrlKey || event.metaKey;
-      if (!mod) {
-        return;
-      }
-      const key = event.key.toLowerCase();
-      if (key === 'k' && !event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        const ui = useUiStore.getState();
-        ui.setPaletteOpen(!ui.paletteOpen);
-      } else if (key === 'a' && event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        useUiStore.getState().toggleRightPanel('aiFeed');
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, []);
+  const showSidebar = !sidebarHidden && railView !== 'settings' && railView !== 'tasks' && railView !== 'plan';
 
   return (
-    <TooltipProvider>
-      <div className="flex h-dvh flex-col overflow-hidden bg-bg-0 text-text-0">
-        <div className="flex min-h-0 flex-1">
-          <Rail />
-          <TreePanel width={treeWidth} onWidthChange={setTreeWidth} />
-          {vaultInfo === undefined ? (
-            <VaultGate />
-          ) : (
-            <main className="flex min-w-0 flex-1 flex-col bg-bg-0">
-              <TabBar />
-              {activeTab !== undefined ? (
-                <EditorPane key={activeTab.id} tabId={activeTab.id} noteRef={activeTab.noteRef} />
-              ) : (
-                <EmptyCenter />
-              )}
-            </main>
-          )}
-          {rightPanelOpen ? <RightPanel tab={rightPanelTab} /> : null}
-        </div>
-        <StatusBar />
-      </div>
-      <CommandPalette />
-      <ToastViewport />
-    </TooltipProvider>
+    <AppMotionConfig>
+      <TooltipProvider>
+        <AppLaunch className="flex h-dvh flex-col overflow-hidden bg-bg-0 text-text-0">
+          <PanelStagger className="flex min-h-0 min-w-0 flex-1">
+            <PanelItem className="flex shrink-0">
+              <Rail />
+            </PanelItem>
+            <PanelItem className="flex min-h-0 shrink-0">
+              <CollapsibleColumn open={showSidebar} width={treeWidth} className="relative h-full shrink-0">
+                {railView === 'search' ? (
+                  <SearchPanel width={treeWidth} onWidthChange={setTreeWidth} />
+                ) : (
+                  <TreePanel width={treeWidth} onWidthChange={setTreeWidth} />
+                )}
+              </CollapsibleColumn>
+            </PanelItem>
+            <PanelItem className="flex min-h-0 min-w-0 flex-1">
+              <CenterView />
+            </PanelItem>
+            <PanelItem className="flex min-h-0 shrink-0">
+              <CollapsibleColumn open={rightPanelOpen} width={rightWidth} className="relative h-full shrink-0">
+                <RightPanel tab={rightPanelTab} width={rightWidth} onWidthChange={setRightWidth} />
+              </CollapsibleColumn>
+            </PanelItem>
+          </PanelStagger>
+          <StatusBar />
+        </AppLaunch>
+        <CommandPalette />
+        <QuickSwitcher />
+        <FloatingCapture />
+        <Keymap />
+        <ToastViewport />
+      </TooltipProvider>
+    </AppMotionConfig>
   );
 }

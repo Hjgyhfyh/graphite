@@ -1,69 +1,146 @@
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { motion } from 'motion/react';
+import { PanelRightClose } from 'lucide-react';
 import { cx } from '@graphite/ui';
+import { Presence, Fade, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useUiStore } from '../../stores/uiStore';
 import type { RightPanelTab } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { BundlePanel } from '../bundle/BundlePanel';
 import { AiFeedTab } from './AiFeedTab';
+import { BacklinksTab } from './BacklinksTab';
 import { LinksTab } from './LinksTab';
 import { PropertiesTab } from './PropertiesTab';
 
 export interface RightPanelProps {
   tab: RightPanelTab;
+  width: number;
+  onWidthChange: (w: number) => void;
 }
 
 const TABS: ReadonlyArray<{ id: RightPanelTab; label: string }> = [
   { id: 'properties', label: 'Свойства' },
-  { id: 'aiFeed', label: 'ИИ' },
+  { id: 'aiFeed', label: 'ИИ-лента' },
   { id: 'links', label: 'Связи' },
+  { id: 'backlinks', label: 'Бэклинки' },
 ];
 
-function NoNote() {
+function NoNote({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-full items-center justify-center p-6 text-center text-ui text-text-2">
-      Откройте заметку, чтобы увидеть её данные
+    <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+      <p className="text-ui text-text-2">{children}</p>
     </div>
   );
 }
 
-export function RightPanel({ tab }: RightPanelProps) {
+export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const currentRef = useVaultStore((s) => s.currentRef);
+  const reduced = usePrefersReducedMotion();
+
+  const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+    const onMove = (moveEvent: PointerEvent) => {
+      onWidthChange(startWidth + (startX - moveEvent.clientX));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const renderTab = () => {
+    if (tab === 'properties') {
+      return currentRef !== undefined ? (
+        <PropertiesTab noteRef={currentRef} />
+      ) : (
+        <NoNote>Откройте заметку, чтобы увидеть её свойства</NoNote>
+      );
+    }
+    if (tab === 'aiFeed') {
+      return <AiFeedTab />;
+    }
+    if (tab === 'links') {
+      return currentRef !== undefined ? (
+        <div className="flex flex-col">
+          <LinksTab noteRef={currentRef} />
+          <div className="border-t border-stroke-0" />
+          <BundlePanel noteRef={currentRef} />
+        </div>
+      ) : (
+        <NoNote>Откройте заметку, чтобы увидеть её связи</NoNote>
+      );
+    }
+    return currentRef !== undefined ? (
+      <BacklinksTab noteRef={currentRef} />
+    ) : (
+      <NoNote>Откройте заметку, чтобы увидеть бэклинки</NoNote>
+    );
+  };
 
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-l border-stroke-0 bg-bg-1" aria-label="Правая панель">
-      <div role="tablist" className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke-0 px-2">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            onClick={() => toggleRightPanel(item.id)}
-            className={cx(
-              'h-7 rounded-s px-2.5 text-ui transition-colors duration-[120ms]',
-              tab === item.id ? 'bg-bg-3 text-text-0' : 'text-text-1 hover:bg-bg-2 hover:text-text-0',
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
+    <aside
+      className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-stroke-0 bg-bg-1"
+      style={{ width }}
+      aria-label="Правая панель"
+    >
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke-0 pl-1.5 pr-1">
+        <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+          {TABS.map((item) => {
+            const active = tab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setRightPanelTab(item.id)}
+                className={cx(
+                  'relative h-7 shrink-0 rounded-s px-2.5 text-caption transition-colors duration-[120ms]',
+                  active ? 'text-text-0' : 'text-text-1 hover:bg-bg-2 hover:text-text-0',
+                )}
+              >
+                {active ? (
+                  <motion.span
+                    layoutId="right-tab-pill"
+                    className="absolute inset-0 rounded-s bg-bg-3"
+                    transition={reduced ? { duration: 0 } : springSnappy}
+                  />
+                ) : null}
+                <span className="relative z-10">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          aria-label="Скрыть правую панель"
+          title="Скрыть панель · Alt+\"
+          onClick={() => toggleRightPanel()}
+          className="shrink-0 rounded-xs p-1.5 text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+        >
+          <PanelRightClose size={15} strokeWidth={1.75} />
+        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'properties' ? (
-          currentRef !== undefined ? (
-            <PropertiesTab noteRef={currentRef} />
-          ) : (
-            <NoNote />
-          )
-        ) : null}
-        {tab === 'aiFeed' ? <AiFeedTab /> : null}
-        {tab === 'links' ? (
-          currentRef !== undefined ? (
-            <LinksTab noteRef={currentRef} />
-          ) : (
-            <NoNote />
-          )
-        ) : null}
+        <Presence mode="wait">
+          <Fade key={tab} className="min-h-full">
+            {renderTab()}
+          </Fade>
+        </Presence>
       </div>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Изменить ширину правой панели"
+        className="absolute inset-y-0 -left-0.5 z-10 w-1 cursor-col-resize hover:bg-stroke-1 active:bg-stroke-1"
+        onPointerDown={onHandlePointerDown}
+      />
     </aside>
   );
 }

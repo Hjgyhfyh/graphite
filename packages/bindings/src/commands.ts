@@ -3,12 +3,18 @@ import type {
   ActivityGetParams,
   ActivityGetResponse,
   BufferSaveParams,
+  BundleComposeParams,
+  BundleComposeResponse,
+  BundleCreateParams,
+  BundleCreateResponse,
   ClaudeCliInfo,
   ContextBriefingResponse,
   DistillContextParams,
   DistillContextResponse,
   DistillSaveParams,
   DistillSaveResponse,
+  IdeaToTasksParams,
+  IdeaToTasksResponse,
   IndexStatus,
   JournalOp,
   LinkAddParams,
@@ -29,6 +35,8 @@ import type {
   NoteReadResponse,
   NoteRenameParams,
   NoteRenameResponse,
+  NotePinParams,
+  NotePinResponse,
   NoteRestoreParams,
   NoteRestoreResponse,
   PlanCreateParams,
@@ -39,6 +47,8 @@ import type {
   PlanUpdateResponse,
   SearchParams,
   SearchResponse,
+  SetIconParams,
+  SetIconResponse,
   SetStatusParams,
   SetStatusResponse,
   TaskCheckParams,
@@ -150,5 +160,20 @@ export const commands = {
   },
   quickCapture(text: string): Promise<NoteCreateResponse> {
     return invoke('quick_capture', { text });
+  },
+  setIcon(params: SetIconParams): Promise<SetIconResponse> {
+    return invoke('set_icon', { params });
+  },
+  notePin(params: NotePinParams): Promise<NotePinResponse> {
+    return invoke('note_pin', { params });
+  },
+  bundleCompose(params: BundleComposeParams): Promise<BundleComposeResponse> {
+    return invoke('bundle_compose', { params });
+  },
+  bundleCreate(params: BundleCreateParams): Promise<BundleCreateResponse> {
+    return invoke('bundle_create', { params });
+  },
+  ideaToTasks(params: IdeaToTasksParams): Promise<IdeaToTasksResponse> {
+    return invoke('idea_to_tasks', { params });
   },
 } as const;

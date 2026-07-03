@@ -47,6 +47,8 @@ export interface Frontmatter {
   targetDate?: string;
   rel?: Record<string, string[]>;
   sort?: number;
+  icon?: string;
+  iconColor?: string;
   created?: string;
   updated?: string;
   [x: string]: unknown;
@@ -126,6 +128,9 @@ export interface TreeNode {
   status?: Status;
   childrenCount: number;
   updated: string;
+  icon?: string;
+  iconColor?: string;
+  pinned?: boolean;
 }
 
 export interface StageProgress {
@@ -583,6 +588,78 @@ export interface ClaudeCliInfo {
   found: boolean;
   path?: string;
   mcpAddCommand: string;
+}
+
+export interface SetIconParams {
+  ref: NoteRef;
+  icon?: string;
+  color?: string;
+}
+
+export interface SetIconResponse {
+  icon?: string;
+  color?: string;
+}
+
+export interface NotePinParams {
+  ref: NoteRef;
+  pinned: boolean;
+}
+
+export interface NotePinResponse {
+  pinned: boolean;
+}
+
+export interface BundleComposeParams {
+  ref: NoteRef;
+  includeLinked?: boolean;
+  maxChars?: number;
+}
+
+export interface BundleComposeMember {
+  ref: NoteRef;
+  title: string;
+  path: string;
+  role: BundleRole;
+  chars: number;
+}
+
+export interface BundleComposeResponse {
+  text: string;
+  members: BundleComposeMember[];
+  chars: number;
+  truncated?: boolean;
+}
+
+export interface BundleCreateParams {
+  title: string;
+  parent?: NoteRef;
+  members?: NoteRef[];
+  instruction?: string;
+}
+
+export interface BundleCreateResponse {
+  ref: NoteRef;
+  path: string;
+  rev: Rev;
+  added: number;
+}
+
+export interface IdeaToTaskDraft {
+  text: string;
+  due?: string;
+  priority?: Priority;
+}
+
+export interface IdeaToTasksParams {
+  ref?: NoteRef;
+  text?: string;
+  createPlan?: boolean;
+}
+
+export interface IdeaToTasksResponse {
+  tasks: IdeaToTaskDraft[];
+  planRef?: NoteRef;
 }
 
 export interface NoteChangedEvent {

@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpRight, Unlink } from 'lucide-react';
+import { ArrowDownLeft, Inbox } from 'lucide-react';
 import { commands } from '@graphite/bindings';
-import type { LinkOut, NoteRef, RelType } from '@graphite/bindings';
+import type { LinkIn, NoteRef, RelType } from '@graphite/bindings';
 import { springSnappy, usePrefersReducedMotion } from '../../motion';
 import { titleFromRef } from '../../stores/tabsStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { NoteIcon } from '../tree/NoteIcon';
 
-export interface LinksTabProps {
+export interface BacklinksTabProps {
   noteRef: NoteRef;
 }
 
@@ -26,21 +26,21 @@ function relLabel(type: RelType): string {
   return REL_LABEL[type] ?? type;
 }
 
-export function LinksTab({ noteRef }: LinksTabProps) {
+export function BacklinksTab({ noteRef }: BacklinksTabProps) {
   const tree = useVaultStore((s) => s.tree);
   const iconByRef = useVaultStore((s) => s.iconByRef);
   const reduced = usePrefersReducedMotion();
-  const [links, setLinks] = useState<LinkOut[]>([]);
+  const [links, setLinks] = useState<LinkIn[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    commands.linksGet({ ref: noteRef, direction: 'out' }).then(
+    commands.linksGet({ ref: noteRef, direction: 'in' }).then(
       (response) => {
         if (!cancelled) {
           const seen = new Set<string>();
-          const unique: LinkOut[] = [];
-          for (const edge of response.out) {
-            const key = `${edge.to}|${edge.type}`;
+          const unique: LinkIn[] = [];
+          for (const edge of response.in) {
+            const key = `${edge.from}|${edge.type}`;
             if (!seen.has(key)) {
               seen.add(key);
               unique.push(edge);
@@ -76,8 +76,8 @@ export function LinksTab({ noteRef }: LinksTabProps) {
     <div className="flex flex-col gap-2 p-3">
       <div className="flex items-center justify-between px-1">
         <h3 className="flex items-center gap-1.5 text-caption text-text-2">
-          <ArrowUpRight size={13} strokeWidth={1.75} />
-          Исходящие связи
+          <ArrowDownLeft size={13} strokeWidth={1.75} />
+          Входящие ссылки
         </h3>
         {links.length > 0 ? (
           <span className="rounded-full bg-bg-3 px-1.5 text-micro text-text-2">{links.length}</span>
@@ -87,10 +87,10 @@ export function LinksTab({ noteRef }: LinksTabProps) {
         <ul className="flex flex-col gap-0.5">
           <AnimatePresence initial={false}>
             {links.map((link) => {
-              const info = iconOf(link.to);
+              const info = iconOf(link.from);
               return (
                 <motion.li
-                  key={`${link.to}|${link.type}`}
+                  key={`${link.from}|${link.type}`}
                   layout={!reduced}
                   initial={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -99,7 +99,7 @@ export function LinksTab({ noteRef }: LinksTabProps) {
                 >
                   <button
                     type="button"
-                    onClick={() => useVaultStore.getState().openNote(link.to)}
+                    onClick={() => useVaultStore.getState().openNote(link.from)}
                     className="group flex w-full items-center gap-2 rounded-s px-2 py-1.5 text-left outline-none transition-colors duration-[120ms] hover:bg-bg-2"
                   >
                     <NoteIcon
@@ -108,13 +108,8 @@ export function LinksTab({ noteRef }: LinksTabProps) {
                       size={15}
                       className={info.color === undefined ? 'shrink-0 text-text-2' : 'shrink-0'}
                     />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-ui text-text-1 group-hover:text-text-0">
-                        {titleOf(link.to)}
-                      </span>
-                      {link.context !== undefined && link.context.length > 0 ? (
-                        <span className="block truncate text-micro text-text-3">{link.context}</span>
-                      ) : null}
+                    <span className="min-w-0 flex-1 truncate text-ui text-text-1 group-hover:text-text-0">
+                      {titleOf(link.from)}
                     </span>
                     <span className="shrink-0 rounded-xs bg-bg-3 px-1 text-micro text-text-2">
                       {relLabel(link.type)}
@@ -127,9 +122,10 @@ export function LinksTab({ noteRef }: LinksTabProps) {
         </ul>
       ) : (
         <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
-          <Unlink size={18} strokeWidth={1.5} className="text-text-3" />
+          <Inbox size={18} strokeWidth={1.5} className="text-text-3" />
           <p className="max-w-[220px] text-caption text-text-2">
-            Связей пока нет — добавьте <span className="font-mono text-text-1">[[ссылку]]</span> прямо в тексте заметки.
+            На эту заметку пока никто не ссылается. Бэклинки появятся, когда её упомянут через{' '}
+            <span className="font-mono text-text-1">[[…]]</span>.
           </p>
         </div>
       )}
