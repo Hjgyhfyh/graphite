@@ -392,7 +392,18 @@ fn mount_vault(path: &str, create: bool) -> Result<VaultInfoResponse, GraphiteEr
         let _ = fs::create_dir_all(root.join(dir));
     }
     let db = root.join(".graphite").join("index.db");
-    let index = Index::open(&db).map_err(core_err)?;
+    let index = match Index::open(&db) {
+        Ok(index) => index,
+        Err(_) => {
+            // Индекс — перестраиваемый кэш. Повреждённый/залоченный после
+            // аварийного завершения (kill/креш) удаляем и открываем заново,
+            // чтобы vault не выглядел «пропавшим» и монтировался всегда.
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = fs::remove_file(root.join(".graphite").join(format!("index.db{suffix}")));
+            }
+            Index::open(&db).map_err(core_err)?
+        }
+    };
     crate::runtime::save_last_vault(&root);
     *lock_core() = Some(CoreState { root: root.clone(), index });
     // Тёплый полный rebuild — в фоне: окно не блокируется на «тысячах файлов».
