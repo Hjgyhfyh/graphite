@@ -2,11 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Base capability for Graphite windows",
-  "windows": ["main", "capture", "note-*"],
+  "windows": ["main", "capture", "note", "note-*"],
   "permissions": [
     "core:default",
     "core:window:allow-hide",
     "core:window:allow-show",
+    "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-center",
     "global-shortcut:default",

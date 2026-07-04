@@ -34,6 +34,20 @@
         "visible": false,
         "center": true,
         "shadow": false
+      },
+      {
+        "label": "note",
+        "url": "index.html?window=note",
+        "title": "Заметка — Graphite",
+        "width": 760,
+        "height": 720,
+        "minWidth": 420,
+        "minHeight": 320,
+        "resizable": true,
+        "decorations": true,
+        "visible": false,
+        "center": true,
+        "backgroundColor": "#0D0E11"
       }
     ],
     "security": {
@@ -41,6 +55,12 @@
     }
   },
   "bundle": {
-    "icon": ["icons/icon.ico"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

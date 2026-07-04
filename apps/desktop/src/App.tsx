@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Component, useCallback, useEffect, useRef, useState } from 'react';
+import type { ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { CornerDownLeft, PenLine } from 'lucide-react';
+import { CornerDownLeft, PenLine, X } from 'lucide-react';
 import { Kbd, TooltipProvider, cx } from '@graphite/ui';
 import { commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
@@ -167,17 +167,98 @@ export function CaptureApp() {
  * Отдельное окно одной заметки (фича #16): выносит файл из вкладок в
  * самостоятельное webview-окно с полноценным редактором.
  */
-export function NoteApp({ noteRef }: { noteRef: NoteRef }) {
+class EditorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+
+  static getDerivedStateFromError(error: unknown): { error: string } {
+    return { error: error instanceof Error ? error.message : 'не удалось открыть заметку' };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
+    console.error('detached editor error', error, info);
+  }
+
+  render(): ReactNode {
+    if (this.state.error !== null) {
+      return (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <p className="text-ui text-text-1">Не удалось открыть заметку</p>
+          <p className="text-caption text-text-3">{this.state.error}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function NoteApp({ initialRef }: { initialRef: string }) {
+  const [noteRef, setNoteRef] = useState(initialRef);
+  const title = noteRef.length > 0 ? titleFromRef(noteRef as NoteRef) : 'Заметка';
+
   useEffect(() => {
-    document.title = titleFromRef(noteRef);
-    void useVaultStore.getState().loadTree();
-  }, [noteRef]);
+    document.title = title;
+  }, [title]);
+
+  // Одно переиспользуемое окно «note»: команда open_note_window шлёт сюда
+  // событие note-open с новой ссылкой, окно обновляет редактор без пересоздания.
+  useEffect(() => {
+    if (!isTauriAvailable()) {
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .listen<string>('note-open', (event) => {
+        if (typeof event.payload === 'string' && event.payload.length > 0) {
+          setNoteRef(event.payload);
+          void useVaultStore.getState().loadTree();
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        void hideSelfWindow();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <AppMotionConfig>
       <TooltipProvider>
         <div className="flex h-dvh flex-col overflow-hidden bg-bg-0 text-text-0">
-          <EditorPane tabId="detached" noteRef={noteRef} />
+          <header
+            data-tauri-drag-region
+            className="flex h-9 shrink-0 select-none items-center gap-2 border-b border-stroke-0 px-3"
+          >
+            <PenLine size={13} strokeWidth={1.75} className="pointer-events-none shrink-0 text-text-2" />
+            <span className="pointer-events-none min-w-0 flex-1 truncate text-ui text-text-1">{title}</span>
+            <button
+              type="button"
+              aria-label="Закрыть окно"
+              onClick={() => void hideSelfWindow()}
+              className="shrink-0 rounded-xs p-1 text-text-2 hover:bg-bg-3 hover:text-text-0"
+            >
+              <X size={14} strokeWidth={1.75} />
+            </button>
+          </header>
+          {noteRef.length > 0 ? (
+            <EditorBoundary key={noteRef}>
+              <EditorPane tabId="detached" noteRef={noteRef as NoteRef} />
+            </EditorBoundary>
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-ui text-text-2">
+              Заметка откроется здесь
+            </div>
+          )}
         </div>
       </TooltipProvider>
     </AppMotionConfig>

@@ -59,6 +59,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::bundle_create,
             commands::idea_to_tasks,
             commands::open_note_window,
+            commands::note_abs_path,
+            commands::reveal_in_explorer,
         ])
         .events(collect_events![
             events::NoteChangedEvent,
@@ -252,7 +254,7 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if matches!(window.label(), "main" | "capture") {
+                if matches!(window.label(), "main" | "capture" | "note") {
                     api.prevent_close();
                     let _ = window.hide();
                 }

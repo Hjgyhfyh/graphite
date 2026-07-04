@@ -1280,30 +1280,7 @@ pub fn idea_to_tasks(params: IdeaToTasksParams) -> Result<IdeaToTasksResponse, G
     })
 }
 
-/// Кодирует значение для query-строки URL (unreserved-символы RFC 3986 —
-/// как есть, остальные байты — в `%XX`). Ссылки содержат `:` `/` кириллицу.
-fn percent_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-/// Стабильная ASCII-метка окна из ссылки: ярлыки Tauri допускают только
-/// `[a-zA-Z0-9-/:_]`, а ссылка может содержать кириллицу и пробелы.
-fn note_window_label(note_ref: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    note_ref.hash(&mut hasher);
-    format!("note-{:016x}", hasher.finish())
-}
-
+/// Заголовок окна заметки из ссылки: «Имя файла — Graphite».
 fn note_window_title(note_ref: &str) -> String {
     let rel = note_ref.strip_prefix("path:").unwrap_or(note_ref);
     let name = rel.rsplit(['/', '\\']).next().unwrap_or(rel);
@@ -1323,29 +1300,67 @@ fn note_window_title(note_ref: &str) -> String {
 #[tauri::command]
 #[specta::specta]
 pub fn open_note_window(app: tauri::AppHandle, note_ref: String) -> Result<(), GraphiteError> {
-    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+    use tauri::{Emitter, Manager};
 
-    let label = note_window_label(&note_ref);
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.show();
-        let _ = existing.unminimize();
-        let _ = existing.set_focus();
-        return Ok(());
+    // Переиспользуем заранее объявленное (в tauri.conf) окно «note»: конфиг-окна
+    // грузят вшитый фронт надёжно, в отличие от создаваемых в рантайме. Закрытие
+    // прячет окно (см. lib.rs), поэтому оно всегда доступно для повторного выноса.
+    let window = app.get_webview_window("note").ok_or_else(|| {
+        gerr(
+            GraphiteErrorCode::Unavailable,
+            "окно заметки недоступно",
+            Some("перезапусти приложение"),
+        )
+    })?;
+    let _ = window.set_title(&note_window_title(&note_ref));
+    let _ = window.emit("note-open", note_ref);
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Абсолютный путь заметки/папки на диске (для «Скопировать путь»).
+/// Для folder-note (`…/_index.md`) отдаёт путь самой папки.
+#[tauri::command]
+#[specta::specta]
+pub fn note_abs_path(note_ref: String) -> Result<String, GraphiteError> {
+    let root = current_root()?;
+    let mut rel = ref_to_rel(&note_ref)?;
+    if let Some(stripped) = rel.strip_suffix("/_index.md") {
+        rel = stripped.to_string();
     }
+    Ok(root.join(&rel).to_string_lossy().to_string())
+}
 
-    let url = format!("index.html?window=note&ref={}", percent_encode(&note_ref));
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
-        .title(note_window_title(&note_ref))
-        .inner_size(760.0, 720.0)
-        .min_inner_size(420.0, 320.0)
-        .center()
-        .build()
-        .map_err(|e| {
-            gerr(
-                GraphiteErrorCode::Unavailable,
-                format!("не удалось открыть окно заметки: {e}"),
-                Some("проверь, что приложение запущено"),
-            )
-        })?;
+/// Показывает заметку/папку в Проводнике, выделяя её. Для folder-note
+/// раскрывает саму папку.
+#[tauri::command]
+#[specta::specta]
+pub fn reveal_in_explorer(note_ref: String) -> Result<(), GraphiteError> {
+    let root = current_root()?;
+    let mut rel = ref_to_rel(&note_ref)?;
+    if let Some(stripped) = rel.strip_suffix("/_index.md") {
+        rel = stripped.to_string();
+    }
+    let abs = root.join(&rel);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", abs.display()))
+            .spawn()
+            .map_err(|e| {
+                gerr(
+                    GraphiteErrorCode::Unavailable,
+                    format!("не удалось открыть проводник: {e}"),
+                    None,
+                )
+            })?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = abs;
+    }
     Ok(())
 }

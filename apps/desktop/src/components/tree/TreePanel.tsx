@@ -15,9 +15,11 @@ import * as ContextMenu from '@radix-ui/react-context-menu';
 import {
   ChevronRight,
   Columns2,
+  Copy,
   FileText,
   Folder,
   FolderOpen,
+  FolderSymlink,
   Palette,
   Pencil,
   Pin,
@@ -26,6 +28,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { NoteRef, TreeNode } from '@graphite/bindings';
+import { commands } from '@graphite/bindings';
 import { Kbd, STAGGER_CAP, cx } from '@graphite/ui';
 import { useActionHandler } from '../../app/Keymap';
 import { springSnappy, springStandard, usePrefersReducedMotion } from '../../motion';
@@ -461,6 +464,33 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
           </ContextMenu.Item>
             </>
           )}
+          <ContextMenu.Separator className="my-1 h-px bg-stroke-0" />
+          <ContextMenu.Item
+            className={MENU_ITEM}
+            onSelect={() => {
+              void commands
+                .revealInExplorer(data.ref)
+                .catch(() => useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось открыть проводник' }));
+            }}
+          >
+            <FolderSymlink size={15} strokeWidth={1.75} className="text-text-2" />
+            Перейти в проводник
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className={MENU_ITEM}
+            onSelect={() => {
+              void commands.noteAbsPath(data.ref).then(
+                (path) => {
+                  void navigator.clipboard.writeText(path);
+                  useUiStore.getState().pushToast({ kind: 'success', text: 'Путь скопирован' });
+                },
+                () => useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось получить путь' }),
+              );
+            }}
+          >
+            <Copy size={15} strokeWidth={1.75} className="text-text-2" />
+            Скопировать путь
+          </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>

@@ -22,10 +22,9 @@ function pickWindow(): ReactNode {
     return <CaptureApp />;
   }
   if (kind === 'note') {
-    const noteRef = params.get('ref');
-    if (noteRef !== null && noteRef.length > 0) {
-      return <NoteApp noteRef={noteRef} />;
-    }
+    const injected = (window as Window & { __GRAPHITE_NOTE_REF__?: unknown }).__GRAPHITE_NOTE_REF__;
+    const initial = typeof injected === 'string' ? injected : (params.get('ref') ?? '');
+    return <NoteApp initialRef={initial} />;
   }
   return <App />;
 }

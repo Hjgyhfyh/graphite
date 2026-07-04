@@ -1,0 +1,11 @@
+import { chromium } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'node:fs';
+const svg = readFileSync('assets/icon.svg', 'utf8');
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1024, height: 1024 }, deviceScaleFactor: 1 });
+await p.setContent(`<!doctype html><html><body style="margin:0;padding:0;width:1024px;height:1024px">${svg}</body></html>`);
+await p.waitForTimeout(200);
+const buf = await p.screenshot({ clip: { x: 0, y: 0, width: 1024, height: 1024 }, omitBackground: true });
+writeFileSync('assets/icon.png', buf);
+console.log('rendered assets/icon.png', buf.length, 'bytes');
+await b.close();

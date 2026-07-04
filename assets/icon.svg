@@ -1,0 +1,72 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1B1F27"/>
+      <stop offset=".55" stop-color="#0E1015"/>
+      <stop offset="1" stop-color="#090A0D"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="512" cy="500" r="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8B93FF" stop-opacity=".55"/>
+      <stop offset=".55" stop-color="#4FD6BE" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#4FD6BE" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="table" x1="400" y1="292" x2="612" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EAECFF"/>
+      <stop offset=".5" stop-color="#B7BDFF"/>
+      <stop offset="1" stop-color="#8E96FF"/>
+    </linearGradient>
+    <linearGradient id="crownL" x1="256" y1="300" x2="470" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9AA2FF"/>
+      <stop offset="1" stop-color="#6E77E6"/>
+    </linearGradient>
+    <linearGradient id="crownR" x1="560" y1="300" x2="768" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8E97FF"/>
+      <stop offset="1" stop-color="#54C9C6"/>
+    </linearGradient>
+    <linearGradient id="pavA" x1="300" y1="432" x2="470" y2="772" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B84F2"/>
+      <stop offset="1" stop-color="#4E57B8"/>
+    </linearGradient>
+    <linearGradient id="pavB" x1="420" y1="432" x2="512" y2="772" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8C95FF"/>
+      <stop offset="1" stop-color="#5D66CC"/>
+    </linearGradient>
+    <linearGradient id="pavC" x1="560" y1="432" x2="640" y2="772" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6FC8D6"/>
+      <stop offset="1" stop-color="#3E9FB0"/>
+    </linearGradient>
+    <linearGradient id="pavD" x1="640" y1="432" x2="760" y2="772" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#59D2C4"/>
+      <stop offset="1" stop-color="#2F9E96"/>
+    </linearGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="34"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="4" y="4" width="1016" height="1016" rx="228" fill="none" stroke="#FFFFFF" stroke-opacity=".07" stroke-width="3"/>
+  <ellipse cx="512" cy="520" rx="330" ry="330" fill="url(#glow)" filter="url(#soft)"/>
+
+  <!-- diamond -->
+  <g stroke="#0C0D12" stroke-opacity=".35" stroke-width="2" stroke-linejoin="round">
+    <!-- pavilion -->
+    <polygon points="256,432 384,432 512,772" fill="url(#pavA)"/>
+    <polygon points="384,432 512,432 512,772" fill="url(#pavB)"/>
+    <polygon points="512,432 640,432 512,772" fill="url(#pavC)"/>
+    <polygon points="640,432 768,432 512,772" fill="url(#pavD)"/>
+    <!-- crown -->
+    <polygon points="400,300 256,432 428,432" fill="url(#crownL)"/>
+    <polygon points="624,300 596,432 768,432" fill="url(#crownR)"/>
+    <polygon points="400,300 624,300 596,432 428,432" fill="url(#table)"/>
+  </g>
+
+  <!-- girdle highlight -->
+  <path d="M256,432 H768" stroke="#EAF0FF" stroke-opacity=".55" stroke-width="4"/>
+  <!-- table specular -->
+  <polygon points="424,314 560,314 528,392 452,392" fill="#FFFFFF" opacity=".22"/>
+  <!-- crown edge sheen -->
+  <path d="M400,300 L624,300" stroke="#FFFFFF" stroke-opacity=".5" stroke-width="5" stroke-linecap="round"/>
+  <!-- bottom sparkle -->
+  <path d="M512,772 L456,470 M512,772 L568,470" stroke="#FFFFFF" stroke-opacity=".12" stroke-width="3"/>
+</svg>

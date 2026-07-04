@@ -179,4 +179,10 @@ export const commands = {
   openNoteWindow(noteRef: string): Promise<void> {
     return invoke('open_note_window', { noteRef });
   },
+  noteAbsPath(noteRef: string): Promise<string> {
+    return invoke('note_abs_path', { noteRef });
+  },
+  revealInExplorer(noteRef: string): Promise<void> {
+    return invoke('reveal_in_explorer', { noteRef });
+  },
 } as const;
