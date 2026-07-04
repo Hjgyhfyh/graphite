@@ -23,7 +23,9 @@ use crate::txn::{self, TxnOpts};
 use crate::{parser, resolver, writer};
 
 /// Параметры `set_icon`: иконка (имя lucide) и цвет во frontmatter
-/// (`icon`/`icon_color`). Пустые значения снимают поле.
+/// (`icon`/`icon_color`). Каждое поле независимо: пропуск (None) оставляет
+/// текущее значение, пустая строка снимает его, значение — устанавливает.
+/// Так папке (folder-note) можно сменить только цвет, не трогая иконку.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetIconParams {
@@ -278,8 +280,36 @@ pub fn link_remove(
     Ok((LinkRemoveResponse { removed: true }, op))
 }
 
-/// Иконка и цвет заметки во frontmatter (`icon`/`icon_color`). Пустые значения
-/// снимают соответствующее поле; косметическая правка не двигает `updated`.
+/// Операция над одним презентационным полем frontmatter: пропуск поля в
+/// параметрах — не трогать, пустая строка — снять, значение — установить.
+enum IconFieldOp {
+    Keep,
+    Clear,
+    Set(String),
+}
+
+impl IconFieldOp {
+    fn from_param(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            None => IconFieldOp::Keep,
+            Some("") => IconFieldOp::Clear,
+            Some(v) => IconFieldOp::Set(v.to_string()),
+        }
+    }
+
+    fn resolve(&self, current: Option<String>) -> Option<String> {
+        match self {
+            IconFieldOp::Keep => current,
+            IconFieldOp::Clear => None,
+            IconFieldOp::Set(v) => Some(v.clone()),
+        }
+    }
+}
+
+/// Иконка и цвет заметки во frontmatter (`icon`/`icon_color`). Поля независимы:
+/// пропущенное остаётся как было (папке можно сменить только цвет, не затирая
+/// иконку), пустая строка снимает поле. Возвращаются итоговые значения;
+/// косметическая правка не двигает `updated`.
 pub fn set_icon(
     root: &Path,
     index: &Index,
@@ -291,17 +321,25 @@ pub fn set_icon(
     let raw = read_note(root, &path)?;
     let parsed = parser::parse_note(&raw)?;
     ensure_frontmatter_ok(&parsed)?;
-    let icon = clean_opt(params.icon.as_deref());
-    let color = clean_opt(params.color.as_deref());
+    let icon_op = IconFieldOp::from_param(params.icon.as_deref());
+    let color_op = IconFieldOp::from_param(params.color.as_deref());
+    let current_icon = extra_str(&parsed.frontmatter.extra, "icon");
+    let current_color = extra_str(&parsed.frontmatter.extra, "icon_color")
+        .or_else(|| extra_str(&parsed.frontmatter.extra, "iconColor"));
+    let icon = icon_op.resolve(current_icon);
+    let color = color_op.resolve(current_color);
     let mut target = parsed.frontmatter.clone();
-    apply_extra_opt(&mut target.extra, "icon", icon.as_deref());
-    apply_extra_opt(&mut target.extra, "icon_color", color.as_deref());
-    target.extra.remove("iconColor");
-    let edits = [
-        ("icon", extra_edit("icon", icon.as_deref())?),
-        ("icon_color", extra_edit("icon_color", color.as_deref())?),
-        ("iconColor", FmSet::Remove),
-    ];
+    let mut edits: Vec<(&str, FmSet)> = Vec::new();
+    if !matches!(icon_op, IconFieldOp::Keep) {
+        apply_extra_opt(&mut target.extra, "icon", icon.as_deref());
+        edits.push(("icon", extra_edit("icon", icon.as_deref())?));
+    }
+    if !matches!(color_op, IconFieldOp::Keep) {
+        apply_extra_opt(&mut target.extra, "icon_color", color.as_deref());
+        target.extra.remove("iconColor");
+        edits.push(("icon_color", extra_edit("icon_color", color.as_deref())?));
+        edits.push(("iconColor", FmSet::Remove));
+    }
     let new_text = patch_or_serialize(&raw, &parsed, &target, &edits)?;
     let summary = format!("Иконка «{}»", meta.title);
     let op = if new_text == raw {
@@ -506,11 +544,8 @@ fn rel_edit(rel: &BTreeMap<String, Vec<String>>) -> Result<FmSet, VaultError> {
     Ok(FmSet::Set(render_key_lines(move |fm| fm.rel = rel)?))
 }
 
-fn clean_opt(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+fn extra_str(extra: &BTreeMap<String, serde_yml::Value>, key: &str) -> Option<String> {
+    extra.get(key).and_then(|v| v.as_str()).map(str::to_string)
 }
 
 fn apply_extra_opt(extra: &mut BTreeMap<String, serde_yml::Value>, key: &str, value: Option<&str>) {
@@ -1032,5 +1067,19 @@ mod tests {
         let out = patch_note_frontmatter(raw, body_offset(raw), &edits);
         assert!(out.starts_with("---\npinned: true\n---\n"));
         assert!(out.ends_with("просто текст\n"));
+    }
+
+    #[test]
+    fn icon_field_op_keep_clear_set() {
+        assert!(matches!(IconFieldOp::from_param(None), IconFieldOp::Keep));
+        assert!(matches!(IconFieldOp::from_param(Some("  ")), IconFieldOp::Clear));
+        assert!(matches!(IconFieldOp::from_param(Some("rocket")), IconFieldOp::Set(_)));
+        let current = || Some("folder".to_string());
+        assert_eq!(IconFieldOp::from_param(None).resolve(current()), current());
+        assert_eq!(IconFieldOp::from_param(Some("")).resolve(current()), None);
+        assert_eq!(
+            IconFieldOp::from_param(Some(" rocket ")).resolve(current()),
+            Some("rocket".to_string())
+        );
     }
 }

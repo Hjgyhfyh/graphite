@@ -2,12 +2,20 @@ import type { ReactNode } from 'react';
 import type { Variants } from 'motion/react';
 import { motion, useIsPresent } from 'motion/react';
 import { cx, easePoints } from '@graphite/ui';
-import { Presence, usePrefersReducedMotion } from '../../motion';
+import { Presence, springStandard, usePrefersReducedMotion } from '../../motion';
 
 const swapVariants: Variants = {
-  initial: { opacity: 0, y: 8, scale: 0.994 },
-  animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.18, ease: easePoints.out } },
-  exit: { opacity: 0, scale: 0.994, transition: { duration: 0.14, ease: easePoints.in } },
+  initial: { opacity: 0, y: 12, scale: 0.995 },
+  animate: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      opacity: { duration: 0.16, ease: easePoints.out },
+      default: springStandard,
+    },
+  },
+  exit: { opacity: 0, y: -6, scale: 0.997, transition: { duration: 0.13, ease: easePoints.in } },
 };
 
 const reducedVariants: Variants = {

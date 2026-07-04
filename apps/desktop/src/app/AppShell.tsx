@@ -18,6 +18,7 @@ import { QuickSwitcher } from '../components/palette/QuickSwitcher';
 import { FloatingCapture } from '../components/capture/FloatingCapture';
 import { WELCOME_NOTE_REF } from '../components/editor/EditorPane';
 import { KanbanView } from '../components/kanban/KanbanView';
+import { Onboarding } from '../components/onboarding/Onboarding';
 import { Rail } from '../components/rail/Rail';
 import { RightPanel } from '../components/right/RightPanel';
 import { SearchPanel } from '../components/search/SearchPanel';
@@ -299,6 +300,7 @@ export function AppShell() {
         <FloatingCapture />
         <Keymap />
         <ToastViewport />
+        <Onboarding />
       </TooltipProvider>
     </AppMotionConfig>
   );

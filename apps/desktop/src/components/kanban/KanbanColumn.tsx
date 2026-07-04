@@ -1,8 +1,7 @@
-import { useRef } from 'react';
-import type { DragEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { cx } from '@graphite/ui';
-import type { Status } from '@graphite/bindings';
+import type { NoteRef, Status } from '@graphite/bindings';
 import { KanbanCard } from './KanbanCard';
 import type { ColumnDef, KanbanCardData } from './columns';
 
@@ -10,14 +9,15 @@ export interface KanbanColumnProps {
   column: ColumnDef;
   cards: KanbanCardData[];
   reduced: boolean;
-  draggingRef: string | null;
+  draggingRef: NoteRef | null;
+  settlingRef: NoteRef | null;
   isOver: boolean;
-  onOver: (status: Status) => void;
-  onLeave: (status: Status) => void;
-  onDropCard: (status: Status, ref: string) => void;
-  onCardDragStart: (ref: string) => void;
-  onCardDragEnd: () => void;
-  onCardOpen: (ref: string) => void;
+  registerColumn(status: Status, el: HTMLElement | null): void;
+  registerCard(ref: NoteRef, el: HTMLElement): void;
+  unregisterCard(ref: NoteRef, el: HTMLElement): void;
+  onCardLift(event: ReactPointerEvent<HTMLElement>, card: KanbanCardData, tags: string[]): void;
+  onCardOpen(ref: NoteRef): void;
+  consumeDropClick(): boolean;
 }
 
 export function KanbanColumn({
@@ -25,58 +25,23 @@ export function KanbanColumn({
   cards,
   reduced,
   draggingRef,
+  settlingRef,
   isOver,
-  onOver,
-  onLeave,
-  onDropCard,
-  onCardDragStart,
-  onCardDragEnd,
+  registerColumn,
+  registerCard,
+  unregisterCard,
+  onCardLift,
   onCardOpen,
+  consumeDropClick,
 }: KanbanColumnProps) {
-  const depth = useRef(0);
   const Icon = column.icon;
-
-  const handleDragOver = (event: DragEvent<HTMLElement>) => {
-    if (draggingRef === null) {
-      return;
-    }
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
-    if (draggingRef === null) {
-      return;
-    }
-    event.preventDefault();
-    depth.current += 1;
-    onOver(column.status);
-  };
-
-  const handleDragLeave = () => {
-    if (draggingRef === null) {
-      return;
-    }
-    depth.current -= 1;
-    if (depth.current <= 0) {
-      depth.current = 0;
-      onLeave(column.status);
-    }
-  };
-
-  const handleDrop = (event: DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    depth.current = 0;
-    onDropCard(column.status, event.dataTransfer.getData('text/plain'));
-  };
 
   return (
     <section
+      ref={(el) => {
+        registerColumn(column.status, el);
+      }}
       aria-label={column.label}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       className={cx(
         'flex h-full min-h-0 min-w-60 flex-1 flex-col rounded-l border transition-colors duration-150',
         isOver ? 'border-accent/40 bg-bg-1/60' : 'border-transparent',
@@ -100,9 +65,12 @@ export function KanbanColumn({
               card={card}
               reduced={reduced}
               dragging={draggingRef === card.ref}
-              onDragStart={onCardDragStart}
-              onDragEnd={onCardDragEnd}
+              settling={settlingRef === card.ref}
+              onLift={onCardLift}
               onOpen={onCardOpen}
+              consumeDropClick={consumeDropClick}
+              registerCard={registerCard}
+              unregisterCard={unregisterCard}
             />
           ))}
         </AnimatePresence>

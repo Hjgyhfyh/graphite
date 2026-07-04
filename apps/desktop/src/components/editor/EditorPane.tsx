@@ -1,17 +1,60 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ElementType, ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ElementType, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { BookOpen, Check, PencilLine } from 'lucide-react';
-import { createEditor, parseBlocks, toggleTaskOnLine } from '@graphite/editor';
-import type { EditorHandle, MdBlock, MdInline, WikiLinkItem } from '@graphite/editor';
+import {
+  Bold,
+  BookOpen,
+  CalendarDays,
+  Check,
+  Clock3,
+  Code,
+  Copy,
+  Heading1,
+  Heading2,
+  Heading3,
+  ImagePlus,
+  Italic,
+  PencilLine,
+  Pilcrow,
+  Scissors,
+  Strikethrough,
+} from 'lucide-react';
+import type { EditorView } from '@codemirror/view';
+import {
+  attachmentInsertPos,
+  attachmentMarkdown,
+  beginAttachmentUpload,
+  createEditor,
+  finishAttachmentUpload,
+  headingLevelAt,
+  inlineFormatState,
+  parseBlocks,
+  setHeadingLevel,
+  splitFrontmatter,
+  toggleInlineFormat,
+  toggleTaskOnLine,
+} from '@graphite/editor';
+import type {
+  EditorHandle,
+  FrontmatterEntry,
+  HeadingLevel,
+  InlineMarker,
+  MdBlock,
+  MdInline,
+  WikiLinkItem,
+} from '@graphite/editor';
 import { GRAPHITE_EVENT, commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteChangedEvent, NoteRef } from '@graphite/bindings';
 import { listen } from '@tauri-apps/api/event';
-import { Tooltip, cx, easePoints } from '@graphite/ui';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { StatusPill, Tooltip, cx, easePoints } from '@graphite/ui';
+import type { NoteStatus } from '@graphite/ui';
 import { titleFromRef, useTabsStore } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import { Presence, usePrefersReducedMotion } from '../../motion';
+import { Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
+import { NoteIcon } from '../tree/NoteIcon';
 import { CopyPageButton } from '../bundle/CopyPageButton';
 
 export const WELCOME_NOTE_REF: NoteRef = 'path:Добро пожаловать.md';
@@ -59,6 +102,93 @@ function openExternal(href: string): void {
     /* opening external links is best-effort outside the desktop shell */
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Вложения (#29): сохранение, кэш превью и резолв ссылок на картинки  */
+/* ------------------------------------------------------------------ */
+
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|tiff?|ico)$/i;
+const EXTERNAL_SRC_RE = /^(?:https?:|data:|blob:|asset:|file:)/i;
+
+/** Живые blob-URL вложений, вставленных в этой сессии: превью без чтения диска. */
+const assetObjectUrls = new Map<string, string>();
+
+let vaultRootPromise: Promise<string | undefined> | null = null;
+
+function vaultRootPath(): Promise<string | undefined> {
+  vaultRootPromise ??= commands
+    .vaultInfo()
+    .then((info) => info.root)
+    .catch(() => {
+      vaultRootPromise = null;
+      return undefined;
+    });
+  return vaultRootPromise;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('не удалось прочитать изображение из буфера'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function saveAttachmentBlob(blob: Blob, ext: string): Promise<string> {
+  let dataUrl: string;
+  try {
+    dataUrl = await blobToDataUrl(blob);
+  } catch {
+    throw new Error('Не удалось прочитать изображение из буфера');
+  }
+  try {
+    const res = await commands.saveAttachment({ dataBase64: dataUrl, ext });
+    const prior = assetObjectUrls.get(res.relPath);
+    if (prior !== undefined) {
+      URL.revokeObjectURL(prior);
+    }
+    assetObjectUrls.set(res.relPath, URL.createObjectURL(blob));
+    return res.relPath;
+  } catch (error) {
+    throw new Error(describeError(error, 'Не удалось сохранить изображение'));
+  }
+}
+
+function resolveImageSrc(target: string): string | Promise<string | undefined> | undefined {
+  if (EXTERNAL_SRC_RE.test(target)) {
+    return target;
+  }
+  const cached = assetObjectUrls.get(target);
+  if (cached !== undefined) {
+    return cached;
+  }
+  if (!isTauriAvailable()) {
+    return undefined;
+  }
+  return vaultRootPath().then((root) => {
+    if (root === undefined) {
+      return undefined;
+    }
+    const rel = target.replace(/^\.\//, '');
+    const abs = /^[A-Za-z]:[\\/]/.test(rel) ? rel : `${root.replace(/[\\/]+$/, '')}/${rel}`;
+    return convertFileSrc(abs);
+  });
+}
+
+function openAttachment(target: string): void {
+  if (isExternalHref(target)) {
+    openExternal(target);
+    return;
+  }
+  commands.revealInExplorer(`path:${target}`).catch(() => {
+    useUiStore.getState().pushToast({ kind: 'info', text: 'Файл вложения не найден на диске' });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Режим чтения (#5, #6)                                                */
+/* ------------------------------------------------------------------ */
 
 const HEADING_TAG: Record<1 | 2 | 3 | 4 | 5 | 6, ElementType> = {
   1: 'h1',
@@ -171,6 +301,29 @@ function renderInline(nodes: readonly MdInline[], keyPrefix: string, ctx: Inline
   });
 }
 
+function inlineText(nodes: readonly MdInline[]): string {
+  let out = '';
+  for (const node of nodes) {
+    switch (node.kind) {
+      case 'text':
+      case 'code':
+        out += node.value;
+        break;
+      case 'strong':
+      case 'em':
+      case 'link':
+        out += inlineText(node.children);
+        break;
+      case 'wikilink':
+        out += node.label;
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
 interface ReadingItemProps {
   block: Extract<MdBlock, { kind: 'list' }>['items'][number];
   keyPrefix: string;
@@ -266,15 +419,189 @@ function renderBlock(block: MdBlock, key: string, ctx: InlineContext, onToggleTa
   }
 }
 
+const STATUS_PILL: Readonly<Record<string, NoteStatus>> = {
+  inbox: 'inbox',
+  shaping: 'shaping',
+  planned: 'plan',
+  active: 'doing',
+  done: 'done',
+  iced: 'ice',
+};
+
+const PRIORITY_CHIP: Readonly<Record<string, { label: string; className: string }>> = {
+  urgent: { label: 'Срочно', className: 'bg-danger/15 text-danger' },
+  high: { label: 'Важно', className: 'bg-warn/15 text-warn' },
+  normal: { label: 'Обычный', className: 'bg-accent/15 text-accent' },
+  low: { label: 'Низкий', className: 'bg-bg-3 text-text-2' },
+};
+
+function fmValue(entries: readonly FrontmatterEntry[], key: string): string | undefined {
+  const hit = entries.find((entry) => entry.key === key);
+  return hit !== undefined && hit.value.length > 0 ? hit.value : undefined;
+}
+
+function fmItems(entries: readonly FrontmatterEntry[], key: string): string[] {
+  const hit = entries.find((entry) => entry.key === key);
+  if (hit === undefined) {
+    return [];
+  }
+  if (hit.items.length > 0) {
+    return [...hit.items];
+  }
+  return hit.value.length > 0 ? [hit.value] : [];
+}
+
+function formatRuDate(value: string): string | undefined {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long' };
+  if (date.getFullYear() !== new Date().getFullYear()) {
+    options.year = 'numeric';
+  }
+  return new Intl.DateTimeFormat('ru-RU', options).format(date);
+}
+
+interface ReadingHeaderProps {
+  entries: readonly FrontmatterEntry[];
+  fallbackTitle: string;
+  hideTitle: boolean;
+  reduced: boolean;
+}
+
+/**
+ * Аккуратная шапка режима чтения (#6): вместо сырого YAML — заголовок из
+ * frontmatter, статус, даты и чипы тегов/алиасов. Технические поля скрыты.
+ */
+function ReadingHeader({ entries, fallbackTitle, hideTitle, reduced }: ReadingHeaderProps) {
+  const title = fmValue(entries, 'title') ?? fallbackTitle;
+  const icon = fmValue(entries, 'icon');
+  const iconColor = fmValue(entries, 'icon_color') ?? fmValue(entries, 'iconColor');
+  const status = fmValue(entries, 'status');
+  const pill = status !== undefined ? STATUS_PILL[status] : undefined;
+  const priority = fmValue(entries, 'priority');
+  const priorityChip = priority !== undefined ? PRIORITY_CHIP[priority] : undefined;
+  const updated = fmValue(entries, 'updated');
+  const updatedLabel = updated !== undefined ? formatRuDate(updated) : undefined;
+  const due = fmValue(entries, 'due');
+  const dueLabel = due !== undefined ? formatRuDate(due) : undefined;
+  const tags = fmItems(entries, 'tags');
+  const aliases = fmItems(entries, 'aliases');
+
+  const showTitle = !hideTitle && title.length > 0;
+  const hasMeta = pill !== undefined || priorityChip !== undefined || updatedLabel !== undefined || dueLabel !== undefined;
+  const hasChips = tags.length > 0 || aliases.length > 0;
+
+  if (!showTitle && !hasMeta && !hasChips) {
+    return null;
+  }
+
+  return (
+    <motion.header
+      initial={reduced ? { opacity: 0 } : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: reduced ? 0.08 : 0.22, ease: easePoints.out }}
+      className="mb-7"
+    >
+      {showTitle ? (
+        <div className="flex items-start gap-3">
+          {icon !== undefined ? (
+            <NoteIcon icon={icon} color={iconColor} size={26} className="mt-[7px] shrink-0" />
+          ) : null}
+          <h1 className="text-[30px] font-[650] leading-[40px] tracking-[-0.01em] text-text-0">{title}</h1>
+        </div>
+      ) : null}
+      {hasMeta ? (
+        <div
+          className={cx('flex flex-wrap items-center gap-2', showTitle && 'mt-3')}
+          style={{ fontFamily: 'var(--font-ui)' }}
+        >
+          {pill !== undefined ? <StatusPill status={pill} /> : null}
+          {priorityChip !== undefined ? (
+            <span
+              className={cx(
+                'inline-flex h-[22px] items-center rounded-full px-2.5 text-caption font-medium',
+                priorityChip.className,
+              )}
+            >
+              {priorityChip.label}
+            </span>
+          ) : null}
+          {dueLabel !== undefined ? (
+            <span className="inline-flex h-[22px] items-center gap-1.5 rounded-full border border-stroke-1 bg-bg-2 px-2.5 text-caption text-text-1">
+              <CalendarDays size={12} strokeWidth={1.75} className="text-text-2" />
+              срок {dueLabel}
+            </span>
+          ) : null}
+          {updatedLabel !== undefined ? (
+            <span className="inline-flex items-center gap-1.5 text-caption text-text-2">
+              <Clock3 size={12} strokeWidth={1.75} />
+              обновлено {updatedLabel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {hasChips ? (
+        <div
+          className={cx('flex flex-wrap items-center gap-1.5', (showTitle || hasMeta) && 'mt-3')}
+          style={{ fontFamily: 'var(--font-ui)' }}
+        >
+          {tags.map((tag) => (
+            <span
+              key={`t.${tag}`}
+              className="inline-flex h-[22px] items-center rounded-full bg-accent/10 px-2.5 text-caption text-accent"
+            >
+              #{tag}
+            </span>
+          ))}
+          {aliases.map((alias) => (
+            <span
+              key={`a.${alias}`}
+              className="inline-flex h-[22px] items-center rounded-full border border-stroke-1 bg-bg-2 px-2.5 text-caption italic text-text-2"
+            >
+              {alias}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div aria-hidden className="mt-7 h-px bg-stroke-0" />
+    </motion.header>
+  );
+}
+
 interface ReadingViewProps {
   doc: string;
+  noteRef: NoteRef;
   reduced: boolean;
   onToggleTask: (line: number) => void;
   onOpenLink: (target: string) => void;
 }
 
-function ReadingView({ doc, reduced, onToggleTask, onOpenLink }: ReadingViewProps) {
-  const blocks = useMemo(() => parseBlocks(doc), [doc]);
+function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: ReadingViewProps) {
+  const split = useMemo(() => splitFrontmatter(doc), [doc]);
+  const blocks = useMemo(
+    () => (split !== null ? parseBlocks(split.body, split.bodyLine) : parseBlocks(doc)),
+    [split, doc],
+  );
+  const entries = split?.frontmatter.entries;
+  const hideTitle = useMemo(() => {
+    if (entries === undefined) {
+      return false;
+    }
+    const title = fmValue(entries, 'title');
+    if (title === undefined) {
+      return false;
+    }
+    const first = blocks.find((block) => block.kind === 'heading');
+    return (
+      first !== undefined &&
+      first.kind === 'heading' &&
+      first.level === 1 &&
+      inlineText(first.content).trim().toLowerCase() === title.trim().toLowerCase()
+    );
+  }, [entries, blocks]);
+
   const ctx: InlineContext = { onOpenLink };
   return (
     <motion.div
@@ -285,7 +612,15 @@ function ReadingView({ doc, reduced, onToggleTask, onOpenLink }: ReadingViewProp
       exit={{ opacity: 0 }}
       transition={{ duration: reduced ? 0.08 : 0.16, ease: easePoints.out }}
     >
-      <div className="mx-auto max-w-[70ch] px-6 py-12" style={{ fontFamily: READING_FONT }}>
+      <div className="mx-auto max-w-[calc(72ch+48px)] px-6 py-12" style={{ fontFamily: READING_FONT }}>
+        {entries !== undefined ? (
+          <ReadingHeader
+            entries={entries}
+            fallbackTitle={titleFromRef(noteRef)}
+            hideTitle={hideTitle}
+            reduced={reduced}
+          />
+        ) : null}
         {blocks.length === 0 ? (
           <p className="text-ui text-text-2">Пустая заметка — переключитесь в режим правки, чтобы начать.</p>
         ) : (
@@ -309,6 +644,204 @@ function ReadingView({ doc, reduced, onToggleTask, onOpenLink }: ReadingViewProp
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Контекст-меню форматирования по выделению (#11)                      */
+/* ------------------------------------------------------------------ */
+
+interface SelectionMenuState {
+  x: number;
+  y: number;
+}
+
+interface SelectionMenuProps {
+  at: SelectionMenuState;
+  view: EditorView;
+  reduced: boolean;
+  onClose: () => void;
+}
+
+interface InlineAction {
+  icon: typeof Bold;
+  label: string;
+  kbd: string;
+  marker: InlineMarker;
+  active: boolean;
+}
+
+interface HeadingAction {
+  icon: typeof Heading1;
+  label: string;
+  level: HeadingLevel;
+}
+
+const HEADING_ACTIONS: readonly HeadingAction[] = [
+  { icon: Heading1, label: 'Заголовок 1', level: 1 },
+  { icon: Heading2, label: 'Заголовок 2', level: 2 },
+  { icon: Heading3, label: 'Заголовок 3', level: 3 },
+  { icon: Pilcrow, label: 'Обычный текст', level: 0 },
+];
+
+const MENU_ROW =
+  'flex w-full select-none items-center gap-2.5 rounded-s px-2.5 py-1.5 text-ui transition-colors duration-[120ms]';
+
+function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState(at);
+
+  const formats = inlineFormatState(view.state);
+  const heading = headingLevelAt(view.state);
+
+  const inlineActions: readonly InlineAction[] = [
+    { icon: Bold, label: 'Жирный', kbd: 'Ctrl+B', marker: '**', active: formats.strong },
+    { icon: Italic, label: 'Курсив', kbd: 'Ctrl+I', marker: '*', active: formats.em },
+    { icon: Strikethrough, label: 'Зачёркнутый', kbd: 'Ctrl+Shift+X', marker: '~~', active: formats.strike },
+    { icon: Code, label: 'Код', kbd: 'Ctrl+E', marker: '`', active: formats.code },
+  ];
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (el === null) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const pad = 8;
+    setPos({
+      x: Math.max(pad, Math.min(at.x, window.innerWidth - rect.width - pad)),
+      y: Math.max(pad, Math.min(at.y, window.innerHeight - rect.height - pad)),
+    });
+  }, [at]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const close = useCallback(() => {
+    onClose();
+    view.focus();
+  }, [onClose, view]);
+
+  const runInline = (marker: InlineMarker) => {
+    toggleInlineFormat(view, marker);
+    close();
+  };
+
+  const runHeading = (level: HeadingLevel) => {
+    setHeadingLevel(view, level);
+    close();
+  };
+
+  const runClipboard = (cut: boolean) => {
+    const range = view.state.selection.main;
+    const text = view.state.sliceDoc(range.from, range.to);
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        if (cut) {
+          view.dispatch({ changes: { from: range.from, to: range.to }, userEvent: 'delete.cut' });
+        }
+      })
+      .catch(() => {
+        useUiStore.getState().pushToast({ kind: 'error', text: 'Буфер обмена недоступен' });
+      });
+    close();
+  };
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onPointerDown={close}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          close();
+        }}
+      />
+      <motion.div
+        ref={menuRef}
+        role="menu"
+        aria-label="Форматирование выделения"
+        className="fixed z-50 min-w-[236px] rounded-m border border-stroke-1 bg-bg-2 p-1.5 shadow-3"
+        style={{ left: pos.x, top: pos.y, transformOrigin: 'top left' }}
+        initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.94, y: -4 }}
+        animate={reduced ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0, transition: springSnappy }}
+        exit={{ opacity: 0, transition: { duration: 0.1, ease: easePoints.in } }}
+      >
+        {inlineActions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            role="menuitem"
+            onClick={() => runInline(action.marker)}
+            className={cx(
+              MENU_ROW,
+              action.active ? 'bg-accent/10 text-accent' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
+            )}
+          >
+            <action.icon size={15} strokeWidth={1.75} className="shrink-0" />
+            <span className="flex-1 text-left">{action.label}</span>
+            <span className="font-mono text-micro text-text-3">{action.kbd}</span>
+          </button>
+        ))}
+        <div aria-hidden className="mx-1.5 my-1 h-px bg-stroke-0" />
+        <p className="px-2.5 pb-1 pt-1.5 text-micro font-medium uppercase tracking-[0.08em] text-text-3">
+          Размер текста
+        </p>
+        {HEADING_ACTIONS.map((action) => {
+          const active = action.level === heading;
+          return (
+            <button
+              key={action.label}
+              type="button"
+              role="menuitem"
+              onClick={() => runHeading(action.level)}
+              className={cx(
+                MENU_ROW,
+                active ? 'bg-accent/10 text-accent' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
+              )}
+            >
+              <action.icon size={15} strokeWidth={1.75} className="shrink-0" />
+              <span className="flex-1 text-left">{action.label}</span>
+              {active ? <Check size={13} strokeWidth={2} className="text-accent" /> : null}
+            </button>
+          );
+        })}
+        <div aria-hidden className="mx-1.5 my-1 h-px bg-stroke-0" />
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runClipboard(false)}
+          className={cx(MENU_ROW, 'text-text-1 hover:bg-bg-3 hover:text-text-0')}
+        >
+          <Copy size={15} strokeWidth={1.75} className="shrink-0" />
+          <span className="flex-1 text-left">Копировать</span>
+          <span className="font-mono text-micro text-text-3">Ctrl+C</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runClipboard(true)}
+          className={cx(MENU_ROW, 'text-text-1 hover:bg-bg-3 hover:text-text-0')}
+        >
+          <Scissors size={15} strokeWidth={1.75} className="shrink-0" />
+          <span className="flex-1 text-left">Вырезать</span>
+          <span className="font-mono text-micro text-text-3">Ctrl+X</span>
+        </button>
+      </motion.div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Панель редактора                                                     */
+/* ------------------------------------------------------------------ */
+
 export interface EditorPaneProps {
   tabId: string;
   noteRef: NoteRef;
@@ -323,6 +856,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
   const saveTimerRef = useRef<number | undefined>(undefined);
   const savingRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  const dragPathsRef = useRef<string[]>([]);
 
   const setDirty = useTabsStore((s) => s.setDirty);
   const readingMode = useUiStore((s) => s.readingMode);
@@ -331,6 +865,8 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
 
   const [docText, setDocText] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [menu, setMenu] = useState<SelectionMenuState | null>(null);
+  const [dropActive, setDropActive] = useState(false);
 
   const isWelcome = noteRef === WELCOME_NOTE_REF;
 
@@ -497,6 +1033,15 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
         initialDoc: content,
         readOnly,
         linkSource,
+        attachments: readOnly
+          ? undefined
+          : {
+              save: saveAttachmentBlob,
+              onError: (message) => {
+                useUiStore.getState().pushToast({ kind: 'error', text: message });
+              },
+            },
+        images: { resolveSrc: resolveImageSrc, onOpen: openAttachment },
         onChange: (next) => {
           if (isWelcome) {
             return;
@@ -546,6 +1091,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
     return () => {
       disposed = true;
       flushSave();
+      setMenu(null);
       editorRef.current?.destroy();
       editorRef.current = null;
     };
@@ -553,28 +1099,36 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
 
   useEffect(() => {
     if (readingMode) {
+      setMenu(null);
       setDocText(docRef.current);
     } else if (loaded) {
       editorRef.current?.focus();
     }
   }, [readingMode, loaded]);
 
+  // Синк окон одной заметки (#4): buffer_save другого окна (и любые внешние
+  // правки) приходят событием note_changed. Своя запись узнаётся по rev; при
+  // чистом буфере содержимое перечитывается с сохранением позиции курсора.
   useEffect(() => {
     if (isWelcome || !isTauriAvailable()) {
       return;
     }
     let active = true;
-    const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
-      const payload = event.payload;
-      if (!active || payload.ref !== noteRef || payload.actor === 'user') {
+    let syncing = false;
+    let queued = false;
+    let queuedHighlight = false;
+
+    const applyFresh = (highlight: boolean) => {
+      if (syncing) {
+        queued = true;
+        queuedHighlight = queuedHighlight || highlight;
         return;
       }
-      if (editorRef.current === null) {
-        return;
-      }
-      commands.noteRead({ ref: noteRef }).then(
-        (res) => {
-          if (!active) {
+      syncing = true;
+      commands
+        .noteRead({ ref: noteRef })
+        .then((res) => {
+          if (!active || editorRef.current === null) {
             return;
           }
           if (res.content === docRef.current) {
@@ -586,7 +1140,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
             return;
           }
           if (!dirtyRef.current) {
-            applyDisk(res.content, res.rev, true);
+            applyDisk(res.content, res.rev, highlight);
             return;
           }
           useUiStore.getState().pushToast({
@@ -599,15 +1153,152 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
               },
             },
           });
-        },
-        () => undefined,
-      );
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          syncing = false;
+          if (queued && active) {
+            queued = false;
+            const highlight = queuedHighlight;
+            queuedHighlight = false;
+            applyFresh(highlight);
+          }
+        });
+    };
+
+    const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
+      const payload = event.payload;
+      if (!active || payload.ref !== noteRef || payload.kind === 'removed') {
+        return;
+      }
+      if (payload.rev === baseRevRef.current) {
+        return;
+      }
+      if (savingRef.current || pendingSaveRef.current) {
+        return;
+      }
+      if (editorRef.current === null) {
+        return;
+      }
+      applyFresh(payload.actor !== 'user');
     });
     return () => {
       active = false;
       void subscription.then((unlisten) => unlisten());
     };
   }, [noteRef, isWelcome, tabId, setDirty, applyDisk]);
+
+  // Drag-drop картинок из проводника (#29): Tauri перехватывает нативный дроп,
+  // поэтому слушаем его событие и вставляем вложение по координатам броска.
+  useEffect(() => {
+    if (isWelcome || !isTauriAvailable()) {
+      return;
+    }
+    let active = true;
+    let unlisten: (() => void) | undefined;
+
+    const pointInHost = (physicalX: number, physicalY: number): { x: number; y: number } | null => {
+      const host = hostRef.current;
+      if (host === null) {
+        return null;
+      }
+      const scale = window.devicePixelRatio || 1;
+      const x = physicalX / scale;
+      const y = physicalY / scale;
+      const rect = host.getBoundingClientRect();
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+        return null;
+      }
+      return { x, y };
+    };
+
+    const dropImages = (paths: string[], x: number, y: number) => {
+      const handle = editorRef.current;
+      if (handle === null) {
+        return;
+      }
+      const view = handle.view;
+      const pos = attachmentInsertPos(
+        view,
+        view.posAtCoords({ x, y }) ?? view.state.selection.main.from,
+      );
+      const uploadId = beginAttachmentUpload(view, pos);
+      void (async () => {
+        const rels: string[] = [];
+        let failure: string | null = null;
+        for (const path of paths) {
+          try {
+            const res = await commands.saveAttachmentFromPath({ srcPath: path });
+            rels.push(res.relPath);
+          } catch (error) {
+            failure = describeError(error, 'Не удалось сохранить изображение');
+          }
+        }
+        if (rels.length === 0) {
+          finishAttachmentUpload(view, uploadId, null);
+          if (failure !== null) {
+            useUiStore.getState().pushToast({ kind: 'error', text: failure });
+          }
+          return;
+        }
+        const markdown = rels
+          .map((rel, index) => (index === 0 ? attachmentMarkdown(view, pos, rel) : `![](${rel})\n`))
+          .join('');
+        finishAttachmentUpload(view, uploadId, markdown);
+        if (failure !== null) {
+          useUiStore.getState().pushToast({ kind: 'error', text: failure });
+        }
+      })();
+    };
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (!active) {
+          return;
+        }
+        const payload = event.payload;
+        if (payload.type === 'leave') {
+          dragPathsRef.current = [];
+          setDropActive(false);
+          return;
+        }
+        if (payload.type === 'enter') {
+          dragPathsRef.current = payload.paths.filter((path) => IMAGE_PATH_RE.test(path));
+        }
+        const hasImages = dragPathsRef.current.length > 0;
+        const inside =
+          hasImages && !useUiStore.getState().readingMode
+            ? pointInHost(payload.position.x, payload.position.y)
+            : null;
+        if (payload.type === 'drop') {
+          const paths = payload.paths.filter((path) => IMAGE_PATH_RE.test(path));
+          dragPathsRef.current = [];
+          setDropActive(false);
+          const point = paths.length > 0 && !useUiStore.getState().readingMode
+            ? pointInHost(payload.position.x, payload.position.y)
+            : null;
+          if (point !== null) {
+            dropImages(paths, point.x, point.y);
+          }
+          return;
+        }
+        setDropActive(inside !== null);
+      })
+      .then((fn) => {
+        if (active) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+      setDropActive(false);
+      unlisten?.();
+    };
+  }, [noteRef, isWelcome]);
 
   const handleReadingToggle = useCallback(
     (line: number) => {
@@ -627,8 +1318,31 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
     [isWelcome, tabId, setDirty, scheduleSave],
   );
 
+  const handleContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (useUiStore.getState().readingMode) {
+      return;
+    }
+    const host = hostRef.current;
+    if (host === null || !(event.target instanceof Node) || !host.contains(event.target)) {
+      return;
+    }
+    const handle = editorRef.current;
+    if (handle === null || handle.view.state.readOnly) {
+      return;
+    }
+    if (handle.view.state.selection.main.empty) {
+      return;
+    }
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY });
+  }, []);
+
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+  }, []);
+
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col" onContextMenu={handleContextMenu}>
       <div
         ref={hostRef}
         className="min-h-0 flex-1 overflow-hidden"
@@ -640,10 +1354,48 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
           <ReadingView
             key="reading"
             doc={docText}
+            noteRef={noteRef}
             reduced={reduced}
             onToggleTask={handleReadingToggle}
             onOpenLink={openLink}
           />
+        ) : null}
+      </Presence>
+
+      <Presence>
+        {menu !== null && editorRef.current !== null ? (
+          <SelectionMenu
+            key="selection-menu"
+            at={menu}
+            view={editorRef.current.view}
+            reduced={reduced}
+            onClose={closeMenu}
+          />
+        ) : null}
+      </Presence>
+
+      <Presence>
+        {dropActive ? (
+          <motion.div
+            key="drop-hint"
+            className="pointer-events-none absolute inset-0 z-30 p-3"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduced ? 0.08 : 0.14, ease: easePoints.out }}
+          >
+            <motion.div
+              className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-l border border-dashed border-accent/60 bg-bg-0/80"
+              initial={reduced ? { scale: 1 } : { scale: 0.985 }}
+              animate={{ scale: 1, transition: springSnappy }}
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
+                <ImagePlus size={22} strokeWidth={1.75} />
+              </span>
+              <p className="text-ui font-medium text-text-0">Отпустите — картинка ляжет в заметку</p>
+              <p className="text-caption text-text-2">Файл сохранится во вложения хранилища</p>
+            </motion.div>
+          </motion.div>
         ) : null}
       </Presence>
 

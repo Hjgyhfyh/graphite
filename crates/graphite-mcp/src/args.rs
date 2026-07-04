@@ -603,6 +603,36 @@ pub struct IdeaToTasksArgs {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(crate = "rmcp::schemars")]
+pub struct AddPathNoteArgs {
+    /// Абсолютные пути внешних файлов/папок — на каждый создаётся заметка-ссылка.
+    pub paths: Vec<String>,
+    /// Родитель заметок: "id:…" или "path:…"; по умолчанию — «Входящие».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct SaveAttachmentArgs {
+    /// Содержимое файла в base64 (допускается и data-URL `data:…;base64,…`).
+    /// Практический потолок канала ~700 КБ; крупные файлы — save_attachment_from_path.
+    pub data_base64: String,
+    /// Расширение файла без точки, например "png".
+    pub ext: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
+pub struct SaveAttachmentFromPathArgs {
+    /// Абсолютный путь исходного файла на диске.
+    pub src_path: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(crate = "rmcp::schemars")]
 pub struct UndoOpArgs {
     /// opId операции для отката (из journal_list).
     pub op_id: String,

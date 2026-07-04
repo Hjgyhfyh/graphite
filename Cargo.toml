@@ -35,6 +35,7 @@ specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 ulid = "1"
+base64 = "0.22"
 fd-lock = "4"
 interprocess = { version = "2", features = ["tokio"] }
 blake3 = "1"

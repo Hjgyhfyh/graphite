@@ -1,18 +1,19 @@
-import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
-import { motion } from 'motion/react';
+import { LayoutGroup, motion } from 'motion/react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ChevronDown, ChevronRight, Layers, Pin, PinOff, Plus, SquareArrowOutUpRight, X } from 'lucide-react';
-import { cx, springTransition } from '@graphite/ui';
+import { Tooltip, cx, springTransition } from '@graphite/ui';
 import { commands } from '@graphite/bindings';
+import type { NoteRef } from '@graphite/bindings';
 import { REDUCED_CROSSFADE, usePrefersReducedMotion } from '../../motion';
 import { usePanesStore } from '../../stores/panesStore';
-import { useTabsStore } from '../../stores/tabsStore';
+import { buildTabStrip, flattenStrip, sortGroupsForStrip, useTabsStore } from '../../stores/tabsStore';
 import type { Tab, TabGroup } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
-import { GroupChip, buildTabStrip, flattenStrip, normalizeOrder, planDrop, pruneEmptyGroups } from './TabGroups';
+import { GroupChip, planDrop, planGroupReorder } from './TabGroups';
 import type { DropTarget } from './TabGroups';
 
 export interface TabBarProps {
@@ -21,6 +22,8 @@ export interface TabBarProps {
 }
 
 export const TAB_DND_TYPE = 'application/x-graphite-tab';
+export const NOTE_DND_TYPE = 'application/x-graphite-note';
+export const GROUP_DND_TYPE = 'application/x-graphite-tabgroup';
 
 const FULL_TAB =
   'group relative flex h-7 w-full items-center gap-1.5 rounded-s px-2.5 text-ui transition-colors duration-[120ms]';
@@ -33,9 +36,14 @@ const MENU_ITEM =
 const DD_CONTENT =
   'z-50 max-h-80 w-64 origin-(--radix-dropdown-menu-content-transform-origin) animate-pop overflow-y-auto rounded-m border border-stroke-1 bg-bg-2 p-1 shadow-3';
 
+type GroupDropState = { groupId: string; before: boolean } | 'end';
+
+function hasType(event: ReactDragEvent<HTMLElement>, type: string): boolean {
+  return event.dataTransfer.types.includes(type);
+}
+
 interface TabItemProps {
   tab: Tab;
-  paneId: string;
   active: boolean;
   compact: boolean;
   groupColor?: string;
@@ -54,7 +62,6 @@ interface TabItemProps {
 
 function TabItem({
   tab,
-  paneId,
   active,
   compact,
   groupColor,
@@ -74,36 +81,16 @@ function TabItem({
   const close = useTabsStore((s) => s.close);
 
   const pinToggle = () => {
-    const store = useTabsStore.getState();
-    const current = store.tabs.find((t) => t.id === tab.id);
-    if (current === undefined) {
-      return;
-    }
-    if (!current.pinned) {
-      store.removeFromGroup(tab.id);
-    }
-    store.togglePin(tab.id);
-    normalizeOrder(paneId);
+    useTabsStore.getState().togglePin(tab.id);
   };
   const joinGroup = (groupId: string) => {
-    const store = useTabsStore.getState();
-    if (tab.pinned) {
-      store.togglePin(tab.id);
-    }
-    store.addToGroup(tab.id, groupId);
-    normalizeOrder(paneId);
+    useTabsStore.getState().addToGroup(tab.id, groupId);
   };
   const createGroup = () => {
-    const store = useTabsStore.getState();
-    if (tab.pinned) {
-      store.togglePin(tab.id);
-    }
-    store.createGroup(undefined, [tab.id]);
-    normalizeOrder(paneId);
+    useTabsStore.getState().createGroup(undefined, [tab.id]);
   };
   const leaveGroup = () => {
     useTabsStore.getState().removeFromGroup(tab.id);
-    normalizeOrder(paneId);
   };
   const detach = () => {
     commands
@@ -116,12 +103,12 @@ function TabItem({
 
   return (
     <motion.div
-      layout
+      layout={!reduced}
       ref={(el) => registerEl(tab.id, el)}
       className={cx('relative flex h-7', compact ? 'w-9 shrink-0' : 'min-w-[120px] max-w-[220px] flex-1 basis-0')}
-      initial={{ opacity: 0, scale: 0.92 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={springTransition('snappy')}
+      initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.92 }}
+      animate={{ opacity: dragging ? 0.45 : 1, scale: dragging && !reduced ? 0.96 : 1 }}
+      transition={reduced ? REDUCED_CROSSFADE : springTransition('snappy')}
     >
       <ContextMenu.Root>
         <ContextMenu.Trigger asChild>
@@ -156,7 +143,6 @@ function TabItem({
               compact ? PIN_TAB : FULL_TAB,
               'cursor-default select-none',
               active ? 'text-text-0' : 'text-text-1 hover:bg-bg-2 hover:text-text-0',
-              dragging && 'opacity-40',
             )}
           >
             {active ? (
@@ -306,24 +292,19 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
   const activate = useTabsStore((s) => s.activate);
   const close = useTabsStore((s) => s.close);
   const toggleGroupCollapsed = useTabsStore((s) => s.toggleGroupCollapsed);
+  const draggingTabId = useTabsStore((s) => s.draggingTabId);
+  const draggingGroupId = useTabsStore((s) => s.draggingGroupId);
   const activeTabId = usePanesStore((s) => s.panes.find((p) => p.id === paneId)?.activeTabId);
   const reduced = usePrefersReducedMotion();
 
+  const strip = useMemo(() => buildTabStrip(tabs, groups, paneId), [tabs, groups, paneId]);
+  const menuGroups = useMemo(() => sortGroupsForStrip(groups), [groups]);
   const paneTabs = useMemo(() => tabs.filter((tab) => tab.paneId === paneId), [tabs, paneId]);
-  const strip = useMemo(() => buildTabStrip(paneTabs, groups), [paneTabs, groups]);
-  const groupsInPane = useMemo(() => {
-    const ids = new Set<string>();
-    for (const tab of paneTabs) {
-      if (!tab.pinned && tab.groupId !== undefined) {
-        ids.add(tab.groupId);
-      }
-    }
-    return groups.filter((group) => ids.has(group.id)).sort((a, b) => a.order - b.order);
-  }, [paneTabs, groups]);
 
-  const draggedId = useRef<string | undefined>(undefined);
-  const [dragging, setDragging] = useState<string | undefined>(undefined);
   const [dropTarget, setDropTarget] = useState<DropTarget | undefined>(undefined);
+  const [groupDrop, setGroupDrop] = useState<GroupDropState | undefined>(undefined);
+  const [autoEditGroupId, setAutoEditGroupId] = useState<string | undefined>(undefined);
+  const [plusHot, setPlusHot] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tabEls = useRef<Map<string, HTMLDivElement>>(new Map());
   const [overflow, setOverflow] = useState<{ scrollable: boolean; hidden: number }>({ scrollable: false, hidden: 0 });
@@ -336,124 +317,272 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
     }
   }, []);
 
-  const clearDrag = useCallback(() => {
-    draggedId.current = undefined;
-    setDragging(undefined);
+  const clearDnd = useCallback(() => {
+    const store = useTabsStore.getState();
+    store.setDraggingTab(undefined);
+    store.setDraggingGroup(undefined);
     setDropTarget(undefined);
+    setGroupDrop(undefined);
+    setPlusHot(false);
+  }, []);
+
+  useEffect(() => {
+    const clear = () => {
+      const store = useTabsStore.getState();
+      store.setDraggingTab(undefined);
+      store.setDraggingGroup(undefined);
+      setDropTarget(undefined);
+      setGroupDrop(undefined);
+      setPlusHot(false);
+    };
+    window.addEventListener('dragend', clear);
+    window.addEventListener('drop', clear);
+    return () => {
+      window.removeEventListener('dragend', clear);
+      window.removeEventListener('drop', clear);
+    };
   }, []);
 
   const applyDrop = useCallback(
     (id: string, target: DropTarget) => {
-      clearDrag();
       const dragged = useTabsStore.getState().tabs.find((tab) => tab.id === id);
       if (dragged === undefined) {
+        clearDnd();
         return;
       }
       if (dragged.paneId !== paneId) {
         usePanesStore.getState().moveTabToPane(id, paneId);
       }
       const state = useTabsStore.getState();
-      const current = state.tabs.filter((tab) => tab.paneId === paneId);
-      const plan = planDrop(current, state.groups, id, target);
-      if (plan === null) {
-        return;
-      }
-      const draggedNow = current.find((tab) => tab.id === id);
-      if (plan.unpin) {
-        state.togglePin(id);
-      }
-      if (plan.nextGroupId !== draggedNow?.groupId) {
-        if (plan.nextGroupId !== undefined) {
-          state.addToGroup(id, plan.nextGroupId);
-        } else {
-          state.removeFromGroup(id);
+      const plan = planDrop(state.tabs, state.groups, paneId, id, target);
+      if (plan !== null) {
+        const current = state.tabs.find((tab) => tab.id === id);
+        if (plan.setPinned !== undefined && current !== undefined && plan.setPinned !== current.pinned) {
+          state.togglePin(id);
         }
+        const afterPin = useTabsStore.getState();
+        const tabNow = afterPin.tabs.find((tab) => tab.id === id);
+        if (plan.nextGroupId !== tabNow?.groupId) {
+          if (plan.nextGroupId !== undefined) {
+            afterPin.addToGroup(id, plan.nextGroupId);
+          } else if (tabNow?.groupId !== undefined) {
+            afterPin.removeFromGroup(id);
+          }
+        }
+        useTabsStore.getState().reorder(paneId, plan.orderedIds);
       }
-      state.reorder(paneId, plan.orderedIds);
-      pruneEmptyGroups();
+      clearDnd();
     },
-    [clearDrag, paneId],
+    [clearDnd, paneId],
   );
 
-  const draggedFrom = (event: ReactDragEvent<HTMLDivElement>): string | undefined => {
-    const fromData = event.dataTransfer.getData(TAB_DND_TYPE);
-    return fromData !== '' ? fromData : draggedId.current;
+  const openNoteAt = useCallback(
+    (ref: NoteRef, target: DropTarget) => {
+      useTabsStore.getState().open(ref, { paneId });
+      const opened = useTabsStore
+        .getState()
+        .tabs.find((tab) => tab.paneId === paneId && tab.kind === 'editor' && tab.noteRef === ref);
+      if (opened !== undefined) {
+        applyDrop(opened.id, target);
+      } else {
+        clearDnd();
+      }
+    },
+    [applyDrop, clearDnd, paneId],
+  );
+
+  const draggedTabFrom = (event: ReactDragEvent<HTMLElement>): string => {
+    const data = event.dataTransfer.getData(TAB_DND_TYPE);
+    if (data !== '') {
+      return data;
+    }
+    return hasType(event, TAB_DND_TYPE) ? (useTabsStore.getState().draggingTabId ?? '') : '';
   };
-  const accepts = (event: ReactDragEvent<HTMLDivElement>): boolean =>
-    event.dataTransfer.types.includes(TAB_DND_TYPE);
+  const draggedGroupFrom = (event: ReactDragEvent<HTMLElement>): string => {
+    const data = event.dataTransfer.getData(GROUP_DND_TYPE);
+    if (data !== '') {
+      return data;
+    }
+    return hasType(event, GROUP_DND_TYPE) ? (useTabsStore.getState().draggingGroupId ?? '') : '';
+  };
 
   const handleDragStart = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
-    draggedId.current = id;
-    setDragging(id);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(TAB_DND_TYPE, id);
+    useTabsStore.getState().setDraggingTab(id);
   };
-  const handleTabDragOver = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
-    if (!accepts(event)) {
+  const handleTabDragOver = (event: ReactDragEvent<HTMLDivElement>, id: string, pinnedZone: boolean) => {
+    if (hasType(event, GROUP_DND_TYPE) || (!hasType(event, TAB_DND_TYPE) && !hasType(event, NOTE_DND_TYPE))) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = 'move';
-    if (paneTabs.find((tab) => tab.id === id)?.pinned === true) {
+    event.dataTransfer.dropEffect = hasType(event, TAB_DND_TYPE) ? 'move' : 'copy';
+    const rect = event.currentTarget.getBoundingClientRect();
+    setDropTarget({ type: pinnedZone ? 'pinned' : 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
+  };
+  const handleTabDrop = (event: ReactDragEvent<HTMLDivElement>, id: string, pinnedZone: boolean) => {
+    if (!hasType(event, TAB_DND_TYPE) && !hasType(event, NOTE_DND_TYPE)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const target: DropTarget = {
+      type: pinnedZone ? 'pinned' : 'tab',
+      id,
+      before: event.clientX < rect.left + rect.width / 2,
+    };
+    const draggedTabId = draggedTabFrom(event);
+    if (draggedTabId !== '') {
+      applyDrop(draggedTabId, target);
+      return;
+    }
+    const ref = event.dataTransfer.getData(NOTE_DND_TYPE);
+    if (ref !== '') {
+      openNoteAt(ref, target);
+    } else {
+      clearDnd();
+    }
+  };
+
+  const handleGroupChipDragStart = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(GROUP_DND_TYPE, groupId);
+    useTabsStore.getState().setDraggingGroup(groupId);
+  };
+  const handleGroupChipDragOver = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
+    if (hasType(event, GROUP_DND_TYPE)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+      const rect = event.currentTarget.getBoundingClientRect();
+      setGroupDrop({ groupId, before: event.clientX < rect.left + rect.width / 2 });
       setDropTarget(undefined);
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
-    setDropTarget({ type: 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
-  };
-  const handleTabDrop = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
-    if (!accepts(event)) {
-      return;
+    if (hasType(event, TAB_DND_TYPE) || hasType(event, NOTE_DND_TYPE)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = hasType(event, TAB_DND_TYPE) ? 'move' : 'copy';
+      setDropTarget({ type: 'group', groupId });
     }
+  };
+  const handleGroupChipDrop = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
     event.preventDefault();
     event.stopPropagation();
-    const draggedTabId = draggedFrom(event);
-    if (draggedTabId === undefined) {
+    const draggedGroup = draggedGroupFrom(event);
+    if (draggedGroup !== '') {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const plan = planGroupReorder(useTabsStore.getState().groups, draggedGroup, {
+        type: 'chip',
+        groupId,
+        before: event.clientX < rect.left + rect.width / 2,
+      });
+      if (plan !== null) {
+        useTabsStore.getState().reorderGroups(plan);
+      }
+      clearDnd();
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
-    applyDrop(draggedTabId, { type: 'tab', id, before: event.clientX < rect.left + rect.width / 2 });
+    const draggedTabId = draggedTabFrom(event);
+    if (draggedTabId !== '') {
+      applyDrop(draggedTabId, { type: 'group', groupId });
+      return;
+    }
+    const ref = event.dataTransfer.getData(NOTE_DND_TYPE);
+    if (ref !== '') {
+      openNoteAt(ref, { type: 'group', groupId });
+    } else {
+      clearDnd();
+    }
   };
-  const handleGroupDragOver = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
-    if (!accepts(event)) {
+
+  const handleStripDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (hasType(event, GROUP_DND_TYPE)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      setGroupDrop('end');
+      setDropTarget(undefined);
       return;
     }
+    if (hasType(event, TAB_DND_TYPE) || hasType(event, NOTE_DND_TYPE)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = hasType(event, TAB_DND_TYPE) ? 'move' : 'copy';
+      setDropTarget({ type: 'end' });
+    }
+  };
+  const handleStripDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const draggedGroup = draggedGroupFrom(event);
+    if (draggedGroup !== '') {
+      const plan = planGroupReorder(useTabsStore.getState().groups, draggedGroup, { type: 'groups-end' });
+      if (plan !== null) {
+        useTabsStore.getState().reorderGroups(plan);
+      }
+      clearDnd();
+      return;
+    }
+    const draggedTabId = draggedTabFrom(event);
+    if (draggedTabId !== '') {
+      applyDrop(draggedTabId, { type: 'end' });
+      return;
+    }
+    const ref = event.dataTransfer.getData(NOTE_DND_TYPE);
+    if (ref !== '') {
+      openNoteAt(ref, { type: 'end' });
+    } else {
+      clearDnd();
+    }
+  };
+  const handleStripDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setDropTarget(undefined);
+      setGroupDrop(undefined);
+    }
+  };
+
+  const createEmptyGroup = () => {
+    const id = useTabsStore.getState().createGroup();
+    setAutoEditGroupId(id);
+  };
+  const handlePlusDragOver = (event: ReactDragEvent<HTMLButtonElement>) => {
+    if (hasType(event, TAB_DND_TYPE) || hasType(event, NOTE_DND_TYPE)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = hasType(event, TAB_DND_TYPE) ? 'move' : 'copy';
+      setPlusHot(true);
+    }
+  };
+  const handlePlusDrop = (event: ReactDragEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = 'move';
-    setDropTarget({ type: 'group', groupId });
-  };
-  const handleGroupDrop = (event: ReactDragEvent<HTMLDivElement>, groupId: string) => {
-    if (!accepts(event)) {
+    const store = useTabsStore.getState();
+    const draggedTabId = draggedTabFrom(event);
+    if (draggedTabId !== '') {
+      const dragged = store.tabs.find((tab) => tab.id === draggedTabId);
+      if (dragged !== undefined) {
+        if (dragged.paneId !== paneId) {
+          usePanesStore.getState().moveTabToPane(draggedTabId, paneId);
+        }
+        const id = useTabsStore.getState().createGroup(undefined, [draggedTabId]);
+        setAutoEditGroupId(id);
+      }
+      clearDnd();
       return;
     }
-    event.preventDefault();
-    event.stopPropagation();
-    const draggedTabId = draggedFrom(event);
-    if (draggedTabId === undefined) {
-      return;
+    const ref = event.dataTransfer.getData(NOTE_DND_TYPE);
+    if (ref !== '') {
+      store.open(ref, { paneId });
+      const opened = useTabsStore
+        .getState()
+        .tabs.find((tab) => tab.paneId === paneId && tab.kind === 'editor' && tab.noteRef === ref);
+      if (opened !== undefined) {
+        const id = useTabsStore.getState().createGroup(undefined, [opened.id]);
+        setAutoEditGroupId(id);
+      }
     }
-    applyDrop(draggedTabId, { type: 'group', groupId });
-  };
-  const handleEndDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!accepts(event)) {
-      return;
-    }
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setDropTarget({ type: 'end' });
-  };
-  const handleEndDrop = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (!accepts(event)) {
-      return;
-    }
-    event.preventDefault();
-    const draggedTabId = draggedFrom(event);
-    if (draggedTabId === undefined) {
-      return;
-    }
-    applyDrop(draggedTabId, { type: 'end' });
+    clearDnd();
   };
 
   const closeOthers = (keepId: string) => {
@@ -515,81 +644,130 @@ export function TabBar({ paneId, trailing }: TabBarProps) {
 
   const indicatorId = `tab-indicator-${paneId}`;
   const insertionFor = (id: string): 'before' | 'after' | undefined => {
-    if (dropTarget?.type === 'tab' && dropTarget.id === id) {
+    if ((dropTarget?.type === 'tab' || dropTarget?.type === 'pinned') && dropTarget.id === id) {
       return dropTarget.before ? 'before' : 'after';
     }
     return undefined;
   };
   const sharedTabProps = (tab: Tab, compact: boolean, groupColor?: string) => ({
     tab,
-    paneId,
     compact,
     groupColor,
-    groups: groupsInPane,
+    groups: menuGroups,
     indicatorId,
     reduced,
     active: tab.id === activeTabId,
     insertion: insertionFor(tab.id),
-    dragging: dragging === tab.id,
+    dragging: draggingTabId === tab.id,
     onCloseOthers: () => closeOthers(tab.id),
     onDragStart: (event: ReactDragEvent<HTMLDivElement>) => handleDragStart(event, tab.id),
-    onDragOver: (event: ReactDragEvent<HTMLDivElement>) => handleTabDragOver(event, tab.id),
-    onDrop: (event: ReactDragEvent<HTMLDivElement>) => handleTabDrop(event, tab.id),
-    onDragEnd: clearDrag,
+    onDragOver: (event: ReactDragEvent<HTMLDivElement>) => handleTabDragOver(event, tab.id, compact),
+    onDrop: (event: ReactDragEvent<HTMLDivElement>) => handleTabDrop(event, tab.id, compact),
+    onDragEnd: clearDnd,
     registerEl,
   });
 
   const allInOrder = flattenStrip(strip);
+  const hasGroups = strip.groups.length > 0;
 
   return (
     <div className="shrink-0 border-b border-stroke-0 bg-bg-0">
       <div className="flex h-9 items-center">
-        <div
-          ref={scrollRef}
-          role="tablist"
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2"
-          onDragOver={handleEndDragOver}
-          onDrop={handleEndDrop}
-        >
-          {strip.pinned.map((tab) => (
-            <TabItem key={tab.id} {...sharedTabProps(tab, true)} />
-          ))}
-          {strip.pinned.length > 0 && strip.segments.length > 0 ? (
-            <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 self-center bg-stroke-1" />
-          ) : null}
-          {strip.segments.map((segment) => {
-            if (segment.kind === 'tab') {
-              return <TabItem key={segment.tab.id} {...sharedTabProps(segment.tab, false)} />;
-            }
-            const { group, tabs: members } = segment;
-            const colorVar = resolveIconColor(group.color) ?? 'var(--text-1)';
-            const containsActive = members.some((member) => member.id === activeTabId);
-            const isDropTarget = dropTarget?.type === 'group' && dropTarget.groupId === group.id;
-            const chip = (
-              <GroupChip
-                paneId={paneId}
-                group={group}
-                count={members.length}
-                collapsedView={group.collapsed}
-                containsActive={containsActive}
-                isDropTarget={isDropTarget}
-                onDragOver={(event) => handleGroupDragOver(event, group.id)}
-                onDrop={(event) => handleGroupDrop(event, group.id)}
+        <LayoutGroup id={`tabstrip-${paneId}`}>
+          <div
+            ref={scrollRef}
+            role="tablist"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2"
+            onDragOver={handleStripDragOver}
+            onDrop={handleStripDrop}
+            onDragLeave={handleStripDragLeave}
+          >
+            {strip.pinned.map((tab) => (
+              <TabItem key={tab.id} {...sharedTabProps(tab, true)} />
+            ))}
+            {strip.pinned.length > 0 && (hasGroups || strip.loose.length > 0) ? (
+              <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 self-center bg-stroke-1" />
+            ) : null}
+
+            {strip.groups.map(({ group, tabs: members }) => {
+              const colorVar = resolveIconColor(group.color) ?? 'var(--text-1)';
+              const containsActive = members.some((member) => member.id === activeTabId);
+              const isDropTarget = dropTarget?.type === 'group' && dropTarget.groupId === group.id;
+              const insertion =
+                groupDrop !== undefined && groupDrop !== 'end' && groupDrop.groupId === group.id
+                  ? groupDrop.before
+                    ? 'before'
+                    : 'after'
+                  : undefined;
+              return (
+                <Fragment key={group.id}>
+                  <GroupChip
+                    paneId={paneId}
+                    group={group}
+                    count={members.length}
+                    collapsedView={group.collapsed}
+                    containsActive={containsActive}
+                    isDropTarget={isDropTarget}
+                    dragging={draggingGroupId === group.id}
+                    insertion={insertion}
+                    autoEdit={autoEditGroupId === group.id}
+                    onAutoEditHandled={() => setAutoEditGroupId(undefined)}
+                    onDragStart={(event) => handleGroupChipDragStart(event, group.id)}
+                    onDragEnd={clearDnd}
+                    onDragOver={(event) => handleGroupChipDragOver(event, group.id)}
+                    onDrop={(event) => handleGroupChipDrop(event, group.id)}
+                  />
+                  {!group.collapsed
+                    ? members.map((member) => <TabItem key={member.id} {...sharedTabProps(member, false, colorVar)} />)
+                    : null}
+                </Fragment>
+              );
+            })}
+            {groupDrop === 'end' ? (
+              <motion.span
+                aria-hidden
+                initial={{ scaleY: 0 }}
+                animate={{ scaleY: 1 }}
+                transition={springTransition('snappy')}
+                className="h-5 w-0.5 shrink-0 origin-center rounded-full bg-accent"
               />
-            );
-            if (group.collapsed) {
-              return <Fragment key={group.id}>{chip}</Fragment>;
-            }
-            return (
-              <Fragment key={group.id}>
-                {chip}
-                {members.map((member) => (
-                  <TabItem key={member.id} {...sharedTabProps(member, false, colorVar)} />
-                ))}
-              </Fragment>
-            );
-          })}
-        </div>
+            ) : null}
+            {hasGroups && strip.loose.length > 0 ? (
+              <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 self-center bg-stroke-1" />
+            ) : null}
+
+            {strip.loose.map((tab) => (
+              <TabItem key={tab.id} {...sharedTabProps(tab, false)} />
+            ))}
+            {dropTarget?.type === 'end' ? (
+              <motion.span
+                aria-hidden
+                initial={{ scaleY: 0 }}
+                animate={{ scaleY: 1 }}
+                transition={springTransition('snappy')}
+                className="h-5 w-0.5 shrink-0 origin-center rounded-full bg-accent"
+              />
+            ) : null}
+          </div>
+        </LayoutGroup>
+
+        <Tooltip content="Новая группа вкладок" side="bottom">
+          <button
+            type="button"
+            aria-label="Новая группа вкладок"
+            onClick={createEmptyGroup}
+            onDragOver={handlePlusDragOver}
+            onDragLeave={() => setPlusHot(false)}
+            onDrop={handlePlusDrop}
+            className={cx(
+              'mr-1 flex h-7 shrink-0 items-center gap-1 rounded-s border border-dashed border-stroke-1 px-2 text-caption text-text-2 transition-colors duration-[120ms] hover:bg-bg-2 hover:text-text-0',
+              plusHot && 'border-accent bg-accent-dim text-text-0',
+            )}
+          >
+            <Plus size={13} strokeWidth={1.75} />
+            Группа
+          </button>
+        </Tooltip>
 
         {overflow.scrollable ? (
           <DropdownMenu.Root>

@@ -43,6 +43,7 @@ export interface UiStore {
   reducedMotion: boolean;
   animationSpeed: number;
   floatingCaptureOpen: boolean;
+  onboardingDone: boolean;
   toasts: Toast[];
   setRailView(v: RailView): void;
   toggleSidebar(): void;
@@ -60,6 +61,7 @@ export interface UiStore {
   setAnimationSpeed(speed: number): void;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
+  setOnboardingDone(done: boolean): void;
   pushToast(t: Omit<Toast, 'id'>): string;
   dismissToast(id: string): void;
 }
@@ -87,6 +89,7 @@ export const useUiStore = create<UiStore>()(
       reducedMotion: false,
       animationSpeed: ANIMATION_SPEED_DEFAULT,
       floatingCaptureOpen: false,
+      onboardingDone: false,
       toasts: [],
       setRailView: (v) => {
         set({ railView: v });
@@ -144,6 +147,9 @@ export const useUiStore = create<UiStore>()(
       toggleFloatingCapture: () => {
         set((s) => ({ floatingCaptureOpen: !s.floatingCaptureOpen }));
       },
+      setOnboardingDone: (done) => {
+        set({ onboardingDone: done });
+      },
       pushToast: (t) => {
         const id = crypto.randomUUID();
         set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));
@@ -167,6 +173,7 @@ export const useUiStore = create<UiStore>()(
         readingMode: s.readingMode,
         reducedMotion: s.reducedMotion,
         animationSpeed: s.animationSpeed,
+        onboardingDone: s.onboardingDone,
       }),
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<UiStore>;

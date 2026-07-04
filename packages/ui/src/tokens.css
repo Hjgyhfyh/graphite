@@ -15,6 +15,8 @@
 
   --color-accent: #8B93FF;
   --color-accent-dim: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  --color-selection: #6F6AF8;
+  --color-selection-dim: color-mix(in srgb, var(--color-selection) 40%, transparent);
   --color-ai: #4FD6BE;
   --color-ai-dim: color-mix(in srgb, var(--color-ai) 12%, transparent);
 
@@ -187,6 +189,8 @@
   --text-3: var(--color-text-3);
   --accent: var(--color-accent);
   --accent-dim: var(--color-accent-dim);
+  --selection: var(--color-selection);
+  --selection-dim: var(--color-selection-dim);
   --ai: var(--color-ai);
   --ai-dim: var(--color-ai-dim);
   --ok: var(--color-ok);
@@ -226,7 +230,7 @@
   }
 
   ::selection {
-    background-color: color-mix(in srgb, var(--accent) 25%, transparent);
+    background-color: var(--selection-dim);
   }
 
   :focus-visible {

@@ -71,39 +71,6 @@ impl GraphiteService {
             .map_err(|err| ErrorData::internal_error(format!("сериализация ответа: {err}"), None))
     }
 
-    /// Текущие `icon`/`icon_color` заметки из frontmatter — для set_icon, чтобы
-    /// точечная смена одного поля не стёрла парное (ядро трактует отсутствие
-    /// поля как очистку). Ошибку чтения заметки пробрасываем вызывающему.
-    async fn current_icon(
-        &self,
-        note_ref: &str,
-    ) -> Result<(Option<String>, Option<String>), ErrorData> {
-        let text = self
-            .proxy("note_read", serde_json::json!({ "ref": note_ref }))
-            .await?;
-        let value: Value = serde_json::from_str(&text).map_err(|err| {
-            ErrorData::internal_error(format!("разбор ответа note_read: {err}"), None)
-        })?;
-        if value.get("ok").and_then(Value::as_bool) != Some(true) {
-            let message = value
-                .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("не удалось прочитать заметку");
-            return Err(ErrorData::internal_error(message.to_string(), None));
-        }
-        let frontmatter = value.get("data").and_then(|data| data.get("frontmatter"));
-        let field = |key: &str| {
-            frontmatter
-                .and_then(|fm| fm.get(key))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        };
-        Ok((
-            field("icon"),
-            field("icon_color").or_else(|| field("iconColor")),
-        ))
-    }
 }
 
 #[tool_router]
@@ -383,7 +350,7 @@ impl GraphiteService {
 
     #[tool(
         name = "set_icon",
-        description = "Ставит заметке иконку lucide и/или цвет во frontmatter (icon/iconColor) — для дерева, вкладок и свитчера. Пропуск поля сохраняет текущее значение, пустая строка снимает его.",
+        description = "Ставит заметке иконку lucide и/или цвет во frontmatter (icon/icon_color) — для дерева, вкладок и свитчера. Поля независимы: пропуск сохраняет текущее значение, пустая строка снимает его. Папке (folder-note …/_index.md) так меняется только цвет без смены иконки; отсутствующий _index.md ядро создаёт само.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     async fn set_icon(
@@ -396,18 +363,7 @@ impl GraphiteService {
                 None,
             ));
         }
-        let (icon, color) = if args.icon.is_none() || args.color.is_none() {
-            let (current_icon, current_color) = self.current_icon(&args.r#ref).await?;
-            (args.icon.or(current_icon), args.color.or(current_color))
-        } else {
-            (args.icon, args.color)
-        };
-        let resolved = SetIconArgs {
-            r#ref: args.r#ref,
-            icon,
-            color,
-        };
-        self.proxy("set_icon", Self::to_params(&resolved)?).await
+        self.proxy("set_icon", Self::to_params(&args)?).await
     }
 
     #[tool(
@@ -456,6 +412,43 @@ impl GraphiteService {
         Parameters(args): Parameters<IdeaToTasksArgs>,
     ) -> Result<String, ErrorData> {
         self.proxy("idea_to_tasks", Self::to_params(&args)?).await
+    }
+
+    #[tool(
+        name = "add_path_note",
+        description = "Фиксирует внешние файлы как заметки-пути: на каждый абсолютный путь создаётся заметка (по умолчанию во «Входящих») с заголовком-именем файла, кликабельной file:-ссылкой и сырым путём. Файл не копируется в хранилище.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+    )]
+    async fn add_path_note(
+        &self,
+        Parameters(args): Parameters<AddPathNoteArgs>,
+    ) -> Result<String, ErrorData> {
+        self.proxy("add_path_note", Self::to_params(&args)?).await
+    }
+
+    #[tool(
+        name = "save_attachment",
+        description = "Сохраняет вложение из base64 в _assets/ГГГГ/ММ/<ulid>.<ext> с дедупом по blake3 (повтор того же содержимого вернёт существующий путь). Возвращает relPath для вставки ![](relPath) в заметку. Для крупных файлов используй save_attachment_from_path.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn save_attachment(
+        &self,
+        Parameters(args): Parameters<SaveAttachmentArgs>,
+    ) -> Result<String, ErrorData> {
+        self.proxy("save_attachment", Self::to_params(&args)?).await
+    }
+
+    #[tool(
+        name = "save_attachment_from_path",
+        description = "Импортирует файл с диска по абсолютному пути в _assets/ГГГГ/ММ/<ulid>.<ext> (дедуп по blake3, расширение из исходного имени). Возвращает relPath для вставки ![](relPath) в заметку.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn save_attachment_from_path(
+        &self,
+        Parameters(args): Parameters<SaveAttachmentFromPathArgs>,
+    ) -> Result<String, ErrorData> {
+        self.proxy("save_attachment_from_path", Self::to_params(&args)?)
+            .await
     }
 
     #[tool(
@@ -528,9 +521,11 @@ impl ServerHandler for GraphiteService {
              \"id:01J8…\" (рекомендовано) или \"path:Проекты/Блог.md\". Ответ каждого \
              инструмента — конверт {{v, ok, data|error}}; при error.code=CONFLICT перечитай \
              заметку через note_read и повтори мутацию с новым rev. Начинай сессию с \
-             vault_info. Кроме базовых: иконки и цвет заметок (set_icon), закрепление \
+             vault_info. Кроме базовых: иконки и цвет заметок и папок (set_icon), закрепление \
              (note_pin), бандлы по смыслу (bundle_create) и их сборка в один текст для ИИ — \
-             «Copy Page» (bundle_compose), разбор сырой идеи в задачи (idea_to_tasks), журнал \
+             «Copy Page» (bundle_compose), разбор сырой идеи в задачи (idea_to_tasks), \
+             заметки-пути на внешние файлы (add_path_note), вложения в _assets с дедупом \
+             (save_attachment, save_attachment_from_path), журнал \
              и откат (journal_list, undo_op, undo_session). Ресурсы: vault://conventions \
              (правила хранилища), vault://inbox, vault://recent. Промпты: distill \
              (флагманская «Выжимка»), plan_from_ideas, weekly_review, brainstorm, inbox_triage.",

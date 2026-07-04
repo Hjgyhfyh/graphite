@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import type { DragEvent, KeyboardEvent, RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { HTMLAttributes, KeyboardEvent, PointerEvent as ReactPointerEvent, Ref, RefObject } from 'react';
 import { motion } from 'motion/react';
 import { Pin } from 'lucide-react';
 import { cx } from '@graphite/ui';
 import { commands, isGraphiteError } from '@graphite/bindings';
+import type { NoteRef } from '@graphite/bindings';
 import { NoteIcon } from '../tree/NoteIcon';
-import { REDUCED_CROSSFADE, springStandard } from '../../motion';
+import { REDUCED_CROSSFADE, springSnappy, springStandard } from '../../motion';
 import { formatUpdated, typeFallbackIcon, typeLabel } from './columns';
 import type { KanbanCardData } from './columns';
 
@@ -86,24 +87,102 @@ function useCardTags(ref: string, updated: string, elementRef: RefObject<HTMLEle
   return tags;
 }
 
+export interface CardSurfaceProps extends HTMLAttributes<HTMLDivElement> {
+  card: KanbanCardData;
+  tags: string[];
+  ref?: Ref<HTMLDivElement>;
+}
+
+export function CardSurface({ card, tags, className, ref, ...rest }: CardSurfaceProps) {
+  const updatedLabel = formatUpdated(card.updated);
+  return (
+    <div
+      ref={ref}
+      className={cx(
+        'group flex select-none flex-col gap-2 rounded-m border border-stroke-0 bg-bg-1 p-3 shadow-1 outline-none',
+        className,
+      )}
+      {...rest}
+    >
+      <div className="flex items-start gap-2">
+        <span className="mt-px shrink-0">
+          <NoteIcon icon={card.icon} color={card.iconColor} size={15} fallback={typeFallbackIcon(card.type)} />
+        </span>
+        <h3 className="line-clamp-2 min-w-0 flex-1 text-ui text-text-0">{card.title}</h3>
+        {card.pinned === true ? (
+          <Pin size={12} strokeWidth={1.75} className="mt-0.5 shrink-0 text-text-3" aria-hidden />
+        ) : null}
+      </div>
+
+      {tags.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {tags.slice(0, 4).map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex max-w-full items-center truncate rounded-full bg-bg-3 px-1.5 py-0.5 text-micro text-text-2"
+            >
+              #{tag}
+            </span>
+          ))}
+          {tags.length > 4 ? <span className="text-micro text-text-3">+{tags.length - 4}</span> : null}
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-2 pt-0.5 text-micro text-text-3">
+        <span className="truncate">{typeLabel(card.type)}</span>
+        {updatedLabel.length > 0 ? <span className="shrink-0">{updatedLabel}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 export interface KanbanCardProps {
   card: KanbanCardData;
   reduced: boolean;
   dragging: boolean;
-  onDragStart: (ref: string) => void;
-  onDragEnd: () => void;
-  onOpen: (ref: string) => void;
+  settling: boolean;
+  onLift(event: ReactPointerEvent<HTMLElement>, card: KanbanCardData, tags: string[]): void;
+  onOpen(ref: NoteRef): void;
+  consumeDropClick(): boolean;
+  registerCard(ref: NoteRef, el: HTMLElement): void;
+  unregisterCard(ref: NoteRef, el: HTMLElement): void;
 }
 
-export function KanbanCard({ card, reduced, dragging, onDragStart, onDragEnd, onOpen }: KanbanCardProps) {
+export function KanbanCard({
+  card,
+  reduced,
+  dragging,
+  settling,
+  onLift,
+  onOpen,
+  consumeDropClick,
+  registerCard,
+  unregisterCard,
+}: KanbanCardProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const tags = useCardTags(card.ref, card.updated, surfaceRef);
-  const updatedLabel = formatUpdated(card.updated);
 
-  const handleDragStart = (event: DragEvent<HTMLDivElement>) => {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', card.ref);
-    onDragStart(card.ref);
+  const attachSurface = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node === null) {
+        return;
+      }
+      surfaceRef.current = node;
+      registerCard(card.ref, node);
+      return () => {
+        unregisterCard(card.ref, node);
+        if (surfaceRef.current === node) {
+          surfaceRef.current = null;
+        }
+      };
+    },
+    [card.ref, registerCard, unregisterCard],
+  );
+
+  const handleClick = () => {
+    if (!consumeDropClick()) {
+      onOpen(card.ref);
+    }
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -116,56 +195,27 @@ export function KanbanCard({ card, reduced, dragging, onDragStart, onDragEnd, on
   return (
     <motion.div
       layout={!reduced}
-      layoutId={reduced ? undefined : card.ref}
-      initial={reduced ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.98 }}
+      initial={settling ? false : reduced ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-      transition={reduced ? REDUCED_CROSSFADE : springStandard}
+      transition={reduced ? REDUCED_CROSSFADE : { ...springStandard, layout: springSnappy }}
+      style={settling ? { visibility: 'hidden' } : undefined}
     >
-      <div
-        ref={surfaceRef}
+      <CardSurface
+        ref={attachSurface}
+        card={card}
+        tags={tags}
         role="button"
         tabIndex={0}
         aria-label={`Открыть «${card.title}»`}
-        draggable
-        onDragStart={handleDragStart}
-        onDragEnd={onDragEnd}
-        onClick={() => onOpen(card.ref)}
+        onPointerDown={(event) => onLift(event, card, tags)}
+        onClick={handleClick}
         onKeyDown={handleKeyDown}
         className={cx(
-          'group flex cursor-grab flex-col gap-2 rounded-m border border-stroke-0 bg-bg-1 p-3 shadow-1 outline-none transition-colors duration-[120ms] hover:border-stroke-1 hover:bg-bg-2 focus-visible:border-accent/60 active:cursor-grabbing',
+          'cursor-grab touch-none transition-[border-color,background-color,opacity] duration-[120ms] hover:border-stroke-1 hover:bg-bg-2 focus-visible:border-accent/60 active:cursor-grabbing',
           dragging ? 'opacity-40' : 'opacity-100',
         )}
-      >
-        <div className="flex items-start gap-2">
-          <span className="mt-px shrink-0">
-            <NoteIcon icon={card.icon} color={card.iconColor} size={15} fallback={typeFallbackIcon(card.type)} />
-          </span>
-          <h3 className="line-clamp-2 min-w-0 flex-1 text-ui text-text-0">{card.title}</h3>
-          {card.pinned === true ? (
-            <Pin size={12} strokeWidth={1.75} className="mt-0.5 shrink-0 text-text-3" aria-hidden />
-          ) : null}
-        </div>
-
-        {tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {tags.slice(0, 4).map((tag) => (
-              <span
-                key={tag}
-                className="inline-flex max-w-full items-center truncate rounded-full bg-bg-3 px-1.5 py-0.5 text-micro text-text-2"
-              >
-                #{tag}
-              </span>
-            ))}
-            {tags.length > 4 ? <span className="text-micro text-text-3">+{tags.length - 4}</span> : null}
-          </div>
-        ) : null}
-
-        <div className="flex items-center justify-between gap-2 pt-0.5 text-micro text-text-3">
-          <span className="truncate">{typeLabel(card.type)}</span>
-          {updatedLabel.length > 0 ? <span className="shrink-0">{updatedLabel}</span> : null}
-        </div>
-      </div>
+      />
     </motion.div>
   );
 }

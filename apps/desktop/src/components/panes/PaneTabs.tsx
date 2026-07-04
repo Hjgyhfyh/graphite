@@ -6,7 +6,7 @@ import { useTabsStore } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { TabBar } from '../tabs/TabBar';
 
-export { TAB_DND_TYPE } from '../tabs/TabBar';
+export { GROUP_DND_TYPE, NOTE_DND_TYPE, TAB_DND_TYPE } from '../tabs/TabBar';
 
 export interface PaneTabsProps {
   paneId: string;

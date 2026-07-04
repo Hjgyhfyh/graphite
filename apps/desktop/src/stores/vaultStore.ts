@@ -28,7 +28,7 @@ export interface VaultStore {
   info?: VaultInfoResponse;
   tree: TreeNode[];
   childrenByRef: Record<NoteRef, TreeNode[]>;
-  expanded: Set<string>;
+  collapsedFolders: Set<string>;
   currentRef?: NoteRef;
   indexStatus: IndexStatus;
   pinnedNotes: Set<NoteRef>;
@@ -42,8 +42,10 @@ export interface VaultStore {
   flashNote(ref: NoteRef): void;
   applyNoteChanged(e: NoteChangedEvent): void;
   setIndexStatus(s: IndexProgressEvent): void;
-  toggleExpanded(path: string): void;
+  setFolderCollapsed(id: string, collapsed: boolean): void;
   createNote(opts?: CreateNoteOptions): Promise<void>;
+  createFolder(parent?: NoteRef, title?: string): Promise<NoteRef | undefined>;
+  addPathNotes(paths: string[], parent?: NoteRef): Promise<number>;
   createBundle(params: BundleCreateParams): Promise<void>;
   rename(ref: NoteRef, title: string): Promise<void>;
   remove(ref: NoteRef): Promise<void>;
@@ -64,6 +66,98 @@ function reason(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Каталог-родитель по ссылке: folder-note и лист сводятся к своей папке. */
+function dirFromRef(ref: NoteRef): string {
+  const raw = ref.startsWith('path:') ? ref.slice('path:'.length) : ref;
+  const rel = raw.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (rel.endsWith('/_index.md')) {
+    return rel.slice(0, -'/_index.md'.length);
+  }
+  if (rel.toLowerCase() === '_index.md') {
+    return '';
+  }
+  if (rel.toLowerCase().endsWith('.md')) {
+    return rel.slice(0, -'.md'.length);
+  }
+  return rel;
+}
+
+/** Зеркало `writer::sanitize_file_name`: безопасное имя файла/папки под Windows. */
+function sanitizeFileName(title: string): string {
+  const forbidden = new Set(['\\', '/', ':', '*', '?', '"', '<', '>', '|']);
+  let mapped = '';
+  for (const ch of title) {
+    mapped += forbidden.has(ch) || ch.charCodeAt(0) < 0x20 ? '—' : ch;
+  }
+  let stem = mapped.replace(/^[ .]+/, '').replace(/[ .]+$/, '');
+  const budget = 117;
+  const chars = [...stem];
+  if (chars.length > budget) {
+    stem = `${chars
+      .slice(0, budget - 1)
+      .join('')
+      .replace(/[ .]+$/, '')}…`;
+  }
+  if (stem.length === 0) {
+    stem = 'Без названия';
+  }
+  if (stem === '_index') {
+    stem = '_index—';
+  }
+  return stem;
+}
+
+/** Имена прямых детей каталога (файлы без `.md` и подпапки), в нижнем регистре. */
+function childNames(tree: readonly TreeNode[], parentDir: string): Set<string> {
+  const prefix = parentDir === '' ? '' : `${parentDir}/`;
+  const names = new Set<string>();
+  for (const node of tree) {
+    if (prefix !== '' && !node.path.startsWith(prefix)) {
+      continue;
+    }
+    const segment = node.path.slice(prefix.length).split('/')[0] ?? '';
+    if (segment.length === 0) {
+      continue;
+    }
+    const name = segment.toLowerCase();
+    names.add(name.endsWith('.md') ? name.slice(0, -'.md'.length) : name);
+  }
+  return names;
+}
+
+function yamlQuote(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function isoNowUtc(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+function ulid(): string {
+  const chars = new Array<string>(26);
+  let time = Date.now();
+  for (let i = 9; i >= 0; i -= 1) {
+    chars[i] = ULID_ALPHABET[time % 32];
+    time = Math.floor(time / 32);
+  }
+  const random = new Uint8Array(16);
+  crypto.getRandomValues(random);
+  for (let i = 0; i < 16; i += 1) {
+    chars[10 + i] = ULID_ALPHABET[random[i] % 32];
+  }
+  return chars.join('');
+}
+
+/** Итог слияния keep/clear/set-семантики `set_icon` поверх прежних значений. */
+function mergeIconField(next: string | undefined, prev: string | undefined): string | undefined {
+  if (next === undefined) {
+    return prev;
+  }
+  return next === '' ? undefined : next;
+}
+
 const NOTE_CHANGED_DEBOUNCE_MS = 180;
 
 let treeLoadSeq = 0;
@@ -73,7 +167,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   info: undefined,
   tree: [],
   childrenByRef: {},
-  expanded: new Set<string>(),
+  collapsedFolders: new Set<string>(),
   currentRef: undefined,
   indexStatus: { state: 'idle', done: 0, total: 0 },
   pinnedNotes: new Set<NoteRef>(),
@@ -156,15 +250,18 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       },
     });
   },
-  toggleExpanded: (path) => {
+  setFolderCollapsed: (id, collapsed) => {
     set((s) => {
-      const expanded = new Set(s.expanded);
-      if (expanded.has(path)) {
-        expanded.delete(path);
-      } else {
-        expanded.add(path);
+      if (s.collapsedFolders.has(id) === collapsed) {
+        return s;
       }
-      return { expanded };
+      const collapsedFolders = new Set(s.collapsedFolders);
+      if (collapsed) {
+        collapsedFolders.add(id);
+      } else {
+        collapsedFolders.delete(id);
+      }
+      return { collapsedFolders };
     });
   },
   createNote: async (opts) => {
@@ -179,6 +276,49 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       get().openNote(created.ref);
     } catch (error) {
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось создать заметку') });
+    }
+  },
+  createFolder: async (parent, title) => {
+    const name = sanitizeFileName(title ?? 'Новая папка');
+    const parentDir = parent === undefined ? '' : dirFromRef(parent);
+    const taken = childNames(get().tree, parentDir);
+    let stem = name;
+    for (let n = 2; taken.has(stem.toLowerCase()); n += 1) {
+      stem = `${name} ${n}`;
+    }
+    const dirRel = parentDir === '' ? stem : `${parentDir}/${stem}`;
+    const ref = refFromPath(`${dirRel}/_index.md`);
+    const now = isoNowUtc();
+    const content = `---\nid: ${ulid()}\ntype: note\ntitle: ${yamlQuote(stem)}\ncreated: ${now}\nupdated: ${now}\n---\n\n`;
+    try {
+      await commands.bufferSave({ ref, baseRev: '', content });
+      await get().loadTree();
+      void get().loadInfo();
+      return ref;
+    } catch (error) {
+      useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось создать папку') });
+      return undefined;
+    }
+  },
+  addPathNotes: async (paths, parent) => {
+    if (paths.length === 0) {
+      return 0;
+    }
+    try {
+      const response = await commands.addPathNote({ paths, parent });
+      await get().loadTree();
+      void get().loadInfo();
+      const count = response.notes.length;
+      if (count === 1) {
+        get().openNote(response.notes[0].ref);
+        useUiStore.getState().pushToast({ kind: 'success', text: 'Файл записан во «Входящие»' });
+      } else {
+        useUiStore.getState().pushToast({ kind: 'success', text: `Записано во «Входящие»: ${count}` });
+      }
+      return count;
+    } catch (error) {
+      useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось добавить файлы') });
+      return 0;
     }
   },
   createBundle: async (params) => {
@@ -245,14 +385,21 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   },
   setIcon: async (ref, icon, color) => {
     const previous = get().iconByRef[ref];
-    set((s) => ({ iconByRef: { ...s.iconByRef, [ref]: { icon, color } } }));
-    for (const tab of useTabsStore.getState().tabs.filter((t) => t.noteRef === ref)) {
-      useTabsStore.getState().setTabIcon(tab.id, icon, color);
-    }
+    const applyEverywhere = (info: NoteIconInfo) => {
+      set((s) => ({ iconByRef: { ...s.iconByRef, [ref]: info } }));
+      for (const tab of useTabsStore.getState().tabs.filter((t) => t.noteRef === ref)) {
+        useTabsStore.getState().setTabIcon(tab.id, info.icon, info.color);
+      }
+    };
+    applyEverywhere({
+      icon: mergeIconField(icon, previous?.icon),
+      color: mergeIconField(color, previous?.color),
+    });
     try {
-      await commands.setIcon({ ref, icon, color });
+      const result = await commands.setIcon({ ref, icon, color });
+      applyEverywhere({ icon: result.icon, color: result.color });
     } catch (error) {
-      set((s) => ({ iconByRef: { ...s.iconByRef, [ref]: previous ?? {} } }));
+      applyEverywhere(previous ?? {});
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось задать иконку') });
     }
   },

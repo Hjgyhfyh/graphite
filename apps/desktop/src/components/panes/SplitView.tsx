@@ -1,17 +1,33 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { cx } from '@graphite/ui';
-import { usePanesStore } from '../../stores/panesStore';
+import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Columns2, FilePlus2 } from 'lucide-react';
+import { cx, springTransition } from '@graphite/ui';
+import { REDUCED_CROSSFADE, usePrefersReducedMotion } from '../../motion';
+import { MAX_PANES, usePanesStore } from '../../stores/panesStore';
 import type { Pane } from '../../stores/panesStore';
 import { useTabsStore } from '../../stores/tabsStore';
 import { EditorPane } from '../editor/EditorPane';
 import { EditorTransition } from '../editor/EditorTransition';
-import { PaneTabs, TAB_DND_TYPE } from './PaneTabs';
+import { NOTE_DND_TYPE, PaneTabs, TAB_DND_TYPE } from './PaneTabs';
 
 const MIN_PANE_PX = 200;
 const DIVIDER_PX = 1;
+const EDGE_HIDE_DELAY_MS = 260;
 
 const paneWeights = new Map<string, number>();
+
+type DragKind = 'tab' | 'note';
+
+function dragKindOf(types: readonly string[]): DragKind | undefined {
+  if (types.includes(TAB_DND_TYPE)) {
+    return 'tab';
+  }
+  if (types.includes(NOTE_DND_TYPE)) {
+    return 'note';
+  }
+  return undefined;
+}
 
 interface ResizeContext {
   leftId: string;
@@ -43,39 +59,82 @@ function PaneColumn({
   const setActivePane = usePanesStore((s) => s.setActivePane);
   const moveTabToPane = usePanesStore((s) => s.moveTabToPane);
   const tab = useTabsStore((s) => s.tabs.find((t) => t.id === pane.activeTabId));
-  const [dropActive, setDropActive] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [dropKind, setDropKind] = useState<DragKind | undefined>(undefined);
+  const enterCount = useRef(0);
 
-  const onBodyDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes(TAB_DND_TYPE)) {
+  const acceptableKind = (event: ReactDragEvent<HTMLDivElement>): DragKind | undefined => {
+    const kind = dragKindOf(event.dataTransfer.types);
+    if (kind === 'tab') {
+      const store = useTabsStore.getState();
+      const dragging = store.draggingTabId === undefined
+        ? undefined
+        : store.tabs.find((t) => t.id === store.draggingTabId);
+      if (dragging !== undefined && dragging.paneId === pane.id) {
+        return undefined;
+      }
+    }
+    return kind;
+  };
+
+  const resetDrop = () => {
+    enterCount.current = 0;
+    setDropKind(undefined);
+  };
+
+  const onBodyDragEnter = (event: ReactDragEvent<HTMLDivElement>) => {
+    const kind = acceptableKind(event);
+    if (kind === undefined) {
       return;
     }
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setDropActive(true);
+    enterCount.current += 1;
+    setDropKind(kind);
   };
 
-  const onBodyDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setDropActive(false);
-    }
-  };
-
-  const onBodyDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes(TAB_DND_TYPE)) {
+  const onBodyDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    const kind = acceptableKind(event);
+    if (kind === undefined) {
       return;
     }
     event.preventDefault();
-    setDropActive(false);
-    const draggedId = event.dataTransfer.getData(TAB_DND_TYPE);
-    if (draggedId === '') {
+    event.dataTransfer.dropEffect = kind === 'tab' ? 'move' : 'copy';
+    setDropKind(kind);
+  };
+
+  const onBodyDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (dragKindOf(event.dataTransfer.types) === undefined) {
       return;
     }
-    const source = useTabsStore.getState().tabs.find((t) => t.id === draggedId);
-    if (source === undefined || source.paneId === pane.id) {
+    enterCount.current = Math.max(0, enterCount.current - 1);
+    if (enterCount.current === 0) {
+      setDropKind(undefined);
+    }
+  };
+
+  const onBodyDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    const kind = dragKindOf(event.dataTransfer.types);
+    resetDrop();
+    if (kind === undefined) {
       return;
     }
-    moveTabToPane(draggedId, pane.id);
-    useTabsStore.getState().removeFromGroup(draggedId);
+    event.preventDefault();
+    if (kind === 'tab') {
+      const store = useTabsStore.getState();
+      const dataId = event.dataTransfer.getData(TAB_DND_TYPE);
+      const draggedId = dataId !== '' ? dataId : (store.draggingTabId ?? '');
+      const source = draggedId === '' ? undefined : store.tabs.find((t) => t.id === draggedId);
+      if (source !== undefined && source.paneId !== pane.id) {
+        moveTabToPane(draggedId, pane.id);
+        useTabsStore.getState().removeFromGroup(draggedId);
+      }
+      useTabsStore.getState().setDraggingTab(undefined);
+      return;
+    }
+    const ref = event.dataTransfer.getData(NOTE_DND_TYPE);
+    if (ref !== '') {
+      useTabsStore.getState().open(ref, { paneId: pane.id });
+    }
   };
 
   return (
@@ -91,6 +150,7 @@ function PaneColumn({
       <PaneTabs paneId={pane.id} />
       <div
         className="relative flex min-h-0 flex-1 flex-col"
+        onDragEnter={onBodyDragEnter}
         onDragOver={onBodyDragOver}
         onDragLeave={onBodyDragLeave}
         onDrop={onBodyDrop}
@@ -102,14 +162,41 @@ function PaneColumn({
         ) : (
           <EmptyPane />
         )}
-        {dropActive ? (
-          <div className="absolute inset-0 z-30" onDragOver={onBodyDragOver} onDrop={onBodyDrop}>
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-2 rounded-m bg-accent/10 ring-1 ring-inset ring-accent/50"
-            />
-          </div>
-        ) : null}
+        <AnimatePresence>
+          {dropKind !== undefined ? (
+            <motion.div
+              key="drop"
+              className="absolute inset-0 z-30"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={reduced ? REDUCED_CROSSFADE : { duration: 0.14, ease: 'easeOut' }}
+              onDragOver={onBodyDragOver}
+              onDrop={onBodyDrop}
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-2 rounded-m bg-accent/10 ring-1 ring-inset ring-accent/50"
+              />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <motion.span
+                  initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: 6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+                  transition={reduced ? REDUCED_CROSSFADE : springTransition('snappy')}
+                  className="flex items-center gap-2 rounded-m border border-stroke-1 bg-bg-2/95 px-3 py-1.5 text-ui text-text-0 shadow-3"
+                >
+                  {dropKind === 'tab' ? (
+                    <Columns2 size={15} strokeWidth={1.75} className="text-accent" />
+                  ) : (
+                    <FilePlus2 size={15} strokeWidth={1.75} className="text-accent" />
+                  )}
+                  {dropKind === 'tab' ? 'Перенести сюда' : 'Открыть здесь'}
+                </motion.span>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
     </section>
   );
@@ -118,11 +205,14 @@ function PaneColumn({
 export function SplitView() {
   const panes = usePanesStore((s) => s.panes);
   const activePaneId = usePanesStore((s) => s.activePaneId);
+  const reduced = usePrefersReducedMotion();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<ResizeContext | null>(null);
   const [weights, setWeights] = useState<Record<string, number>>(() => ({ ...Object.fromEntries(paneWeights) }));
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [windowDragKind, setWindowDragKind] = useState<DragKind | undefined>(undefined);
+  const [edgeHot, setEdgeHot] = useState(false);
 
   const weightOf = (id: string): number => weights[id] ?? 1;
 
@@ -153,6 +243,85 @@ export function SplitView() {
     },
     [],
   );
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const over = (event: DragEvent) => {
+      const types = event.dataTransfer?.types;
+      const kind = types === undefined ? undefined : dragKindOf(types);
+      if (kind === undefined) {
+        return;
+      }
+      setWindowDragKind((prev) => (prev === kind ? prev : kind));
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setWindowDragKind(undefined), EDGE_HIDE_DELAY_MS);
+    };
+    const end = () => {
+      window.clearTimeout(timer);
+      setWindowDragKind(undefined);
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', end);
+    window.addEventListener('dragend', end);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('drop', end);
+      window.removeEventListener('dragend', end);
+    };
+  }, []);
+
+  const edgeVisible = windowDragKind !== undefined && panes.length < MAX_PANES;
+
+  useEffect(() => {
+    if (!edgeVisible) {
+      setEdgeHot(false);
+    }
+  }, [edgeVisible]);
+
+  const onEdgeDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    const kind = dragKindOf(event.dataTransfer.types);
+    if (kind === undefined) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = kind === 'tab' ? 'move' : 'copy';
+    setEdgeHot(true);
+  };
+
+  const onEdgeDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    const kind = dragKindOf(event.dataTransfer.types);
+    if (kind === undefined) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setEdgeHot(false);
+    const store = useTabsStore.getState();
+    if (kind === 'tab') {
+      const dataId = event.dataTransfer.getData(TAB_DND_TYPE);
+      const draggedId = dataId !== '' ? dataId : (store.draggingTabId ?? '');
+      if (draggedId === '') {
+        return;
+      }
+      const newPaneId = usePanesStore.getState().addPane();
+      if (newPaneId !== undefined) {
+        usePanesStore.getState().moveTabToPane(draggedId, newPaneId);
+        useTabsStore.getState().removeFromGroup(draggedId);
+      }
+      useTabsStore.getState().setDraggingTab(undefined);
+      return;
+    }
+    const ref = event.dataTransfer.getData(NOTE_DND_TYPE);
+    if (ref === '') {
+      return;
+    }
+    const newPaneId = usePanesStore.getState().addPane();
+    if (newPaneId !== undefined) {
+      store.open(ref, { paneId: newPaneId });
+    }
+  };
 
   const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>, index: number) => {
     const container = containerRef.current;
@@ -219,7 +388,7 @@ export function SplitView() {
   const showFrame = panes.length > 1;
 
   return (
-    <div ref={containerRef} className="flex min-h-0 min-w-0 flex-1">
+    <div ref={containerRef} className="relative flex min-h-0 min-w-0 flex-1">
       {panes.map((pane, index) => (
         <Fragment key={pane.id}>
           <PaneColumn pane={pane} grow={weightOf(pane.id)} isActive={pane.id === activePaneId} showFrame={showFrame} />
@@ -244,6 +413,30 @@ export function SplitView() {
           ) : null}
         </Fragment>
       ))}
+      <AnimatePresence>
+        {edgeVisible ? (
+          <motion.div
+            key="edge"
+            className="absolute inset-y-0 right-0 z-40 w-10 p-1"
+            initial={reduced ? { opacity: 0 } : { opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, x: 12 }}
+            transition={reduced ? REDUCED_CROSSFADE : springTransition('standard')}
+            onDragOver={onEdgeDragOver}
+            onDragLeave={() => setEdgeHot(false)}
+            onDrop={onEdgeDrop}
+          >
+            <div
+              className={cx(
+                'flex h-full w-full items-center justify-center rounded-m border border-dashed transition-colors duration-[120ms]',
+                edgeHot ? 'border-accent bg-accent/15' : 'border-stroke-1 bg-bg-1/60',
+              )}
+            >
+              <Columns2 size={15} strokeWidth={1.75} className={edgeHot ? 'text-accent' : 'text-text-2'} />
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

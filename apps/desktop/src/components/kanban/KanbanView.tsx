@@ -6,8 +6,15 @@ import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
 import { usePrefersReducedMotion } from '../../motion';
 import { KanbanColumn } from './KanbanColumn';
+import { DragGhost } from './DragGhost';
+import { useKanbanDnd } from './useKanbanDnd';
 import { COLUMNS, groupByStatus, pipelineStatus, statusReason } from './columns';
 import type { KanbanCardData } from './columns';
+
+interface OptimisticMove {
+  status: Status;
+  at: number;
+}
 
 export function KanbanView() {
   const tree = useVaultStore((s) => s.tree);
@@ -17,9 +24,7 @@ export function KanbanView() {
   const setRailView = useUiStore((s) => s.setRailView);
   const reduced = usePrefersReducedMotion();
 
-  const [optimistic, setOptimistic] = useState<Record<NoteRef, Status>>({});
-  const [draggingRef, setDraggingRef] = useState<NoteRef | null>(null);
-  const [overStatus, setOverStatus] = useState<Status | null>(null);
+  const [optimistic, setOptimistic] = useState<Record<NoteRef, OptimisticMove>>({});
 
   useEffect(() => {
     if (useVaultStore.getState().tree.length === 0) {
@@ -34,12 +39,25 @@ export function KanbanView() {
       if (base === null) {
         continue;
       }
-      list.push({ ...node, status: optimistic[node.ref] ?? base });
+      const move = optimistic[node.ref];
+      list.push({
+        ...node,
+        status: move?.status ?? base,
+        sortStamp: move?.at ?? (Date.parse(node.updated) || 0),
+      });
     }
     return list;
   }, [tree, optimistic]);
 
   const byStatus = useMemo(() => groupByStatus(cards), [cards]);
+
+  const statusByRef = useMemo(() => {
+    const map = new Map<NoteRef, Status>();
+    for (const card of cards) {
+      map.set(card.ref, card.status);
+    }
+    return map;
+  }, [cards]);
 
   const clearOptimistic = useCallback((ref: NoteRef) => {
     setOptimistic((current) => {
@@ -54,16 +72,7 @@ export function KanbanView() {
 
   const move = useCallback(
     async (ref: NoteRef, target: Status) => {
-      const node = useVaultStore.getState().tree.find((n) => n.ref === ref);
-      const base = node !== undefined ? pipelineStatus(node) : null;
-      if (base === null) {
-        return;
-      }
-      const current = optimistic[ref] ?? base;
-      if (current === target) {
-        return;
-      }
-      setOptimistic((prev) => ({ ...prev, [ref]: target }));
+      setOptimistic((prev) => ({ ...prev, [ref]: { status: target, at: Date.now() } }));
       try {
         await commands.setStatus({ ref, status: target });
         await loadTree();
@@ -73,37 +82,16 @@ export function KanbanView() {
         pushToast({ kind: 'error', text: statusReason(error, 'Не удалось сменить статус') });
       }
     },
-    [optimistic, loadTree, clearOptimistic, pushToast],
+    [loadTree, clearOptimistic, pushToast],
   );
 
-  const handleDragStart = useCallback((ref: NoteRef) => {
-    setDraggingRef(ref);
-  }, []);
-
-  const handleDragEnd = useCallback(() => {
-    setDraggingRef(null);
-    setOverStatus(null);
-  }, []);
-
-  const handleOver = useCallback((status: Status) => {
-    setOverStatus(status);
-  }, []);
-
-  const handleLeave = useCallback((status: Status) => {
-    setOverStatus((current) => (current === status ? null : current));
-  }, []);
-
-  const handleDrop = useCallback(
-    (status: Status, ref: string) => {
-      const target = ref.length > 0 ? ref : draggingRef;
-      setDraggingRef(null);
-      setOverStatus(null);
-      if (target !== null && target.length > 0) {
-        void move(target, status);
-      }
+  const dnd = useKanbanDnd({
+    reduced,
+    statusOf: (ref) => statusByRef.get(ref) ?? null,
+    onDrop: (ref, status) => {
+      void move(ref, status);
     },
-    [draggingRef, move],
-  );
+  });
 
   const handleOpen = useCallback(
     (ref: NoteRef) => {
@@ -126,25 +114,30 @@ export function KanbanView() {
       </header>
 
       <LayoutGroup>
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-6 pb-6">
+        <div ref={dnd.setBoardEl} className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-6 pb-6">
           {COLUMNS.map((column) => (
             <KanbanColumn
               key={column.status}
               column={column}
               cards={byStatus[column.status]}
               reduced={reduced}
-              draggingRef={draggingRef}
-              isOver={overStatus === column.status}
-              onOver={handleOver}
-              onLeave={handleLeave}
-              onDropCard={handleDrop}
-              onCardDragStart={handleDragStart}
-              onCardDragEnd={handleDragEnd}
+              draggingRef={dnd.draggingRef}
+              settlingRef={dnd.settlingRef}
+              isOver={dnd.overStatus === column.status}
+              registerColumn={dnd.registerColumn}
+              registerCard={dnd.registerCard}
+              unregisterCard={dnd.unregisterCard}
+              onCardLift={dnd.liftCard}
               onCardOpen={handleOpen}
+              consumeDropClick={dnd.consumeDropClick}
             />
           ))}
         </div>
       </LayoutGroup>
+
+      {dnd.ghost !== null ? (
+        <DragGhost key={dnd.ghost.card.ref} ghost={dnd.ghost} reduced={reduced} onApi={dnd.attachGhost} />
+      ) : null}
     </main>
   );
 }

@@ -1,5 +1,10 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { Component, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  ErrorInfo,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from 'react';
 import {
   Clock,
   File as FileIcon,
@@ -31,6 +36,8 @@ export interface SearchPanelProps {
 const SEARCH_LIMIT = 50;
 const DEBOUNCE_MS = 40;
 const SKELETON_THRESHOLD_MS = 150;
+const HIGHLIGHT_TERMS_MAX = 12;
+const HIGHLIGHT_TERM_CHARS = 80;
 
 const STATUS_LABEL: Record<Status, string> = {
   inbox: 'Входящие',
@@ -320,17 +327,66 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Приводит ответ поиска к безопасной форме: любые пропуски, чужие типы,
+ * дубли ref и не-массивы деградируют до пустых значений, а не до падения
+ * рендера. Единственная точка входа данных бэкенда в список результатов.
+ */
+function sanitizeHits(response: unknown): SearchHit[] {
+  if (typeof response !== 'object' || response === null) {
+    return [];
+  }
+  const rawHits = (response as { hits?: unknown }).hits;
+  if (!Array.isArray(rawHits)) {
+    return [];
+  }
+  const out: SearchHit[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawHits) {
+    if (typeof raw !== 'object' || raw === null) {
+      continue;
+    }
+    const hit = raw as { ref?: unknown; title?: unknown; score?: unknown; snippets?: unknown; updated?: unknown };
+    const ref = typeof hit.ref === 'string' ? hit.ref : '';
+    if (ref.length === 0 || seen.has(ref)) {
+      continue;
+    }
+    seen.add(ref);
+    out.push({
+      ref,
+      title: typeof hit.title === 'string' ? hit.title : '',
+      score: typeof hit.score === 'number' && Number.isFinite(hit.score) ? hit.score : 0,
+      snippets: Array.isArray(hit.snippets) ? hit.snippets.filter((s): s is string => typeof s === 'string') : [],
+      updated: typeof hit.updated === 'string' ? hit.updated : '',
+    });
+    if (out.length >= SEARCH_LIMIT) {
+      break;
+    }
+  }
+  return out;
+}
+
 function highlightSnippet(text: string, terms: string[]): ReactNode {
-  if (terms.length === 0) {
+  if (terms.length === 0 || text.length === 0) {
     return text;
   }
-  const pattern = terms
-    .slice()
-    .sort((a, b) => b.length - a.length)
-    .map(escapeRegExp)
-    .join('|');
-  const re = new RegExp(`(${pattern})`, 'gi');
-  const parts = text.split(re);
+  const usable = terms
+    .filter((term) => term.length > 0)
+    .slice(0, HIGHLIGHT_TERMS_MAX)
+    .map((term) => term.slice(0, HIGHLIGHT_TERM_CHARS));
+  if (usable.length === 0) {
+    return text;
+  }
+  let parts: string[];
+  try {
+    const pattern = usable
+      .sort((a, b) => b.length - a.length)
+      .map(escapeRegExp)
+      .join('|');
+    parts = text.split(new RegExp(`(${pattern})`, 'gi'));
+  } catch {
+    return text;
+  }
   return parts.map((part, index) =>
     index % 2 === 1 ? (
       <mark key={index} className="rounded-xs bg-accent-dim px-0.5 text-text-0">
@@ -359,34 +415,41 @@ function parentDir(path: string | undefined): string | undefined {
 }
 
 function formatUpdated(iso: string): { short: string; full: string } {
+  if (iso.length === 0) {
+    return { short: '', full: '' };
+  }
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return { short: '', full: iso };
   }
-  const full = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeStyle: 'short' }).format(date);
-  const diff = Date.now() - date.getTime();
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (diff < minute) {
-    return { short: 'только что', full };
+  try {
+    const full = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeStyle: 'short' }).format(date);
+    const diff = Date.now() - date.getTime();
+    const minute = 60_000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diff < minute) {
+      return { short: 'только что', full };
+    }
+    const relative = new Intl.RelativeTimeFormat('ru-RU', { numeric: 'auto' });
+    if (diff < hour) {
+      return { short: relative.format(-Math.round(diff / minute), 'minute'), full };
+    }
+    if (diff < day) {
+      return { short: relative.format(-Math.round(diff / hour), 'hour'), full };
+    }
+    if (diff < 7 * day) {
+      return { short: relative.format(-Math.round(diff / day), 'day'), full };
+    }
+    const sameYear = date.getFullYear() === new Date().getFullYear();
+    const short = new Intl.DateTimeFormat(
+      'ru-RU',
+      sameYear ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' },
+    ).format(date);
+    return { short, full };
+  } catch {
+    return { short: '', full: iso };
   }
-  const relative = new Intl.RelativeTimeFormat('ru-RU', { numeric: 'auto' });
-  if (diff < hour) {
-    return { short: relative.format(-Math.round(diff / minute), 'minute'), full };
-  }
-  if (diff < day) {
-    return { short: relative.format(-Math.round(diff / hour), 'hour'), full };
-  }
-  if (diff < 7 * day) {
-    return { short: relative.format(-Math.round(diff / day), 'day'), full };
-  }
-  const sameYear = date.getFullYear() === new Date().getFullYear();
-  const short = new Intl.DateTimeFormat(
-    'ru-RU',
-    sameYear ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' },
-  ).format(date);
-  return { short, full };
 }
 
 function pluralResults(count: number): string {
@@ -407,10 +470,15 @@ type Phase = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
 type View = 'idle' | 'skeleton' | 'results' | 'empty' | 'building' | 'error';
 
 function StatusChip({ status }: { status: Status }) {
+  const label: string | undefined = STATUS_LABEL[status];
+  if (label === undefined) {
+    return null;
+  }
+  const dot: string | undefined = STATUS_DOT[status];
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-stroke-0 bg-bg-2 py-0.5 pl-1.5 pr-2 text-micro text-text-1">
-      <span aria-hidden className={cx('size-1.5 rounded-full', STATUS_DOT[status])} />
-      {STATUS_LABEL[status]}
+      <span aria-hidden className={cx('size-1.5 rounded-full', dot ?? 'bg-text-3')} />
+      {label}
     </span>
   );
 }
@@ -438,6 +506,58 @@ function SkeletonList({ shimmer, rows }: { shimmer: string; rows: number }) {
   );
 }
 
+function SearchErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+      <span className="grid size-11 place-items-center rounded-full border border-stroke-0 bg-bg-2 text-warn">
+        <SearchX size={20} strokeWidth={1.75} />
+      </span>
+      <div className="flex flex-col gap-1">
+        <p className="text-ui text-text-1">Поиск временно недоступен</p>
+        <p className="text-caption text-text-2">Не удалось выполнить запрос. Попробуйте ещё раз.</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-s border border-stroke-1 bg-bg-2 px-3 py-1 text-caption text-text-1 transition-colors hover:border-accent hover:text-text-0"
+      >
+        Повторить
+      </button>
+    </div>
+  );
+}
+
+interface SearchBoundaryProps {
+  onTrip: () => void;
+  onRetry: () => void;
+  children: ReactNode;
+}
+
+/**
+ * Локальный предохранитель списка результатов: любая ошибка рендера
+ * деградирует до состояния «Поиск временно недоступен» с повтором,
+ * не размонтируя остальное приложение.
+ */
+class SearchBoundary extends Component<SearchBoundaryProps, { tripped: boolean }> {
+  state = { tripped: false };
+
+  static getDerivedStateFromError(): { tripped: boolean } {
+    return { tripped: true };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
+    console.error('search render error', error, info);
+    this.props.onTrip();
+  }
+
+  render(): ReactNode {
+    if (this.state.tripped) {
+      return <SearchErrorState onRetry={this.props.onRetry} />;
+    }
+    return this.props.children;
+  }
+}
+
 export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -446,6 +566,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [unavailableHint, setUnavailableHint] = useState<string | undefined>(undefined);
   const [nonce, setNonce] = useState(0);
+  const [boundaryEpoch, setBoundaryEpoch] = useState(0);
 
   const openNote = useVaultStore((s) => s.openNote);
   const indexStatus = useVaultStore((s) => s.indexStatus);
@@ -456,6 +577,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const lastViewRef = useRef<View>('idle');
   const indexBuildingRef = useRef(false);
+  const boundaryTrippedRef = useRef(false);
 
   const parsed = useMemo(() => parseQuery(query), [query]);
   const nodeByRef = useMemo(() => {
@@ -497,32 +619,52 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
         params.filters = parsed.filters;
       }
 
-      commands.search(params).then(
-        (response) => {
-          if (cancelled) {
-            return;
+      const finishLoading = () => {
+        window.clearTimeout(skeletonTimer);
+        setShowSkeleton(false);
+      };
+
+      const applyHits = (list: SearchHit[]) => {
+        finishLoading();
+        setHits(list);
+        setSelectedIndex(0);
+        setPhase('ready');
+        if (boundaryTrippedRef.current) {
+          boundaryTrippedRef.current = false;
+          setBoundaryEpoch((value) => value + 1);
+        }
+      };
+
+      const applyFailure = (failure: unknown) => {
+        finishLoading();
+        setHits([]);
+        if (isGraphiteError(failure) && failure.code === 'UNAVAILABLE') {
+          setUnavailableHint(failure.hint ?? failure.message);
+          setPhase('unavailable');
+        } else {
+          setPhase('error');
+        }
+      };
+
+      Promise.resolve()
+        .then(() => commands.search(params))
+        .then(
+          (response) => {
+            if (!cancelled) {
+              applyHits(sanitizeHits(response));
+            }
+          },
+          (failure: unknown) => {
+            if (!cancelled) {
+              applyFailure(failure);
+            }
+          },
+        )
+        .catch((failure: unknown) => {
+          if (!cancelled) {
+            applyFailure(failure);
           }
-          window.clearTimeout(skeletonTimer);
-          setShowSkeleton(false);
-          setHits(response.hits.slice(0, SEARCH_LIMIT));
-          setSelectedIndex(0);
-          setPhase('ready');
-        },
-        (error: unknown) => {
-          if (cancelled) {
-            return;
-          }
-          window.clearTimeout(skeletonTimer);
-          setShowSkeleton(false);
-          setHits([]);
-          if (isGraphiteError(error) && error.code === 'UNAVAILABLE') {
-            setUnavailableHint(error.hint ?? error.message);
-            setPhase('unavailable');
-          } else {
-            setPhase('error');
-          }
-        },
-      );
+        });
     }, DEBOUNCE_MS);
 
     return () => {
@@ -564,6 +706,19 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const appendOperator = (op: string) => {
     setQuery((current) => (current.trim().length > 0 ? `${current.trim()} ${op}` : op));
     inputRef.current?.focus();
+  };
+
+  const retrySearch = () => {
+    boundaryTrippedRef.current = false;
+    setBoundaryEpoch((value) => value + 1);
+    setNonce((value) => value + 1);
+  };
+
+  const onBoundaryTrip = () => {
+    boundaryTrippedRef.current = true;
+    setHits([]);
+    setShowSkeleton(false);
+    setPhase('error');
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -738,198 +893,191 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <Presence mode="wait">
-          {view === 'results' ? (
-            <Fade key="results" className="flex flex-col p-2">
-              <motion.ul
-                id="search-results-list"
-                role="listbox"
-                aria-label="Результаты поиска"
-                variants={listContainerVariants}
-                initial="initial"
-                animate="animate"
-                className="flex flex-col gap-1"
-              >
-                {hits.map((hit, index) => {
-                  const node = nodeByRef.get(hit.ref);
-                  const TypeIcon = node !== undefined ? TYPE_ICON[node.type] : FileIcon;
-                  const status = node?.status;
-                  const dir = node !== undefined ? parentDir(node.path) : parentDir(refToPath(hit.ref));
-                  const date = formatUpdated(hit.updated);
-                  const snippets = hit.snippets.filter((s) => s.trim().length > 0).slice(0, 3);
-                  const selected = index === selectedIndex;
-                  return (
-                    <motion.li key={hit.ref} variants={listItemVariants}>
-                      <button
-                        ref={(el) => {
-                          itemRefs.current[index] = el;
-                        }}
-                        type="button"
-                        id={`search-option-${index}`}
-                        role="option"
-                        aria-selected={selected}
-                        onClick={() => openNote(hit.ref)}
-                        onMouseMove={() => setSelectedIndex(index)}
-                        className={cx(
-                          'flex w-full gap-2.5 rounded-m px-2.5 py-2 text-left transition-colors',
-                          selected ? 'bg-bg-3' : 'hover:bg-bg-2',
-                        )}
-                      >
-                        <span
+        <SearchBoundary key={boundaryEpoch} onTrip={onBoundaryTrip} onRetry={retrySearch}>
+          <Presence mode="wait">
+            {view === 'results' ? (
+              <Fade key="results" className="flex flex-col p-2">
+                <motion.ul
+                  id="search-results-list"
+                  role="listbox"
+                  aria-label="Результаты поиска"
+                  variants={listContainerVariants}
+                  initial="initial"
+                  animate="animate"
+                  className="flex flex-col gap-1"
+                >
+                  {hits.map((hit, index) => {
+                    const node = nodeByRef.get(hit.ref);
+                    const TypeIcon: LucideIcon = (node !== undefined ? TYPE_ICON[node.type] : undefined) ?? FileIcon;
+                    const status = node?.status;
+                    const dir = node !== undefined ? parentDir(node.path) : parentDir(refToPath(hit.ref));
+                    const date = formatUpdated(hit.updated);
+                    const snippets = hit.snippets.filter((s) => s.trim().length > 0).slice(0, 3);
+                    const selected = index === selectedIndex;
+                    return (
+                      <motion.li key={hit.ref} variants={listItemVariants}>
+                        <button
+                          ref={(el) => {
+                            itemRefs.current[index] = el;
+                          }}
+                          type="button"
+                          id={`search-option-${index}`}
+                          role="option"
+                          aria-selected={selected}
+                          onClick={() => openNote(hit.ref)}
+                          onMouseMove={() => setSelectedIndex(index)}
                           className={cx(
-                            'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-s border bg-bg-2 transition-colors',
-                            selected ? 'border-stroke-1 text-accent' : 'border-stroke-0 text-text-2',
+                            'flex w-full gap-2.5 rounded-m px-2.5 py-2 text-left transition-colors',
+                            selected ? 'bg-bg-3' : 'hover:bg-bg-2',
                           )}
                         >
-                          <TypeIcon size={15} strokeWidth={1.75} />
-                        </span>
-                        <span className="flex min-w-0 flex-1 flex-col gap-1">
-                          <span className="flex items-baseline gap-2">
-                            <span className="min-w-0 flex-1 truncate text-ui text-text-0">
-                              {hit.title.length > 0 ? hit.title : 'Без названия'}
-                            </span>
-                            {date.short.length > 0 ? (
-                              <time dateTime={hit.updated} title={date.full} className="shrink-0 text-micro text-text-3">
-                                {date.short}
-                              </time>
-                            ) : null}
+                          <span
+                            className={cx(
+                              'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-s border bg-bg-2 transition-colors',
+                              selected ? 'border-stroke-1 text-accent' : 'border-stroke-0 text-text-2',
+                            )}
+                          >
+                            <TypeIcon size={15} strokeWidth={1.75} />
                           </span>
-                          {snippets.length > 0 ? (
-                            <span className="flex flex-col gap-0.5">
-                              {snippets.map((snippet, snippetIndex) => (
-                                <span
-                                  key={snippetIndex}
-                                  className="line-clamp-2 text-caption leading-relaxed text-text-2"
+                          <span className="flex min-w-0 flex-1 flex-col gap-1">
+                            <span className="flex items-baseline gap-2">
+                              <span className="min-w-0 flex-1 truncate text-ui text-text-0">
+                                {hit.title.trim().length > 0 ? hit.title : 'Без названия'}
+                              </span>
+                              {date.short.length > 0 ? (
+                                <time
+                                  dateTime={hit.updated}
+                                  title={date.full}
+                                  className="shrink-0 text-micro text-text-3"
                                 >
-                                  {highlightSnippet(snippet, parsed.terms)}
-                                </span>
-                              ))}
-                            </span>
-                          ) : null}
-                          {status !== undefined || dir !== undefined ? (
-                            <span className="mt-0.5 flex min-w-0 items-center gap-2">
-                              {status !== undefined ? <StatusChip status={status} /> : null}
-                              {dir !== undefined ? (
-                                <span className="min-w-0 flex-1 truncate text-micro text-text-3">{dir}</span>
+                                  {date.short}
+                                </time>
                               ) : null}
                             </span>
-                          ) : null}
-                        </span>
-                      </button>
-                    </motion.li>
-                  );
-                })}
-              </motion.ul>
-            </Fade>
-          ) : view === 'skeleton' ? (
-            <Fade key="skeleton" className="flex flex-col gap-2 p-2">
-              {indexBuilding ? (
-                <p className="px-0.5 text-micro text-text-3">Индекс ещё строится — показываю, что уже готово</p>
-              ) : null}
-              <SkeletonList shimmer={shimmer} rows={6} />
-            </Fade>
-          ) : view === 'building' ? (
-            <Fade key="building" className="flex flex-1 flex-col">
-              <div className="flex items-center gap-2 px-3 pb-1.5 pt-3">
-                <LoaderCircle
-                  size={15}
-                  strokeWidth={1.75}
-                  className={cx('shrink-0 text-accent', !reduced && 'animate-spin')}
-                  aria-hidden
-                />
-                <span className="text-ui text-text-1">Индекс строится</span>
-                {indexStatus.total > 0 ? (
-                  <span className="ml-auto text-micro tabular-nums text-text-3">
-                    {indexStatus.done} / {indexStatus.total}
-                  </span>
+                            {snippets.length > 0 ? (
+                              <span className="flex flex-col gap-0.5">
+                                {snippets.map((snippet, snippetIndex) => (
+                                  <span
+                                    key={snippetIndex}
+                                    className="line-clamp-2 text-caption leading-relaxed text-text-2"
+                                  >
+                                    {highlightSnippet(snippet, parsed.terms)}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : null}
+                            {status !== undefined || dir !== undefined ? (
+                              <span className="mt-0.5 flex min-w-0 items-center gap-2">
+                                {status !== undefined ? <StatusChip status={status} /> : null}
+                                {dir !== undefined ? (
+                                  <span className="min-w-0 flex-1 truncate text-micro text-text-3">{dir}</span>
+                                ) : null}
+                              </span>
+                            ) : null}
+                          </span>
+                        </button>
+                      </motion.li>
+                    );
+                  })}
+                </motion.ul>
+              </Fade>
+            ) : view === 'skeleton' ? (
+              <Fade key="skeleton" className="flex flex-col gap-2 p-2">
+                {indexBuilding ? (
+                  <p className="px-0.5 text-micro text-text-3">Индекс ещё строится — показываю, что уже готово</p>
                 ) : null}
-              </div>
-              <p className="px-3 pb-3 text-caption text-text-2">
-                Результаты появятся, как только поиск будет готов.
-                {unavailableHint !== undefined && phase === 'unavailable' ? (
-                  <span className="mt-1 block text-micro text-text-3">{unavailableHint}</span>
-                ) : null}
-              </p>
-              <div className="px-2 opacity-60">
-                <SkeletonList shimmer={shimmer} rows={4} />
-              </div>
-            </Fade>
-          ) : view === 'empty' ? (
-            <Fade key="empty" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-              <span className="grid size-11 place-items-center rounded-full border border-stroke-0 bg-bg-2 text-text-2">
-                <SearchX size={20} strokeWidth={1.75} />
-              </span>
-              <div className="flex flex-col gap-1">
-                <p className="text-ui text-text-1">Ничего не найдено</p>
-                <p className="text-caption text-text-2">Уточните запрос или измените операторы.</p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-1.5">
-                {(['tag:', 'status:', 'type:', 'path:', 'updated:'] as const).map((op) => (
-                  <button
-                    key={op}
-                    type="button"
-                    onClick={() => appendOperator(op)}
-                    className="rounded-full border border-stroke-1 bg-bg-2 px-2 py-0.5 font-mono text-micro text-text-1 transition-colors hover:border-accent hover:text-text-0"
-                  >
-                    {op}
-                  </button>
-                ))}
-              </div>
-            </Fade>
-          ) : view === 'error' ? (
-            <Fade key="error" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-              <span className="grid size-11 place-items-center rounded-full border border-stroke-0 bg-bg-2 text-warn">
-                <SearchX size={20} strokeWidth={1.75} />
-              </span>
-              <div className="flex flex-col gap-1">
-                <p className="text-ui text-text-1">Поиск временно недоступен</p>
-                <p className="text-caption text-text-2">Не удалось выполнить запрос. Попробуйте ещё раз.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setNonce((value) => value + 1)}
-                className="rounded-s border border-stroke-1 bg-bg-2 px-3 py-1 text-caption text-text-1 transition-colors hover:border-accent hover:text-text-0"
-              >
-                Повторить
-              </button>
-            </Fade>
-          ) : (
-            <Fade key="idle" className="flex flex-1 flex-col gap-4 px-3 py-5">
-              {indexBuilding ? (
-                <div className="flex items-center gap-2 rounded-m border border-stroke-0 bg-bg-2 px-3 py-2">
-                  <span
+                <SkeletonList shimmer={shimmer} rows={6} />
+              </Fade>
+            ) : view === 'building' ? (
+              <Fade key="building" className="flex flex-1 flex-col">
+                <div className="flex items-center gap-2 px-3 pb-1.5 pt-3">
+                  <LoaderCircle
+                    size={15}
+                    strokeWidth={1.75}
+                    className={cx('shrink-0 text-accent', !reduced && 'animate-spin')}
                     aria-hidden
-                    className={cx('size-1.5 shrink-0 rounded-full bg-accent', !reduced && 'animate-pulse-mcp')}
                   />
-                  <span className="text-caption text-text-2">
-                    Индекс строится{indexStatus.total > 0 ? ` · ${indexStatus.done}/${indexStatus.total}` : ''}
-                  </span>
+                  <span className="text-ui text-text-1">Индекс строится</span>
+                  {indexStatus.total > 0 ? (
+                    <span className="ml-auto text-micro tabular-nums text-text-3">
+                      {indexStatus.done} / {indexStatus.total}
+                    </span>
+                  ) : null}
                 </div>
-              ) : null}
-              <div className="flex flex-col gap-1.5">
-                <p className="text-ui text-text-1">Поиск по хранилищу</p>
-                <p className="text-caption text-text-2">
-                  Введите запрос или используйте операторы. Навигация — стрелками, открытие — Enter.
+                <p className="px-3 pb-3 text-caption text-text-2">
+                  Результаты появятся, как только поиск будет готов.
+                  {unavailableHint !== undefined && phase === 'unavailable' ? (
+                    <span className="mt-1 block text-micro text-text-3">{unavailableHint}</span>
+                  ) : null}
                 </p>
-              </div>
-              <div className="flex flex-col gap-1">
-                {OPERATOR_HELP.map((item) => (
-                  <button
-                    key={item.op}
-                    type="button"
-                    onClick={() => appendOperator(item.op)}
-                    className="group flex items-center gap-2.5 rounded-s px-2 py-1.5 text-left transition-colors hover:bg-bg-2"
-                  >
-                    <code className="shrink-0 rounded-xs border border-stroke-1 bg-bg-2 px-1.5 py-0.5 font-mono text-micro text-text-1 transition-colors group-hover:border-accent group-hover:text-text-0">
-                      {item.op}
-                    </code>
-                    <span className="min-w-0 flex-1 truncate text-caption text-text-2">{item.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </Fade>
-          )}
-        </Presence>
+                <div className="px-2 opacity-60">
+                  <SkeletonList shimmer={shimmer} rows={4} />
+                </div>
+              </Fade>
+            ) : view === 'empty' ? (
+              <Fade key="empty" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+                <span className="grid size-11 place-items-center rounded-full border border-stroke-0 bg-bg-2 text-text-2">
+                  <SearchX size={20} strokeWidth={1.75} />
+                </span>
+                <div className="flex flex-col gap-1">
+                  <p className="text-ui text-text-1">Ничего не найдено</p>
+                  <p className="text-caption text-text-2">Уточните запрос или измените операторы.</p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {(['tag:', 'status:', 'type:', 'path:', 'updated:'] as const).map((op) => (
+                    <button
+                      key={op}
+                      type="button"
+                      onClick={() => appendOperator(op)}
+                      className="rounded-full border border-stroke-1 bg-bg-2 px-2 py-0.5 font-mono text-micro text-text-1 transition-colors hover:border-accent hover:text-text-0"
+                    >
+                      {op}
+                    </button>
+                  ))}
+                </div>
+              </Fade>
+            ) : view === 'error' ? (
+              <Fade key="error" className="flex flex-1 flex-col">
+                <SearchErrorState onRetry={retrySearch} />
+              </Fade>
+            ) : (
+              <Fade key="idle" className="flex flex-1 flex-col gap-4 px-3 py-5">
+                {indexBuilding ? (
+                  <div className="flex items-center gap-2 rounded-m border border-stroke-0 bg-bg-2 px-3 py-2">
+                    <span
+                      aria-hidden
+                      className={cx('size-1.5 shrink-0 rounded-full bg-accent', !reduced && 'animate-pulse-mcp')}
+                    />
+                    <span className="text-caption text-text-2">
+                      Индекс строится{indexStatus.total > 0 ? ` · ${indexStatus.done}/${indexStatus.total}` : ''}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-ui text-text-1">Поиск по хранилищу</p>
+                  <p className="text-caption text-text-2">
+                    Введите запрос или используйте операторы. Навигация — стрелками, открытие — Enter.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {OPERATOR_HELP.map((item) => (
+                    <button
+                      key={item.op}
+                      type="button"
+                      onClick={() => appendOperator(item.op)}
+                      className="group flex items-center gap-2.5 rounded-s px-2 py-1.5 text-left transition-colors hover:bg-bg-2"
+                    >
+                      <code className="shrink-0 rounded-xs border border-stroke-1 bg-bg-2 px-1.5 py-0.5 font-mono text-micro text-text-1 transition-colors group-hover:border-accent group-hover:text-text-0">
+                        {item.op}
+                      </code>
+                      <span className="min-w-0 flex-1 truncate text-caption text-text-2">{item.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </Fade>
+            )}
+          </Presence>
+        </SearchBoundary>
       </div>
 
       {footerText !== undefined ? (

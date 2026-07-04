@@ -5,6 +5,7 @@ import type { NoteType, Status, TreeNode } from '@graphite/bindings';
 
 export interface KanbanCardData extends TreeNode {
   status: Status;
+  sortStamp: number;
 }
 
 export interface ColumnDef {
@@ -121,7 +122,7 @@ export function groupByStatus(cards: KanbanCardData[]): Record<Status, KanbanCar
       if (pinDiff !== 0) {
         return pinDiff;
       }
-      return (Date.parse(b.updated) || 0) - (Date.parse(a.updated) || 0);
+      return b.sortStamp - a.sortStamp;
     });
   }
   return groups;

@@ -58,6 +58,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::bundle_compose,
             commands::bundle_create,
             commands::idea_to_tasks,
+            commands::add_path_note,
+            commands::save_attachment,
+            commands::save_attachment_from_path,
             commands::open_note_window,
             commands::note_abs_path,
             commands::reveal_in_explorer,
@@ -245,7 +248,7 @@ pub fn run() {
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&["capture"])
+                .with_denylist(&["capture", "note"])
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -264,6 +267,15 @@ pub fn run() {
             builder.mount_events(app);
             runtime::set_app_handle(app.handle().clone());
             commands::mount_saved_vault();
+
+            // Служебные окна на старте всегда скрыты, что бы ни лежало в
+            // сохранённом window-state прошлых версий: окно заметки появляется
+            // только по open_note_window, захват — по хоткею/трею.
+            for label in ["note", "capture"] {
+                if let Some(window) = app.get_webview_window(label) {
+                    let _ = window.hide();
+                }
+            }
 
             let mcp_item = build_tray(app)?;
             register_global_shortcut(app.handle());

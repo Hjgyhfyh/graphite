@@ -91,6 +91,9 @@ export const usePanesStore = create<PanesStore>()((set, get) => ({
     syncCurrentRef(get());
   },
   moveTabToPane: (tabId, paneId) => {
+    if (!get().panes.some((p) => p.id === paneId)) {
+      return;
+    }
     useTabsStore.getState().moveToPane(tabId, paneId);
     set((s) => {
       const panes = s.panes.map((p) => {

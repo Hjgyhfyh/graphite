@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Tree } from 'react-arborist';
 import type {
   CursorProps,
@@ -12,23 +12,30 @@ import type {
   TreeApi,
 } from 'react-arborist';
 import * as ContextMenu from '@radix-ui/react-context-menu';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import {
   ChevronRight,
   Columns2,
   Copy,
+  FilePlus,
   FileText,
   Folder,
   FolderOpen,
+  FolderPlus,
   FolderSymlink,
+  Import,
   Palette,
   Pencil,
   Pin,
   PinOff,
   Plus,
+  SquareKanban,
   Trash2,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { NoteRef, TreeNode } from '@graphite/bindings';
-import { commands } from '@graphite/bindings';
+import { commands, isTauriAvailable } from '@graphite/bindings';
 import { Kbd, STAGGER_CAP, cx } from '@graphite/ui';
 import { useActionHandler } from '../../app/Keymap';
 import { springSnappy, springStandard, usePrefersReducedMotion } from '../../motion';
@@ -52,6 +59,10 @@ const STAGGER_STEP = 0.018;
 
 const MENU_ITEM =
   'flex h-8 cursor-default select-none items-center gap-2 rounded-s px-2 text-ui text-text-1 outline-none data-[highlighted]:bg-bg-3 data-[highlighted]:text-text-0';
+const MENU_CONTENT =
+  'z-50 min-w-56 origin-(--radix-context-menu-content-transform-origin) animate-pop rounded-m border border-stroke-1 bg-bg-2 p-1 shadow-3';
+const DD_CONTENT =
+  'z-50 min-w-52 origin-(--radix-dropdown-menu-content-transform-origin) animate-pop rounded-m border border-stroke-1 bg-bg-2 p-1 shadow-3';
 
 interface ArNode {
   id: string;
@@ -69,6 +80,7 @@ interface IconRequest {
   icon?: string;
   color?: string;
   point: { x: number; y: number };
+  mode: 'full' | 'color';
 }
 
 interface NodeTreeContext {
@@ -81,7 +93,10 @@ interface NodeTreeContext {
   openNote: (ref: NoteRef) => void;
   openInNewPane: (ref: NoteRef) => void;
   startRename: (node: NodeApi<ArNode>) => void;
+  renameByRef: (ref: NoteRef) => void;
   requestIcon: (request: IconRequest) => void;
+  newNoteInside: (parent: NoteRef) => void;
+  newFolderInside: (parent: NoteRef) => void;
   togglePin: (ref: NoteRef) => void;
   remove: (ref: NoteRef) => void;
 }
@@ -104,6 +119,23 @@ function dirOf(path: string): string {
 function baseName(path: string): string {
   const slash = path.lastIndexOf('/');
   return slash === -1 ? path : path.slice(slash + 1);
+}
+
+/** Ссылка на folder-note папки: у виртуальной — будущий `_index.md`. */
+function folderNoteRef(data: ArNode): NoteRef {
+  return data.virtual === true ? `path:${data.path}${INDEX_SUFFIX}` : data.ref;
+}
+
+function filesPhrase(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return `${count} файл станет заметкой`;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${count} файла станут заметками`;
+  }
+  return `${count} файлов станут заметками`;
 }
 
 function buildForest(nodes: readonly TreeNode[]): ArNode[] {
@@ -281,46 +313,61 @@ function Cursor({ top, left, indent }: CursorProps) {
   );
 }
 
-function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
-  const ctx = useNodeCtx();
+interface MenuItemProps {
+  icon: LucideIcon;
+  label: string;
+  kbd?: string;
+  danger?: boolean;
+  onSelect: () => void;
+}
+
+function MenuItem({ icon: Icon, label, kbd, danger, onSelect }: MenuItemProps) {
   return (
-    <div
-      {...attrs}
-      ref={innerRef}
-      onClick={node.handleClick}
-      onFocus={(event) => event.stopPropagation()}
-      onKeyDown={(event) => {
-        if (node.isEditing) {
-          return;
-        }
-        if (
-          event.key === 'Enter' &&
-          !event.altKey &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.shiftKey
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          event.nativeEvent.stopImmediatePropagation();
-          if (node.data.virtual === true) {
-            node.toggle();
-          } else {
-            ctx.openNote(node.data.ref);
-          }
-        } else if (event.key === 'Delete') {
-          event.preventDefault();
-          event.stopPropagation();
-          event.nativeEvent.stopImmediatePropagation();
-          if (node.data.virtual !== true) {
-            ctx.remove(node.data.ref);
-          }
-        }
-      }}
-      className="flex items-center px-1 outline-none"
+    <ContextMenu.Item
+      className={cx(MENU_ITEM, danger === true ? 'text-danger data-[highlighted]:text-danger' : undefined)}
+      onSelect={onSelect}
     >
-      {children}
-    </div>
+      <Icon size={15} strokeWidth={1.75} className={danger === true ? undefined : 'text-text-2'} />
+      <span className="flex-1">{label}</span>
+      {kbd !== undefined ? <Kbd>{kbd}</Kbd> : null}
+    </ContextMenu.Item>
+  );
+}
+
+function MenuSeparator() {
+  return <ContextMenu.Separator className="my-1 h-px bg-stroke-0" />;
+}
+
+interface ExplorerItemsProps {
+  refId: NoteRef;
+}
+
+function ExplorerItems({ refId }: ExplorerItemsProps) {
+  return (
+    <>
+      <MenuItem
+        icon={FolderSymlink}
+        label="Перейти в проводник"
+        onSelect={() => {
+          void commands
+            .revealInExplorer(refId)
+            .catch(() => useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось открыть проводник' }));
+        }}
+      />
+      <MenuItem
+        icon={Copy}
+        label="Скопировать путь"
+        onSelect={() => {
+          void commands.noteAbsPath(refId).then(
+            (path) => {
+              void navigator.clipboard.writeText(path);
+              useUiStore.getState().pushToast({ kind: 'success', text: 'Путь скопирован' });
+            },
+            () => useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось получить путь' }),
+          );
+        }}
+      />
+    </>
   );
 }
 
@@ -372,7 +419,9 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
             <button
               type="button"
               tabIndex={-1}
+              draggable={false}
               aria-label={node.isOpen ? 'Свернуть' : 'Развернуть'}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
                 node.toggle();
@@ -411,86 +460,209 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
         </motion.div>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="z-50 min-w-56 origin-(--radix-context-menu-content-transform-origin) animate-pop rounded-m border border-stroke-1 bg-bg-2 p-1 shadow-3">
-          {data.virtual === true ? (
-            <ContextMenu.Item className={MENU_ITEM} onSelect={() => node.toggle()}>
-              {node.isOpen ? (
-                <FolderOpen size={15} strokeWidth={1.75} className="text-text-2" />
-              ) : (
-                <Folder size={15} strokeWidth={1.75} className="text-text-2" />
-              )}
-              {node.isOpen ? 'Свернуть' : 'Развернуть'}
-            </ContextMenu.Item>
+        <ContextMenu.Content className={MENU_CONTENT}>
+          {data.isFolder ? (
+            <>
+              <MenuItem
+                icon={node.isOpen ? Folder : FolderOpen}
+                label={node.isOpen ? 'Свернуть' : 'Развернуть'}
+                onSelect={() => node.toggle()}
+              />
+              {data.virtual !== true ? (
+                <>
+                  <MenuItem icon={FileText} label="Открыть заметку" onSelect={() => ctx.openNote(data.ref)} />
+                  <MenuItem
+                    icon={Columns2}
+                    label="Открыть в новой панели"
+                    onSelect={() => ctx.openInNewPane(data.ref)}
+                  />
+                </>
+              ) : null}
+              <MenuSeparator />
+              <MenuItem icon={FilePlus} label="Новая заметка" onSelect={() => ctx.newNoteInside(data.ref)} />
+              <MenuItem icon={FolderPlus} label="Новая папка" onSelect={() => ctx.newFolderInside(data.ref)} />
+              <MenuSeparator />
+              {data.virtual !== true ? (
+                <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.startRename(node)} />
+              ) : null}
+              <MenuItem
+                icon={Palette}
+                label="Цвет папки"
+                onSelect={() =>
+                  ctx.requestIcon({
+                    ref: folderNoteRef(data),
+                    icon: iconInfo.icon,
+                    color: iconInfo.color,
+                    point: menuPoint.current,
+                    mode: 'color',
+                  })
+                }
+              />
+              {data.virtual !== true ? (
+                <MenuItem
+                  icon={pinned ? PinOff : Pin}
+                  label={pinned ? 'Открепить' : 'Закрепить'}
+                  onSelect={() => ctx.togglePin(data.ref)}
+                />
+              ) : null}
+              {data.virtual !== true ? (
+                <>
+                  <MenuSeparator />
+                  <MenuItem icon={Trash2} label="Удалить" danger onSelect={() => ctx.remove(data.ref)} />
+                </>
+              ) : null}
+            </>
           ) : (
             <>
-          <ContextMenu.Item className={MENU_ITEM} onSelect={() => ctx.openNote(data.ref)}>
-            <FileText size={15} strokeWidth={1.75} className="text-text-2" />
-            Открыть
-          </ContextMenu.Item>
-          <ContextMenu.Item className={MENU_ITEM} onSelect={() => ctx.openInNewPane(data.ref)}>
-            <Columns2 size={15} strokeWidth={1.75} className="text-text-2" />
-            Открыть в новой панели
-          </ContextMenu.Item>
-          <ContextMenu.Separator className="my-1 h-px bg-stroke-0" />
-          <ContextMenu.Item className={MENU_ITEM} onSelect={() => ctx.startRename(node)}>
-            <Pencil size={15} strokeWidth={1.75} className="text-text-2" />
-            <span className="flex-1">Переименовать</span>
-            <Kbd>F2</Kbd>
-          </ContextMenu.Item>
-          <ContextMenu.Item
-            className={MENU_ITEM}
-            onSelect={() =>
-              ctx.requestIcon({ ref: data.ref, icon: iconInfo.icon, color: iconInfo.color, point: menuPoint.current })
-            }
-          >
-            <Palette size={15} strokeWidth={1.75} className="text-text-2" />
-            Иконка и цвет
-          </ContextMenu.Item>
-          <ContextMenu.Item className={MENU_ITEM} onSelect={() => ctx.togglePin(data.ref)}>
-            {pinned ? (
-              <PinOff size={15} strokeWidth={1.75} className="text-text-2" />
-            ) : (
-              <Pin size={15} strokeWidth={1.75} className="text-text-2" />
-            )}
-            {pinned ? 'Открепить' : 'Закрепить'}
-          </ContextMenu.Item>
-          <ContextMenu.Separator className="my-1 h-px bg-stroke-0" />
-          <ContextMenu.Item
-            className={cx(MENU_ITEM, 'text-danger data-[highlighted]:text-danger')}
-            onSelect={() => ctx.remove(data.ref)}
-          >
-            <Trash2 size={15} strokeWidth={1.75} />
-            Удалить
-          </ContextMenu.Item>
+              <MenuItem icon={FileText} label="Открыть" onSelect={() => ctx.openNote(data.ref)} />
+              <MenuItem icon={Columns2} label="Открыть в новой панели" onSelect={() => ctx.openInNewPane(data.ref)} />
+              <MenuSeparator />
+              <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.startRename(node)} />
+              <MenuItem
+                icon={Palette}
+                label="Иконка и цвет"
+                onSelect={() =>
+                  ctx.requestIcon({
+                    ref: data.ref,
+                    icon: iconInfo.icon,
+                    color: iconInfo.color,
+                    point: menuPoint.current,
+                    mode: 'full',
+                  })
+                }
+              />
+              <MenuItem
+                icon={pinned ? PinOff : Pin}
+                label={pinned ? 'Открепить' : 'Закрепить'}
+                onSelect={() => ctx.togglePin(data.ref)}
+              />
+              <MenuSeparator />
+              <MenuItem icon={Trash2} label="Удалить" danger onSelect={() => ctx.remove(data.ref)} />
             </>
           )}
-          <ContextMenu.Separator className="my-1 h-px bg-stroke-0" />
-          <ContextMenu.Item
-            className={MENU_ITEM}
-            onSelect={() => {
-              void commands
-                .revealInExplorer(data.ref)
-                .catch(() => useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось открыть проводник' }));
-            }}
+          <MenuSeparator />
+          <ExplorerItems refId={data.ref} />
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  );
+}
+
+function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
+  const ctx = useNodeCtx();
+  return (
+    <div
+      {...attrs}
+      ref={innerRef}
+      onClick={node.handleClick}
+      onFocus={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (node.isEditing) {
+          return;
+        }
+        if (
+          event.key === 'Enter' &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.nativeEvent.stopImmediatePropagation();
+          if (node.data.isFolder) {
+            node.toggle();
+          } else {
+            ctx.openNote(node.data.ref);
+          }
+        } else if (event.key === 'Delete') {
+          event.preventDefault();
+          event.stopPropagation();
+          event.nativeEvent.stopImmediatePropagation();
+          if (node.data.virtual !== true) {
+            ctx.remove(node.data.ref);
+          }
+        }
+      }}
+      className="flex items-center px-1 outline-none"
+    >
+      {children}
+    </div>
+  );
+}
+
+interface PinnedItem {
+  ref: NoteRef;
+  title: string;
+  isFolder: boolean;
+}
+
+function PinnedRow({ item }: { item: PinnedItem }) {
+  const ctx = useNodeCtx();
+  const info = ctx.iconByRef[item.ref] ?? {};
+  const active = ctx.activeRef === item.ref;
+  const menuPoint = useRef({ x: 0, y: 0 });
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <div
+          onContextMenu={(event) => {
+            menuPoint.current = { x: event.clientX, y: event.clientY };
+          }}
+          className={cx(
+            'group/pin flex h-7 items-center gap-1.5 rounded-s px-2 text-ui',
+            active ? 'bg-accent-dim text-text-0' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => ctx.openNote(item.ref)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
           >
-            <FolderSymlink size={15} strokeWidth={1.75} className="text-text-2" />
-            Перейти в проводник
-          </ContextMenu.Item>
-          <ContextMenu.Item
-            className={MENU_ITEM}
-            onSelect={() => {
-              void commands.noteAbsPath(data.ref).then(
-                (path) => {
-                  void navigator.clipboard.writeText(path);
-                  useUiStore.getState().pushToast({ kind: 'success', text: 'Путь скопирован' });
-                },
-                () => useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось получить путь' }),
-              );
-            }}
+            <NoteIcon
+              icon={info.icon}
+              color={info.color}
+              fallback={item.isFolder ? 'Folder' : 'FileText'}
+              size={15}
+              className={cx('shrink-0', info.color === undefined ? 'text-text-2' : undefined)}
+            />
+            <span className="min-w-0 flex-1 truncate">{item.title}</span>
+          </button>
+          <button
+            type="button"
+            aria-label="Открепить"
+            onClick={() => ctx.togglePin(item.ref)}
+            className="shrink-0 text-text-2 hover:text-danger"
           >
-            <Copy size={15} strokeWidth={1.75} className="text-text-2" />
-            Скопировать путь
-          </ContextMenu.Item>
+            <Pin size={11} strokeWidth={1.75} className="group-hover/pin:hidden" />
+            <PinOff size={12} strokeWidth={1.75} className="hidden group-hover/pin:block" />
+          </button>
+        </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className={MENU_CONTENT}>
+          <MenuItem icon={FileText} label="Открыть" onSelect={() => ctx.openNote(item.ref)} />
+          <MenuItem icon={Columns2} label="Открыть в новой панели" onSelect={() => ctx.openInNewPane(item.ref)} />
+          <MenuSeparator />
+          <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.renameByRef(item.ref)} />
+          <MenuItem
+            icon={Palette}
+            label={item.isFolder ? 'Цвет папки' : 'Иконка и цвет'}
+            onSelect={() =>
+              ctx.requestIcon({
+                ref: item.ref,
+                icon: info.icon,
+                color: info.color,
+                point: menuPoint.current,
+                mode: item.isFolder ? 'color' : 'full',
+              })
+            }
+          />
+          <MenuItem icon={PinOff} label="Открепить" onSelect={() => ctx.togglePin(item.ref)} />
+          <MenuSeparator />
+          <MenuItem icon={Trash2} label="Удалить" danger onSelect={() => ctx.remove(item.ref)} />
+          <MenuSeparator />
+          <ExplorerItems refId={item.ref} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -510,8 +682,11 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const [justOpened, setJustOpened] = useState<string | undefined>(undefined);
   const [justMoved, setJustMoved] = useState<string | undefined>(undefined);
   const [iconRequest, setIconRequest] = useState<IconRequest | undefined>(undefined);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [dropCount, setDropCount] = useState<number | undefined>(undefined);
   const openTimer = useRef<number | undefined>(undefined);
   const moveTimer = useRef<number | undefined>(undefined);
+  const renameTimer = useRef<number | undefined>(undefined);
 
   const forest = useMemo(() => buildForest(tree), [tree]);
   const pinned = useMemo(
@@ -523,10 +698,19 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
     [tree, pinnedNotes],
   );
 
+  const initialOpenState = useMemo(() => {
+    const state: Record<string, boolean> = {};
+    for (const id of useVaultStore.getState().collapsedFolders) {
+      state[id] = false;
+    }
+    return state;
+  }, []);
+
   useEffect(() => {
     return () => {
       window.clearTimeout(openTimer.current);
       window.clearTimeout(moveTimer.current);
+      window.clearTimeout(renameTimer.current);
     };
   }, []);
 
@@ -545,6 +729,42 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       /* узел ещё не в дереве */
     }
   }, [currentRef]);
+
+  useEffect(() => {
+    if (!isTauriAvailable()) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === 'enter') {
+          if (payload.paths.length > 0) {
+            setDropCount(payload.paths.length);
+          }
+        } else if (payload.type === 'leave') {
+          setDropCount(undefined);
+        } else if (payload.type === 'drop') {
+          setDropCount(undefined);
+          if (payload.paths.length > 0) {
+            void useVaultStore.getState().addPathNotes(payload.paths);
+          }
+        }
+      })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const flagOpened = useCallback((id: string) => {
     setJustOpened(id);
@@ -570,9 +790,39 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
     }, 0);
   }, []);
 
+  const renameByRef = useCallback((ref: NoteRef) => {
+    window.setTimeout(() => {
+      void treeRef.current?.edit(ref);
+    }, 0);
+  }, []);
+
   const requestIcon = useCallback((request: IconRequest) => {
     setIconRequest(request);
   }, []);
+
+  const newNoteInside = useCallback((parent: NoteRef) => {
+    void useVaultStore.getState().createNote({ parent });
+  }, []);
+
+  const createFolderFlow = useCallback((parent?: NoteRef) => {
+    void (async () => {
+      const ref = await useVaultStore.getState().createFolder(parent);
+      if (ref === undefined) {
+        return;
+      }
+      window.clearTimeout(renameTimer.current);
+      renameTimer.current = window.setTimeout(() => {
+        void treeRef.current?.edit(ref);
+      }, 90);
+    })();
+  }, []);
+
+  const newFolderInside = useCallback(
+    (parent: NoteRef) => {
+      createFolderFlow(parent);
+    },
+    [createFolderFlow],
+  );
 
   const togglePin = useCallback((ref: NoteRef) => {
     void useVaultStore.getState().togglePinNote(ref);
@@ -583,7 +833,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   }, []);
 
   const handleActivate = useCallback((node: NodeApi<ArNode>) => {
-    if (node.data.virtual === true) {
+    if (node.data.isFolder) {
       node.toggle();
       return;
     }
@@ -592,7 +842,9 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
 
   const handleToggle = useCallback(
     (id: string) => {
-      if (treeRef.current?.isOpen(id) === true) {
+      const open = treeRef.current?.isOpen(id) === true;
+      useVaultStore.getState().setFolderCollapsed(id, !open);
+      if (open) {
         flagOpened(id);
       }
     },
@@ -669,7 +921,10 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       openNote,
       openInNewPane,
       startRename,
+      renameByRef,
       requestIcon,
+      newNoteInside,
+      newFolderInside,
       togglePin,
       remove,
     }),
@@ -683,7 +938,10 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       openNote,
       openInNewPane,
       startRename,
+      renameByRef,
       requestIcon,
+      newNoteInside,
+      newFolderInside,
       togglePin,
       remove,
     ],
@@ -713,69 +971,72 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       <header className="flex h-9 shrink-0 items-center justify-between px-4 text-caption text-text-2">
         <span>Заметки</span>
         {vaultReady ? (
-          <button
-            type="button"
-            aria-label="Новая заметка"
-            onClick={() => void useVaultStore.getState().createNote()}
-            className="rounded-xs p-1 text-text-2 hover:bg-bg-3 hover:text-text-0"
-          >
-            <Plus size={14} strokeWidth={1.75} />
-          </button>
+          <DropdownMenu.Root open={plusOpen} onOpenChange={setPlusOpen}>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                aria-label="Создать"
+                className={cx(
+                  'rounded-xs p-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+                  plusOpen ? 'bg-bg-3 text-accent' : 'text-text-2',
+                )}
+              >
+                <motion.span
+                  className="flex"
+                  animate={{ rotate: plusOpen ? 90 : 0 }}
+                  transition={reduced ? { duration: 0 } : springSnappy}
+                >
+                  <Plus size={14} strokeWidth={1.75} />
+                </motion.span>
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" sideOffset={6} className={DD_CONTENT}>
+                <DropdownMenu.Item
+                  className={MENU_ITEM}
+                  onSelect={() => void useVaultStore.getState().createNote()}
+                >
+                  <FilePlus size={15} strokeWidth={1.75} className="text-text-2" />
+                  <span className="flex-1">Новая заметка</span>
+                  <Kbd>Ctrl+N</Kbd>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className={MENU_ITEM} onSelect={() => createFolderFlow()}>
+                  <FolderPlus size={15} strokeWidth={1.75} className="text-text-2" />
+                  <span className="flex-1">Новая папка</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator className="my-1 h-px bg-stroke-0" />
+                <DropdownMenu.Item
+                  className={MENU_ITEM}
+                  onSelect={() => void useVaultStore.getState().createNote({ title: 'Новый план', type: 'plan' })}
+                >
+                  <SquareKanban size={15} strokeWidth={1.75} className="text-text-2" />
+                  <span className="flex-1">Новый план</span>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
         ) : null}
       </header>
 
-      {forest.length === 0 && pinned.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
-          {pinned.length > 0 ? (
-            <div className="shrink-0 border-b border-stroke-0 px-2 pb-2 pt-1">
-              <p className="px-2 pb-1 text-micro uppercase tracking-wide text-text-3">Закреплённое</p>
-              <ul className="animate-fade-in space-y-0.5">
-                {pinned.map((item) => {
-                  const info = iconByRef[item.ref] ?? {};
-                  const active = currentRef === item.ref;
-                  return (
+      <NodeCtx.Provider value={ctxValue}>
+        {forest.length === 0 && pinned.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {pinned.length > 0 ? (
+              <div className="shrink-0 border-b border-stroke-0 px-2 pb-2 pt-1">
+                <p className="px-2 pb-1 text-micro uppercase tracking-wide text-text-3">Закреплённое</p>
+                <ul className="animate-fade-in space-y-0.5">
+                  {pinned.map((item) => (
                     <li key={item.ref}>
-                      <div
-                        className={cx(
-                          'group/pin flex h-7 items-center gap-1.5 rounded-s px-2 text-ui',
-                          active ? 'bg-accent-dim text-text-0' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => openNote(item.ref)}
-                          className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
-                        >
-                          <NoteIcon
-                            icon={info.icon}
-                            color={info.color}
-                            fallback={item.isFolder ? 'Folder' : 'FileText'}
-                            size={15}
-                            className={cx('shrink-0', info.color === undefined ? 'text-text-2' : undefined)}
-                          />
-                          <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Открепить"
-                          onClick={() => togglePin(item.ref)}
-                          className="shrink-0 text-text-2 hover:text-danger"
-                        >
-                          <Pin size={11} strokeWidth={1.75} className="group-hover/pin:hidden" />
-                          <PinOff size={12} strokeWidth={1.75} className="hidden group-hover/pin:block" />
-                        </button>
-                      </div>
+                      <PinnedRow item={item} />
                     </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
-          <div ref={listRef} className="min-h-0 flex-1">
-            <NodeCtx.Provider value={ctxValue}>
+            <div ref={listRef} className="min-h-0 flex-1">
               {forest.length > 0 ? (
                 <Tree<ArNode>
                   ref={treeRef}
@@ -783,6 +1044,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
                   idAccessor="id"
                   childrenAccessor="children"
                   openByDefault
+                  initialOpenState={initialOpenState}
                   width={size.width > 0 ? size.width : width}
                   height={size.height > 0 ? size.height : 600}
                   indent={INDENT}
@@ -803,10 +1065,42 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
                   {NodeRow}
                 </Tree>
               ) : null}
-            </NodeCtx.Provider>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </NodeCtx.Provider>
+
+      <AnimatePresence>
+        {dropCount !== undefined ? (
+          <motion.div
+            key="drop-overlay"
+            className="absolute inset-2 z-30 flex items-center justify-center rounded-m border-2 border-dashed border-accent bg-bg-1/95"
+            initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
+            animate={reduced ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+            exit={
+              reduced
+                ? { opacity: 0, transition: { duration: 0.08 } }
+                : { opacity: 0, scale: 0.985, transition: { duration: 0.14, ease: [0.4, 0, 1, 1] } }
+            }
+            transition={reduced ? { duration: 0.08 } : springStandard}
+          >
+            <div className="flex flex-col items-center gap-3 px-6 text-center">
+              <motion.span
+                aria-hidden
+                className="grid size-12 place-items-center rounded-full bg-accent-dim text-accent"
+                animate={reduced ? undefined : { scale: [1, 1.1, 1] }}
+                transition={reduced ? undefined : { duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+              >
+                <Import size={22} strokeWidth={1.75} />
+              </motion.span>
+              <div>
+                <p className="text-ui text-text-0">Отпустите, чтобы добавить</p>
+                <p className="mt-1 text-caption text-text-2">{filesPhrase(dropCount)} во «Входящих»</p>
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {iconRequest !== undefined ? (
         <IconPicker
@@ -819,6 +1113,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
           icon={iconRequest.icon}
           color={iconRequest.color}
           anchorPoint={iconRequest.point}
+          mode={iconRequest.mode}
           onPick={(icon, color) => void useVaultStore.getState().setIcon(iconRequest.ref, icon, color)}
         />
       ) : null}

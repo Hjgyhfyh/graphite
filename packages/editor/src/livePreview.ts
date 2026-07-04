@@ -1,7 +1,8 @@
 import { syntaxTree } from '@codemirror/language';
-import type { Range, Text } from '@codemirror/state';
+import type { Range } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
+import { frontmatterEnd } from './frontmatter';
 
 const lineDeco = (cls: string): Decoration => Decoration.line({ class: cls });
 const markDeco = (cls: string): Decoration => Decoration.mark({ class: cls });
@@ -27,24 +28,6 @@ const QUOTE_LINE = lineDeco('cm-gr-quote');
 const FENCE_LINE = lineDeco('cm-gr-fence');
 const HR_LINE = lineDeco('cm-gr-hr');
 const FRONTMATTER_LINE = lineDeco('cm-gr-frontmatter');
-
-const FM_OPEN_RE = /^\uFEFF?---\s*$/;
-const FM_CLOSE_RE = /^(?:---|\.\.\.)\s*$/;
-const FM_MAX_SCAN = 200;
-
-/** End char offset of a leading YAML frontmatter block, or 0 when the doc has none. */
-function frontmatterEnd(doc: Text): number {
-  if (doc.lines < 2 || !FM_OPEN_RE.test(doc.line(1).text)) {
-    return 0;
-  }
-  const last = Math.min(doc.lines, FM_MAX_SCAN);
-  for (let ln = 2; ln <= last; ln += 1) {
-    if (FM_CLOSE_RE.test(doc.line(ln).text)) {
-      return doc.line(ln).to;
-    }
-  }
-  return 0;
-}
 
 function buildDecorations(view: EditorView): DecorationSet {
   const items: Range<Decoration>[] = [];

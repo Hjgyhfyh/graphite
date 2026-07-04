@@ -2,6 +2,8 @@ import { invoke } from './invoke';
 import type {
   ActivityGetParams,
   ActivityGetResponse,
+  AddPathNoteParams,
+  AddPathNoteResponse,
   BufferSaveParams,
   BundleComposeParams,
   BundleComposeResponse,
@@ -45,6 +47,9 @@ import type {
   PlanProgressResponse,
   PlanUpdateParams,
   PlanUpdateResponse,
+  SaveAttachmentFromPathParams,
+  SaveAttachmentParams,
+  SaveAttachmentResponse,
   SearchParams,
   SearchResponse,
   SetIconParams,
@@ -175,6 +180,15 @@ export const commands = {
   },
   ideaToTasks(params: IdeaToTasksParams): Promise<IdeaToTasksResponse> {
     return invoke('idea_to_tasks', { params });
+  },
+  addPathNote(params: AddPathNoteParams): Promise<AddPathNoteResponse> {
+    return invoke('add_path_note', { params });
+  },
+  saveAttachment(params: SaveAttachmentParams): Promise<SaveAttachmentResponse> {
+    return invoke('save_attachment', { params });
+  },
+  saveAttachmentFromPath(params: SaveAttachmentFromPathParams): Promise<SaveAttachmentResponse> {
+    return invoke('save_attachment_from_path', { params });
   },
   openNoteWindow(noteRef: string): Promise<void> {
     return invoke('open_note_window', { noteRef });

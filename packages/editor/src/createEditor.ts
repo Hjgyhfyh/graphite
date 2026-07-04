@@ -3,11 +3,17 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { Annotation, EditorSelection, EditorState } from '@codemirror/state';
+import { Annotation, EditorState } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { EditorView, drawSelection, dropCursor, highlightSpecialChars, keymap } from '@codemirror/view';
 import type { KeyBinding } from '@codemirror/view';
 import { aiTouchField, clearAiTouched, setAiTouched } from './aiTouch';
+import { toggleInlineFormat } from './formatting';
+import { frontmatterFold } from './frontmatterFold';
+import { imageAttachments } from './imageInsert';
+import type { AttachmentSaveOptions } from './imageInsert';
+import { imagePreviews } from './imagePreview';
+import type { ImagePreviewOptions } from './imagePreview';
 import { livePreview } from './livePreview';
 import { taskCheckboxes } from './taskList';
 import { graphiteDark } from './theme';
@@ -23,6 +29,8 @@ export interface CreateEditorOptions {
   readOnly?: boolean;
   onChange?: (doc: string) => void;
   linkSource?: WikiLinkSource;
+  attachments?: AttachmentSaveOptions;
+  images?: ImagePreviewOptions;
 }
 
 export interface EditorHandle {
@@ -36,25 +44,6 @@ export interface EditorHandle {
 
 const CHECKBOX_LINE_RE = /^(\s*(?:[-*+]|\d{1,9}[.)])\s+)\[([ xX])\]/;
 const LIST_MARKER_RE = /^\s*(?:[-*+]|\d{1,9}[.)])\s+/;
-
-function wrapSelection(view: EditorView, marker: string): boolean {
-  if (view.state.readOnly) {
-    return false;
-  }
-  const width = marker.length;
-  view.dispatch({
-    ...view.state.changeByRange((range) => ({
-      changes: [
-        { from: range.from, insert: marker },
-        { from: range.to, insert: marker },
-      ],
-      range: EditorSelection.range(range.from + width, range.to + width),
-    })),
-    scrollIntoView: true,
-    userEvent: 'input',
-  });
-  return true;
-}
 
 function toggleChecklist(view: EditorView): boolean {
   if (view.state.readOnly) {
@@ -84,13 +73,15 @@ function toggleChecklist(view: EditorView): boolean {
 }
 
 const markdownKeymap: readonly KeyBinding[] = [
-  { key: 'Mod-b', preventDefault: true, run: (view) => wrapSelection(view, '**') },
-  { key: 'Mod-i', preventDefault: true, run: (view) => wrapSelection(view, '*') },
+  { key: 'Mod-b', preventDefault: true, run: (view) => toggleInlineFormat(view, '**') },
+  { key: 'Mod-i', preventDefault: true, run: (view) => toggleInlineFormat(view, '*') },
+  { key: 'Mod-e', preventDefault: true, run: (view) => toggleInlineFormat(view, '`') },
+  { key: 'Mod-Shift-x', preventDefault: true, run: (view) => toggleInlineFormat(view, '~~') },
   { key: 'Ctrl-l', preventDefault: true, run: toggleChecklist },
 ];
 
 export function createEditor(container: HTMLElement, options: CreateEditorOptions = {}): EditorHandle {
-  const { initialDoc = '', readOnly = false, onChange, linkSource } = options;
+  const { initialDoc = '', readOnly = false, onChange, linkSource, attachments, images } = options;
 
   const updateListener = EditorView.updateListener.of((update) => {
     if (!update.docChanged || onChange === undefined) {
@@ -127,8 +118,11 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       EditorView.lineWrapping,
       markdown({ base: markdownLanguage }),
       livePreview,
+      frontmatterFold,
       taskCheckboxes,
       aiTouchField,
+      ...(attachments !== undefined && !readOnly ? [imageAttachments(attachments)] : []),
+      ...(images !== undefined ? [imagePreviews(images)] : []),
       keymap.of(markdownKeymap),
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap]),
       graphiteDark,
@@ -145,8 +139,54 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
     view,
     getDoc: () => view.state.sliceDoc(),
     setDoc: (doc) => {
+      // Заменяем только реально изменившийся диапазон: выделение и позиция
+      // курсора переживают перезагрузку с диска, а скролл не дёргается.
+      const prev = view.state.sliceDoc();
+      if (prev === doc) {
+        return;
+      }
+      const minLen = Math.min(prev.length, doc.length);
+      let start = 0;
+      while (start < minLen && prev[start] === doc[start]) {
+        start += 1;
+      }
+      let endPrev = prev.length;
+      let endNext = doc.length;
+      while (endPrev > start && endNext > start && prev[endPrev - 1] === doc[endNext - 1]) {
+        endPrev -= 1;
+        endNext -= 1;
+      }
+      // Строковые индексы → позиции документа: многосимвольный разделитель
+      // строк (\r\n) в позициях CodeMirror всегда считается за один символ.
+      const sep = view.state.lineBreak;
+      const extra = sep.length - 1;
+      if (extra > 0) {
+        if (prev[start - 1] === '\r' && prev[start] === '\n') {
+          start -= 1;
+        }
+        if (prev[endPrev - 1] === '\r' && prev[endPrev] === '\n') {
+          endPrev += 1;
+          endNext += 1;
+        }
+      }
+      const sepsBefore = (upto: number): number => {
+        if (extra === 0) {
+          return 0;
+        }
+        let count = 0;
+        let at = prev.indexOf(sep);
+        while (at !== -1 && at < upto) {
+          count += 1;
+          at = prev.indexOf(sep, at + sep.length);
+        }
+        return count;
+      };
       view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: doc },
+        changes: {
+          from: start - sepsBefore(start) * extra,
+          to: endPrev - sepsBefore(endPrev) * extra,
+          insert: doc.slice(start, endNext),
+        },
         annotations: external.of(true),
       });
     },

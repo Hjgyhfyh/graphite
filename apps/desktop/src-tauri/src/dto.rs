@@ -1110,3 +1110,38 @@ pub struct IdeaToTasksResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_ref: Option<NoteRef>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AddPathNoteParams {
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<NoteRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AddPathNoteResponse {
+    pub notes: Vec<NoteCreateResponse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAttachmentParams {
+    pub data_base64: String,
+    pub ext: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAttachmentFromPathParams {
+    pub src_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAttachmentResponse {
+    pub rel_path: String,
+    pub bytes: u32,
+    pub reused: bool,
+}

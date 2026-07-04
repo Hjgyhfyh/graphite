@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::MutexGuard;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tauri::Emitter;
@@ -478,6 +480,9 @@ pub fn dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::V
         "bundle_compose" => ser(bundle_compose(de(params)?)?),
         "bundle_create" => ser(bundle_create(de(params)?)?),
         "idea_to_tasks" => ser(idea_to_tasks(de(params)?)?),
+        "add_path_note" => ser(add_path_note(de(params)?)?),
+        "save_attachment" => ser(save_attachment(de(params)?)?),
+        "save_attachment_from_path" => ser(save_attachment_from_path(de(params)?)?),
         "journal_list" => ser(journal_list(de(params)?)?),
         "undo_op" => {
             let op_id = params.get("opId").and_then(|v| v.as_str()).unwrap_or_default().to_string();
@@ -1094,6 +1099,23 @@ pub fn buffer_save(params: BufferSaveParams) -> Result<NoteEditResponse, Graphit
             .reindex_paths(&s.root, std::slice::from_ref(&rel))
             .map_err(core_err)
     });
+    // Эхо-подавление лишает второе окно той же заметки события от watcher-а,
+    // поэтому синхронизацию окон обеспечивает сама команда: рассылаем
+    // note_changed с новым rev. Окно-инициатор узнаёт свою запись по rev
+    // (он совпадает с revNew ответа) и не перечитывает буфер.
+    if let Some(app) = crate::runtime::app_handle() {
+        let actor = if actor_is_assistant() { Actor::Assistant } else { Actor::User };
+        let _ = app.emit(
+            "note_changed",
+            NoteChangedEvent {
+                r#ref: NoteRef(format!("path:{rel}")),
+                rev: Rev(rev_new.0.clone()),
+                actor,
+                kind: Some(NoteChangeKind::Modified),
+                from: None,
+            },
+        );
+    }
     let old_lines: Vec<&str> = old.lines().collect();
     let new_lines: Vec<&str> = params.content.lines().collect();
     let common = old_lines.iter().zip(new_lines.iter()).filter(|(a, b)| a == b).count();
@@ -1224,9 +1246,271 @@ pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> 
     Ok(resp)
 }
 
+/// Отображаемое имя из абсолютного пути: последний сегмент, для корней дисков —
+/// сам путь.
+fn path_display_name(path: &str) -> String {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
+/// `file:`-URL пути: локальные диски → `file:///C:/…`, UNC → `file://server/…`.
+/// Слэши нормализуются, пробелы/кириллица остаются как есть — назначение
+/// вставляется в markdown в угловых скобках `(<…>)`.
+fn file_url(path: &str) -> String {
+    let forward = path.replace('\\', "/");
+    if let Some(unc) = forward.strip_prefix("//") {
+        format!("file://{unc}")
+    } else {
+        format!("file:///{}", forward.trim_start_matches('/'))
+    }
+}
+
+/// Экранирование текста markdown-ссылки: скобки и обратный слэш.
+fn escape_md_link_text(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")
+}
+
+/// Дроп внешних файлов → заметки-пути (Р28): на каждый путь создаётся заметка
+/// во «Входящих» (или под переданным родителем) с кликабельной `file:`-ссылкой
+/// и сырым путём — файл фиксируется «где лежит», без копирования в хранилище.
+#[tauri::command]
+#[specta::specta]
+pub fn add_path_note(params: AddPathNoteParams) -> Result<AddPathNoteResponse, GraphiteError> {
+    let paths: Vec<String> = params
+        .paths
+        .iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if paths.is_empty() {
+        return Err(gerr(
+            GraphiteErrorCode::Validation,
+            "не передано ни одного пути",
+            Some("paths — абсолютные пути внешних файлов"),
+        ));
+    }
+    let parent = params.parent.map(|r| r.0);
+    let mut notes = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let name = path_display_name(path);
+        let body = format!(
+            "[{}](<{}>)\n\n`{}`\n",
+            escape_md_link_text(&name),
+            file_url(path),
+            path
+        );
+        let (resp, text) = note_create_impl(
+            parent.clone(),
+            &name,
+            None,
+            None,
+            Some(vec!["файл".to_string()]),
+            Some(body),
+        )?;
+        reindex_new(&resp.path);
+        record_create(&resp.path, &text);
+        notes.push(resp);
+    }
+    Ok(AddPathNoteResponse { notes })
+}
+
+/// Потолок размера вложения: и base64-вставка, и импорт по пути читаются в
+/// память целиком — гигабайтные файлы отклоняем доменной ошибкой, а не OOM.
+const ATTACHMENT_MAX_BYTES: usize = 256 * 1024 * 1024;
+
+/// Расширение файла вложения: точка/мусор срезаются, только ASCII-буквоцифры,
+/// нижний регистр, не длиннее 12 символов; пусто → `bin`.
+fn sanitize_ext(ext: &str) -> String {
+    let cleaned: String = ext
+        .trim()
+        .trim_start_matches('.')
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
+    if cleaned.is_empty() {
+        "bin".to_string()
+    } else {
+        cleaned.to_ascii_lowercase()
+    }
+}
+
+/// Base64-полезная нагрузка вставки: допускается data-URL (`data:…;base64,…`)
+/// и переносы строк внутри тела.
+fn decode_base64_payload(data: &str) -> Result<Vec<u8>, GraphiteError> {
+    let trimmed = data.trim();
+    let payload = match (trimmed.starts_with("data:"), trimmed.find("base64,")) {
+        (true, Some(idx)) => &trimmed[idx + "base64,".len()..],
+        _ => trimmed,
+    };
+    let cleaned: String = payload.chars().filter(|c| !c.is_whitespace()).collect();
+    BASE64
+        .decode(cleaned.as_bytes())
+        .map_err(|e| gerr(GraphiteErrorCode::Validation, format!("некорректный base64: {e}"), None))
+}
+
+/// Поиск уже сохранённого вложения с тем же содержимым (SPEC §6.7, дедуп по
+/// blake3): обход `_assets/` с префильтром по размеру, хэш считается только у
+/// кандидатов равной длины. Возвращает rel-путь с `/`-разделителями.
+fn find_asset_duplicate(root: &Path, len: u64, hash: &str) -> Option<String> {
+    let mut stack = vec![(root.join("_assets"), "_assets".to_string())];
+    while let Some((dir, rel)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let child_rel = format!("{rel}/{name}");
+            match entry.file_type() {
+                Ok(ft) if ft.is_dir() => stack.push((entry.path(), child_rel)),
+                Ok(ft) if ft.is_file() => {
+                    let Ok(meta) = entry.metadata() else { continue };
+                    if meta.len() != len {
+                        continue;
+                    }
+                    let Ok(data) = fs::read(entry.path()) else { continue };
+                    if writer::compute_full_hash(&data) == hash {
+                        return Some(child_rel);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Общий сохранитель вложений (Р29): дедуп по blake3, иначе атомарная запись в
+/// `_assets/ГГГГ/ММ/<ulid>.<расширение>`. Возвращает rel-путь для вставки
+/// `![](_assets/…)`.
+fn save_attachment_bytes(bytes: &[u8], ext: &str) -> Result<SaveAttachmentResponse, GraphiteError> {
+    if bytes.is_empty() {
+        return Err(gerr(GraphiteErrorCode::Validation, "пустое вложение", None));
+    }
+    if bytes.len() > ATTACHMENT_MAX_BYTES {
+        return Err(gerr(
+            GraphiteErrorCode::Limit,
+            format!("вложение больше {} МБ", ATTACHMENT_MAX_BYTES / (1024 * 1024)),
+            Some("сохрани файл рядом и добавь его путь через add_path_note"),
+        ));
+    }
+    let root = current_root()?;
+    let size = bytes.len() as u32;
+    let hash = writer::compute_full_hash(bytes);
+    if let Some(existing) = find_asset_duplicate(&root, bytes.len() as u64, &hash) {
+        return Ok(SaveAttachmentResponse {
+            rel_path: existing,
+            bytes: size,
+            reused: true,
+        });
+    }
+    let now = writer::now_iso_utc();
+    let rel = format!(
+        "_assets/{}/{}/{}.{}",
+        &now[0..4],
+        &now[5..7],
+        ulid::Ulid::new(),
+        sanitize_ext(ext)
+    );
+    writer::write_atomic(&root, &rel, bytes).map_err(core_err)?;
+    Ok(SaveAttachmentResponse {
+        rel_path: rel,
+        bytes: size,
+        reused: false,
+    })
+}
+
+/// Вставка картинки/файла из буфера (Р29): содержимое приходит base64
+/// (допустим data-URL), сохраняется в `_assets/ГГГГ/ММ/<ulid>.<ext>` с дедупом
+/// по blake3.
+#[tauri::command]
+#[specta::specta]
+pub fn save_attachment(params: SaveAttachmentParams) -> Result<SaveAttachmentResponse, GraphiteError> {
+    let bytes = decode_base64_payload(&params.data_base64)?;
+    save_attachment_bytes(&bytes, &params.ext)
+}
+
+/// Импорт вложения с диска (Р29): файл читается по абсолютному пути и
+/// сохраняется в `_assets/` той же схемой (дедуп, ulid-имя); расширение
+/// берётся из исходного имени.
+#[tauri::command]
+#[specta::specta]
+pub fn save_attachment_from_path(
+    params: SaveAttachmentFromPathParams,
+) -> Result<SaveAttachmentResponse, GraphiteError> {
+    let src = params.src_path.trim();
+    if src.is_empty() {
+        return Err(gerr(GraphiteErrorCode::Validation, "пустой путь к файлу", None));
+    }
+    let path = PathBuf::from(src);
+    if !path.is_file() {
+        return Err(gerr(
+            GraphiteErrorCode::NotFound,
+            format!("файл не найден: {src}"),
+            None,
+        ));
+    }
+    let bytes = fs::read(&path)
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("не удалось прочитать файл: {e}"), None))?;
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    save_attachment_bytes(&bytes, &ext)
+}
+
+/// Гарантирует существование folder-note для ссылок вида `path:…/_index.md`:
+/// у «виртуальной» папки (каталог есть, `_index.md` нет) файл создаётся с
+/// минимальным frontmatter, чтобы иконку/цвет папки можно было ставить сразу.
+/// Ссылки другой формы и существующие файлы проходят насквозь.
+fn ensure_folder_note(note_ref: &str) -> Result<(), GraphiteError> {
+    let Some(raw) = note_ref.strip_prefix("path:") else {
+        return Ok(());
+    };
+    let rel = raw.replace('\\', "/").trim_matches('/').to_string();
+    if rel != "_index.md" && !rel.ends_with("/_index.md") {
+        return Ok(());
+    }
+    if rel.split('/').any(|seg| seg == "..") {
+        return Err(gerr(GraphiteErrorCode::Validation, "путь выходит за пределы хранилища", None));
+    }
+    let root = current_root()?;
+    let abs = root.join(&rel);
+    if abs.is_file() {
+        return Ok(());
+    }
+    let dir = abs.parent().unwrap_or(&root).to_path_buf();
+    if !dir.is_dir() {
+        return Err(gerr(
+            GraphiteErrorCode::NotFound,
+            format!("папка не найдена: {rel}"),
+            None,
+        ));
+    }
+    let title = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Заметки".to_string());
+    let now = writer::now_iso_utc();
+    let id = ulid::Ulid::new().to_string();
+    let text = format!(
+        "---\nid: {id}\ntype: note\ntitle: {}\ncreated: {now}\nupdated: {now}\n---\n\n",
+        yaml_quote(&title)
+    );
+    writer::create_atomic(&root, &rel, &text).map_err(core_err)?;
+    reindex_new(&rel);
+    record_create(&rel, &text);
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn set_icon(params: SetIconParams) -> Result<SetIconResponse, GraphiteError> {
+    ensure_folder_note(&params.r#ref.0)?;
     with_core(|s| {
         let p: crud::SetIconParams = convert(&params)?;
         let (resp, op) = crud::set_icon(&s.root, &s.index, &p, &txn_opts()).map_err(core_err)?;

@@ -654,6 +654,30 @@ export interface IdeaToTasksResponse {
   planRef?: NoteRef;
 }
 
+export interface AddPathNoteParams {
+  paths: string[];
+  parent?: NoteRef;
+}
+
+export interface AddPathNoteResponse {
+  notes: NoteCreateResponse[];
+}
+
+export interface SaveAttachmentParams {
+  dataBase64: string;
+  ext: string;
+}
+
+export interface SaveAttachmentFromPathParams {
+  srcPath: string;
+}
+
+export interface SaveAttachmentResponse {
+  relPath: string;
+  bytes: number;
+  reused: boolean;
+}
+
 export type NoteChangeKind = 'created' | 'modified' | 'removed' | 'moved';
 
 export interface NoteChangedEvent {
