@@ -1,0 +1,239 @@
+import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'motion/react';
+import { ListTree } from 'lucide-react';
+import { EditorView } from '@codemirror/view';
+import { cx } from '@graphite/ui';
+import { GRAPHITE_EVENT, commands, isTauriAvailable } from '@graphite/bindings';
+import type { NoteChangedEvent, NoteRef } from '@graphite/bindings';
+import { listen } from '@tauri-apps/api/event';
+import { parseHeadings } from '@graphite/editor';
+import type { MdHeading } from '@graphite/editor';
+import { Fade, Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
+import { useEditorViewsStore } from '../../stores/editorViewsStore';
+import { useUiStore } from '../../stores/uiStore';
+import { useVaultStore } from '../../stores/vaultStore';
+
+export interface OutlineTabProps {
+  noteRef: NoteRef;
+  /** Id вкладки редактора — точный выбор view, когда заметка открыта в нескольких панелях. */
+  tabId?: string;
+}
+
+const DOC_REFRESH_DEBOUNCE_MS = 150;
+
+/**
+ * Оглавление активной заметки: заголовки H1–H6 с прыжком к строке по клику
+ * и подсветкой текущего раздела при скролле. Документ берётся из живого
+ * буфера редактора; для заметки без открытого редактора — с диска.
+ */
+export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
+  const views = useEditorViewsStore((s) => s.views);
+  const docVersion = useEditorViewsStore((s) => s.docVersion);
+  const reduced = usePrefersReducedMotion();
+  const [doc, setDoc] = useState<string | undefined>(undefined);
+  const [activeLine, setActiveLine] = useState<number | undefined>(undefined);
+
+  const view = useMemo(() => {
+    const exact = tabId !== undefined ? views[tabId] : undefined;
+    if (exact !== undefined && exact.noteRef === noteRef) {
+      return exact.view;
+    }
+    return Object.values(views).find((entry) => entry.noteRef === noteRef)?.view;
+  }, [views, tabId, noteRef]);
+
+  // Живой буфер: моментально при появлении view, дальше — с мягким дебаунсом
+  // по docVersion, чтобы не парсить документ на каждое нажатие клавиши.
+  useEffect(() => {
+    if (view === undefined) {
+      return;
+    }
+    setDoc(view.state.sliceDoc());
+  }, [view]);
+
+  useEffect(() => {
+    if (view === undefined) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setDoc(view.state.sliceDoc());
+    }, DOC_REFRESH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [view, docVersion]);
+
+  // Заметка без открытого редактора: читаем с диска и следим за note_changed.
+  useEffect(() => {
+    if (view !== undefined) {
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      commands.noteRead({ ref: noteRef }).then(
+        (response) => {
+          if (!cancelled) {
+            setDoc(response.content);
+          }
+        },
+        () => {
+          if (!cancelled) {
+            setDoc('');
+          }
+        },
+      );
+    };
+    load();
+    if (!isTauriAvailable()) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
+      const payload = event.payload;
+      if (cancelled || payload.ref !== noteRef || payload.kind === 'removed') {
+        return;
+      }
+      load();
+    });
+    return () => {
+      cancelled = true;
+      void subscription.then((unlisten) => unlisten());
+    };
+  }, [view, noteRef]);
+
+  const headings = useMemo(() => (doc === undefined ? [] : parseHeadings(doc)), [doc]);
+  const minLevel = useMemo(() => headings.reduce((min, h) => Math.min(min, h.level), 6), [headings]);
+
+  // Подсветка текущего раздела: активен последний заголовок над верхней
+  // видимой строкой редактора.
+  useEffect(() => {
+    if (view === undefined) {
+      setActiveLine(undefined);
+      return;
+    }
+    const scroller = view.scrollDOM;
+    const syncActive = () => {
+      const block = view.lineBlockAtHeight(scroller.scrollTop);
+      const topLine = view.state.doc.lineAt(block.from).number - 1;
+      let current: number | undefined;
+      for (const heading of headings) {
+        if (heading.line <= topLine) {
+          current = heading.line;
+        } else {
+          break;
+        }
+      }
+      setActiveLine(current);
+    };
+    syncActive();
+    scroller.addEventListener('scroll', syncActive, { passive: true });
+    return () => scroller.removeEventListener('scroll', syncActive);
+  }, [view, docVersion, headings]);
+
+  const jumpTo = (heading: MdHeading) => {
+    if (view === undefined) {
+      useVaultStore.getState().openNote(noteRef);
+      return;
+    }
+    const jump = () => {
+      const docLine = view.state.doc.line(Math.min(heading.line + 1, view.state.doc.lines));
+      view.dispatch({
+        selection: { anchor: docLine.from },
+        effects: EditorView.scrollIntoView(docLine.from, { y: 'start', yMargin: 12 }),
+      });
+      view.focus();
+    };
+    const ui = useUiStore.getState();
+    if (ui.readingMode) {
+      // В режиме чтения CodeMirror скрыт под ReadingView: сначала выводим
+      // в правку, прыгаем после кадра — когда редактор снова виден.
+      ui.setReadingMode(false);
+      requestAnimationFrame(jump);
+      return;
+    }
+    jump();
+  };
+
+  const state = doc === undefined ? 'loading' : headings.length === 0 ? 'empty' : 'list';
+
+  return (
+    <div className="flex flex-col gap-2 p-3">
+      <div className="flex items-center justify-between px-1">
+        <h3 className="flex items-center gap-1.5 text-caption text-text-2">
+          <ListTree size={13} strokeWidth={1.75} />
+          Оглавление
+        </h3>
+        {headings.length > 0 ? (
+          <span className="rounded-full bg-bg-3 px-1.5 text-micro text-text-2">{headings.length}</span>
+        ) : null}
+      </div>
+      <Presence mode="wait">
+        <Fade key={state}>
+          {state === 'loading' ? (
+            <div className="flex flex-col gap-1">
+              {[0, 1].map((row) => (
+                <div
+                  key={row}
+                  className={cx(
+                    'h-8 rounded-s border border-stroke-0',
+                    reduced
+                      ? 'bg-bg-2'
+                      : 'animate-shimmer bg-[length:200%_100%] bg-[image:linear-gradient(90deg,var(--bg-2),var(--bg-3),var(--bg-2))]',
+                  )}
+                />
+              ))}
+            </div>
+          ) : state === 'empty' ? (
+            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
+              <ListTree size={18} strokeWidth={1.5} className="text-text-3" />
+              <p className="max-w-[220px] text-caption text-text-2">В заметке нет заголовков</p>
+              <p className="max-w-[220px] text-micro text-text-3">
+                Начните строку с <span className="font-mono text-text-1">#</span> — и пункт появится здесь
+              </p>
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-0.5">
+              {headings.map((heading) => {
+                const active = heading.line === activeLine;
+                const label = heading.text.length > 0 ? heading.text : '…';
+                return (
+                  <li key={heading.line}>
+                    <button
+                      type="button"
+                      title={label}
+                      onClick={() => jumpTo(heading)}
+                      style={{ paddingLeft: (heading.level - minLevel) * 14 + 8 }}
+                      className={cx(
+                        'group relative flex w-full items-center rounded-s px-2 py-1.5 text-left outline-none transition-colors duration-[120ms]',
+                        !active && 'hover:bg-bg-2',
+                      )}
+                    >
+                      {active ? (
+                        <motion.span
+                          layoutId="outline-active-row"
+                          className="absolute inset-0 rounded-s bg-accent/10"
+                          transition={reduced ? { duration: 0 } : springSnappy}
+                        />
+                      ) : null}
+                      <span
+                        className={cx(
+                          'relative z-10 min-w-0 flex-1 truncate',
+                          heading.level <= 2 ? 'text-ui' : 'text-caption',
+                          active
+                            ? 'text-accent'
+                            : heading.level <= 2
+                              ? 'text-text-1 group-hover:text-text-0'
+                              : 'text-text-2 group-hover:text-text-1',
+                        )}
+                      >
+                        {label}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Fade>
+      </Presence>
+    </div>
+  );
+}

@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::MutexGuard;
@@ -1658,4 +1659,357 @@ pub fn reveal_in_explorer(note_ref: String) -> Result<(), GraphiteError> {
         let _ = abs;
     }
     Ok(())
+}
+
+/// Срез хранилища для вида «Граф связей»: все заметки индекса — узлы, их
+/// резолвленные исходящие ссылки — рёбра. Битые ссылки (без `dst_id`) и цели
+/// вне индекса отбрасываются, пары источник→цель дедуплицируются, петли на
+/// себя не включаются. Пустое хранилище отдаёт пустой граф.
+#[tauri::command]
+#[specta::specta]
+pub fn graph_data() -> Result<GraphData, GraphiteError> {
+    let (root, notes, edges) = with_core(|s| {
+        let notes = s.index.all_notes().map_err(core_err)?;
+        let mut ref_by_id: HashMap<String, String> = HashMap::with_capacity(notes.len());
+        for meta in &notes {
+            ref_by_id.insert(meta.id.0.clone(), format!("path:{}", meta.path));
+        }
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        let mut edges: Vec<GraphEdge> = Vec::new();
+        for meta in &notes {
+            let src_ref = format!("path:{}", meta.path);
+            for edge in s.index.outgoing(&meta.id).map_err(core_err)? {
+                let Some(dst) = edge.dst_id else { continue };
+                let Some(dst_ref) = ref_by_id.get(&dst.0) else { continue };
+                if *dst_ref == src_ref || !seen.insert((src_ref.clone(), dst_ref.clone())) {
+                    continue;
+                }
+                edges.push(GraphEdge {
+                    source: NoteRef(src_ref.clone()),
+                    target: NoteRef(dst_ref.clone()),
+                });
+            }
+        }
+        Ok((s.root.clone(), notes, edges))
+    })?;
+    let mut degree: HashMap<String, u32> = HashMap::new();
+    for edge in &edges {
+        *degree.entry(edge.source.0.clone()).or_insert(0) += 1;
+        *degree.entry(edge.target.0.clone()).or_insert(0) += 1;
+    }
+    // Иконка/цвет живут во frontmatter файлов (как в дереве); читаем их уже
+    // без мьютекса ядра, чтобы скан файлов не блокировал остальные команды.
+    let mut nodes = Vec::with_capacity(notes.len());
+    for meta in &notes {
+        let node_ref = format!("path:{}", meta.path);
+        let fm = read_fm(&root.join(&meta.path));
+        nodes.push(GraphNode {
+            r#ref: NoteRef(node_ref.clone()),
+            title: meta.title.clone(),
+            icon: yml_str(&fm, "icon"),
+            color: yml_str(&fm, "icon_color").or_else(|| yml_str(&fm, "iconColor")),
+            degree: degree.get(&node_ref).copied().unwrap_or(0),
+        });
+    }
+    Ok(GraphData { nodes, edges })
+}
+
+/// Агрегация тегов по всем заметкам: frontmatter-теги из индекса плюс
+/// инлайн-`#теги` тела. Ключ агрегата — нормализация §9.3 (регистр, `ё`→`е`),
+/// отображается первое встреченное написание; внутри одной заметки тег
+/// считается один раз. Сортировка: count по убыванию, затем по алфавиту.
+#[tauri::command]
+#[specta::specta]
+pub fn tags_list() -> Result<Vec<TagInfo>, GraphiteError> {
+    let (root, notes) = with_core(|s| Ok((s.root.clone(), s.index.all_notes().map_err(core_err)?)))?;
+    let mut by_key: BTreeMap<String, TagInfo> = BTreeMap::new();
+    for meta in &notes {
+        let note_ref = format!("path:{}", meta.path);
+        let mut tags = meta.tags.clone();
+        if let Ok(raw) = fs::read_to_string(root.join(&meta.path)) {
+            if let Ok(parsed) = parser::parse_note(&raw) {
+                tags.extend(parser::extract_tags(&parsed.body));
+            }
+        }
+        let mut seen: HashSet<String> = HashSet::new();
+        for tag in tags {
+            let display = tag.trim().trim_start_matches('#').to_string();
+            if display.is_empty() {
+                continue;
+            }
+            let key = vault_core::resolver::normalize_key(&display);
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let entry = by_key.entry(key).or_insert_with(|| TagInfo {
+                tag: display,
+                count: 0,
+                refs: Vec::new(),
+            });
+            entry.count += 1;
+            entry.refs.push(NoteRef(note_ref.clone()));
+        }
+    }
+    let mut out: Vec<TagInfo> = by_key.into_values().collect();
+    out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.tag.cmp(&b.tag)));
+    Ok(out)
+}
+
+/// Форма даты дневника: строго `ГГГГ-ММ-ДД` (цифры и дефисы на своих местах).
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b.iter()
+            .enumerate()
+            .all(|(i, c)| if matches!(i, 4 | 7) { *c == b'-' } else { c.is_ascii_digit() })
+}
+
+/// Путь пользовательского шаблона записи дня внутри хранилища.
+const DAILY_TEMPLATE_REL: &str = "Шаблоны/Дневник.md";
+
+/// Нормализация папки дневника: `\`→`/`, обрезка слэшей, пустая → «Дневник»;
+/// сегменты `..` запрещены.
+fn daily_folder(folder: Option<String>) -> Result<String, GraphiteError> {
+    let folder = folder
+        .map(|f| f.replace('\\', "/").trim_matches('/').to_string())
+        .filter(|f| !f.is_empty())
+        .unwrap_or_else(|| "Дневник".to_string());
+    if folder.split('/').any(|seg| seg == "..") {
+        return Err(gerr(GraphiteErrorCode::Validation, "путь выходит за пределы хранилища", None));
+    }
+    Ok(folder)
+}
+
+/// Валидация даты и папки дневника; возвращает (дата, папка, rel-путь записи).
+fn daily_target(date: &str, folder: Option<String>) -> Result<(String, String, String), GraphiteError> {
+    let date = date.trim().to_string();
+    if !is_iso_date(&date) {
+        return Err(gerr(
+            GraphiteErrorCode::Validation,
+            format!("некорректная дата: {date}"),
+            Some("ожидается формат ГГГГ-ММ-ДД"),
+        ));
+    }
+    let folder = daily_folder(folder)?;
+    let rel = format!("{folder}/{date}.md");
+    Ok((date, folder, rel))
+}
+
+/// Встроенное тело новой записи дня.
+fn default_daily_body(date: &str) -> String {
+    format!("# {date}\n\n## Заметки дня\n\n## Задачи\n")
+}
+
+/// Подстановка плейсхолдеров шаблона дня: `{{date}}`/`{{title}}` → дата,
+/// `{{time}}` → текущее время `ЧЧ:ММ` (UTC).
+fn substitute_daily(tpl: &str, date: &str) -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let time = format!("{:02}:{:02}", secs % 86_400 / 3600, secs % 3600 / 60);
+    tpl.replace("{{date}}", date)
+        .replace("{{title}}", date)
+        .replace("{{time}}", &time)
+}
+
+/// Тело пользовательского шаблона `Шаблоны/Дневник.md` (без frontmatter),
+/// если такой файл есть и парсится.
+fn daily_custom_template(root: &Path) -> Option<String> {
+    let raw = fs::read_to_string(root.join(DAILY_TEMPLATE_REL)).ok()?;
+    parser::parse_frontmatter(&raw).ok().map(|(_, body)| body)
+}
+
+/// Тело записи дня «пустое», если каждая непустая строка входит в шаблонный
+/// набор: заголовок дня, штатные секции и строки пользовательского шаблона с
+/// подставленной датой. Любая иная строка — признак контента (подмножество,
+/// не равенство: удалённые заголовки пустоты не отменяют).
+fn daily_body_is_empty(body: &str, date: &str, custom_template: Option<&str>) -> bool {
+    let mut allowed: HashSet<String> = HashSet::new();
+    allowed.insert(format!("# {date}"));
+    allowed.insert("## Заметки дня".to_string());
+    allowed.insert("## Задачи".to_string());
+    if let Some(tpl) = custom_template {
+        let filled = tpl.replace("{{date}}", date).replace("{{title}}", date);
+        for line in filled.split('\n') {
+            let line = line.trim_end();
+            // Строки с «{{time}}» зависят от момента создания — их не угадать,
+            // поэтому записи с ними безопаснее считать непустыми.
+            if !line.is_empty() && !line.contains("{{time}}") {
+                allowed.insert(line.to_string());
+            }
+        }
+    }
+    body.split('\n')
+        .map(|line| line.trim_end())
+        .filter(|line| !line.is_empty())
+        .all(|line| allowed.contains(line))
+}
+
+/// Дневниковая заметка на дату: существующий файл `<папка>/<дата>.md`
+/// возвращается как есть (`created=false`), отсутствующий — создаётся с
+/// шаблоном дня (пользовательский `Шаблоны/Дневник.md`, иначе встроенный);
+/// папка (по умолчанию «Дневник») появляется вместе с ним.
+#[tauri::command]
+#[specta::specta]
+pub fn ensure_daily_note(params: DailyNoteParams) -> Result<DailyNote, GraphiteError> {
+    let (date, folder, rel) = daily_target(&params.date, params.folder)?;
+    let root = current_root()?;
+    let abs = root.join(&rel);
+    if abs.is_file() {
+        let title = read_fm(&abs)
+            .title
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| date.clone());
+        return Ok(DailyNote {
+            r#ref: NoteRef(format!("path:{rel}")),
+            created: false,
+            title,
+        });
+    }
+    let body = daily_custom_template(&root)
+        .map(|tpl| substitute_daily(&tpl, &date))
+        .unwrap_or_else(|| default_daily_body(&date));
+    let (resp, text) = note_create_impl(
+        Some(format!("path:{folder}")),
+        &date,
+        Some(NoteType::Journal),
+        None,
+        None,
+        Some(body),
+    )?;
+    reindex_new(&resp.path);
+    record_create(&resp.path, &text);
+    Ok(DailyNote {
+        r#ref: resp.r#ref,
+        created: true,
+        title: date,
+    })
+}
+
+/// Проверка записи дня без побочных эффектов: существует ли файл и его
+/// заголовок. Ничего не создаёт и не пишет — календарь листается свободно.
+#[tauri::command]
+#[specta::specta]
+pub fn peek_daily_note(params: DailyNoteParams) -> Result<DailyNotePeek, GraphiteError> {
+    let (date, _, rel) = daily_target(&params.date, params.folder)?;
+    let root = current_root()?;
+    let abs = root.join(&rel);
+    let exists = abs.is_file();
+    let title = if exists {
+        read_fm(&abs)
+            .title
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| date.clone())
+    } else {
+        date.clone()
+    };
+    Ok(DailyNotePeek {
+        r#ref: NoteRef(format!("path:{rel}")),
+        exists,
+        title,
+    })
+}
+
+/// Уборка пустых записей дневника: нетронутые шаблоны уезжают в корзину тем же
+/// механизмом, что и обычное удаление (журнал, обновление индекса и токены для
+/// отмены). `dry_run` — только пересчитать кандидатов. Записи с реальным
+/// контентом, закрепом или ручной иконкой не трогаются никогда.
+#[tauri::command]
+#[specta::specta]
+pub fn prune_empty_daily_notes(params: DailyPruneParams) -> Result<DailyPruneResponse, GraphiteError> {
+    let folder = daily_folder(params.folder)?;
+    let root = current_root()?;
+    let dir = root.join(&folder);
+    if !dir.is_dir() {
+        return Ok(DailyPruneResponse { items: Vec::new() });
+    }
+    let custom = daily_custom_template(&root);
+    // Скан кандидатов — обычным обходом ФС, без мьютекса ядра: только файлы
+    // `ГГГГ-ММ-ДД.md`, отсортированные по имени для детерминизма.
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let Some(stem) = name.strip_suffix(".md") else { continue };
+            if is_iso_date(stem) {
+                candidates.push(stem.to_string());
+            }
+        }
+    }
+    candidates.sort();
+    let mut empty: Vec<(String, String)> = Vec::new();
+    for date in candidates {
+        let rel = format!("{folder}/{date}.md");
+        let Ok(raw) = fs::read_to_string(root.join(&rel)) else { continue };
+        let Ok((fm, body)) = parser::parse_frontmatter(&raw) else { continue };
+        // Страховки: чужой тип заметки, закреп или ручная иконка — признак
+        // намерения пользователя, такие файлы не трогаем даже с шаблонным телом.
+        if !matches!(fm.r#type, Some(vault_core::NoteType::Journal)) {
+            continue;
+        }
+        if fm.extra.get("pinned").and_then(|v| v.as_bool()) == Some(true) {
+            continue;
+        }
+        if yml_str(&fm, "icon").is_some() || yml_str(&fm, "icon_color").is_some() {
+            continue;
+        }
+        if !daily_body_is_empty(&body, &date, custom.as_deref()) {
+            continue;
+        }
+        empty.push((date, rel));
+    }
+    if params.dry_run == Some(true) {
+        let items = empty
+            .into_iter()
+            .map(|(date, rel)| DailyPruneItem {
+                r#ref: NoteRef(format!("path:{rel}")),
+                date,
+                restore_token: None,
+            })
+            .collect();
+        return Ok(DailyPruneResponse { items });
+    }
+    let mut items = Vec::new();
+    for (date, rel) in empty {
+        let mut result = note_delete(NoteDeleteParams {
+            r#ref: NoteRef(format!("path:{rel}")),
+        });
+        if matches!(&result, Err(err) if err.code == GraphiteErrorCode::NotFound) {
+            // Файл ещё не в индексе (фоновая индексация не догнала) — вносим
+            // его точечно и пробуем ровно один раз ещё; иначе пропускаем,
+            // не валя всю пачку.
+            reindex_new(&rel);
+            result = note_delete(NoteDeleteParams {
+                r#ref: NoteRef(format!("path:{rel}")),
+            });
+        }
+        let Ok(resp) = result else { continue };
+        items.push(DailyPruneItem {
+            r#ref: NoteRef(format!("path:{rel}")),
+            date,
+            restore_token: Some(resp.restore_token),
+        });
+    }
+    Ok(DailyPruneResponse { items })
+}
+
+/// Записывает результат экспорта по выбранному пользователем абсолютному пути.
+/// Файл живёт вне хранилища: ни индекс, ни журнал не затрагиваются.
+#[tauri::command]
+#[specta::specta]
+pub fn export_write(params: ExportWriteParams) -> Result<(), GraphiteError> {
+    let dest = PathBuf::from(&params.dest_path);
+    if !dest.is_absolute() {
+        return Err(gerr(
+            GraphiteErrorCode::Validation,
+            "ожидается абсолютный путь назначения",
+            Some("выбери файл через системный диалог сохранения"),
+        ));
+    }
+    fs::write(&dest, params.contents.as_bytes())
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("не удалось записать файл: {e}"), None))
 }

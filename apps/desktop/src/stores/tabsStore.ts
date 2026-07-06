@@ -74,6 +74,7 @@ export interface TabsStore {
   setTabIcon(id: string, icon?: string, iconColor?: string): void;
   setDraggingTab(id?: string): void;
   setDraggingGroup(id?: string): void;
+  reset(): void;
 }
 
 export const GROUP_COLORS = ['accent', 'ai', 'ok', 'warn', 'danger', 'text-1'] as const;
@@ -399,5 +400,8 @@ export const useTabsStore = create<TabsStore>()((set, get) => ({
     if (get().draggingGroupId !== id) {
       set({ draggingGroupId: id });
     }
+  },
+  reset: () => {
+    set({ tabs: [], groups: [], draggingTabId: undefined, draggingGroupId: undefined });
   },
 }));

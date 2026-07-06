@@ -1145,3 +1145,179 @@ pub struct SaveAttachmentResponse {
     pub bytes: u32,
     pub reused: bool,
 }
+
+/// Краткая карточка последнего коммита для индикатора статуса.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitBrief {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    /// ISO-8601 (`%cI`).
+    pub date: String,
+}
+
+/// Снимок состояния git-репозитория хранилища (см. `gitsync::git_status`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    pub installed: bool,
+    pub is_repo: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub changed_files: u32,
+    pub ahead: u32,
+    pub behind: u32,
+    pub has_remote: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_commit: Option<GitCommitBrief>,
+}
+
+/// Запись истории версий (один коммит).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    /// ISO-8601 (`%cI`).
+    pub date: String,
+    pub files_changed: u32,
+}
+
+/// Изменённый в коммите файл. `status`: "A" | "M" | "D" | "R".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileChange {
+    pub path: String,
+    pub status: String,
+}
+
+/// Результат действия git (снимок/восстановление/сеть). `ok=false` — мягкий
+/// отказ (например «нет изменений»), не ошибка.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitActionResult {
+    pub ok: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiffParams {
+    pub hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRestoreFileParams {
+    pub hash: String,
+    pub path: String,
+}
+
+/// Узел «Графа связей»: одна существующая заметка хранилища.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphNode {
+    pub r#ref: NoteRef,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Степень узла (входящие + исходящие) в итоговом наборе рёбер графа.
+    pub degree: u32,
+}
+
+/// Ребро «Графа связей»: `source`/`target` — `ref` существующих узлов.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEdge {
+    pub source: NoteRef,
+    pub target: NoteRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphData {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+}
+
+/// Агрегат одного тега по хранилищу (вид «Теги»): счётчик и заметки-носители.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInfo {
+    pub tag: String,
+    pub count: u32,
+    pub refs: Vec<NoteRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyNoteParams {
+    /// Дата записи дневника, `ГГГГ-ММ-ДД`.
+    pub date: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyNote {
+    pub r#ref: NoteRef,
+    pub created: bool,
+    pub title: String,
+}
+
+/// Ответ проверки записи дня без побочных эффектов: `ref` вычислен в обеих
+/// ветках, `exists` говорит, лежит ли файл на диске.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyNotePeek {
+    pub r#ref: NoteRef,
+    pub exists: bool,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyPruneParams {
+    /// Папка дневника; по умолчанию «Дневник».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// Только пересчитать кандидатов, ничего не удаляя.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+}
+
+/// Одна пустая запись дневника: убранная либо, при dry_run, подлежащая уборке.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyPruneItem {
+    pub r#ref: NoteRef,
+    /// Дата записи, `ГГГГ-ММ-ДД` (имя файла без расширения).
+    pub date: String,
+    /// Токен корзины для отмены; при dry_run отсутствует.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_token: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyPruneResponse {
+    pub items: Vec<DailyPruneItem>,
+}
+
+/// Запись результата экспорта по абсолютному пути вне хранилища.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportWriteParams {
+    pub dest_path: String,
+    pub contents: String,
+}

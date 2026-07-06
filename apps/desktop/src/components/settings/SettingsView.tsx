@@ -1,19 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { motion } from 'motion/react';
-import { Check, Copy, Database, Keyboard, Palette, Plug, RefreshCw, Zap } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { getVersion } from '@tauri-apps/api/app';
+import {
+  Check,
+  Copy,
+  Database,
+  FolderOpen,
+  FolderPlus,
+  GitBranch,
+  HardDrive,
+  Keyboard,
+  Loader,
+  Palette,
+  Plug,
+  RefreshCw,
+  Sparkles,
+  X,
+  Zap,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Button, Switch, cx } from '@graphite/ui';
-import { commands, isGraphiteError } from '@graphite/bindings';
+import { Button, Switch, Tooltip, cx } from '@graphite/ui';
+import { commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { ClaudeCliInfo, IndexStatus } from '@graphite/bindings';
-import { Fade, springSnappy, usePrefersReducedMotion } from '../../motion';
+import { Fade, REDUCED_CROSSFADE, springSnappy, usePrefersReducedMotion } from '../../motion';
 import {
   ANIMATION_SPEED_MAX,
   ANIMATION_SPEED_MIN,
   useUiStore,
 } from '../../stores/uiStore';
+import { useUpdaterStore } from '../../stores/updaterStore';
+import { forgetVault, pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
+import { useVaultsStore, vaultKey } from '../../stores/vaultsStore';
+import { BackupSection } from '../backup/BackupSection';
 import { KeybindingsEditor } from './KeybindingsEditor';
+import { ThemeSelect } from './ThemeSelect';
 
 const MCP_ADD_COMMAND = 'claude mcp add graphite';
 
@@ -21,6 +43,8 @@ const SECTIONS = [
   { id: 'storage', title: 'Хранилище', icon: Database },
   { id: 'mcp', title: 'Ассистент', icon: Plug },
   { id: 'appearance', title: 'Внешний вид', icon: Palette },
+  { id: 'backup', title: 'Копии', icon: GitBranch },
+  { id: 'updates', title: 'Обновления', icon: Sparkles },
   { id: 'keys', title: 'Клавиши', icon: Keyboard },
 ] as const satisfies readonly { id: string; title: string; icon: LucideIcon }[];
 
@@ -133,6 +157,122 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+function KnownVaults() {
+  const known = useVaultsStore((s) => s.known);
+  const root = useVaultStore((s) => s.info?.root);
+  const reduced = usePrefersReducedMotion();
+  const [switchingPath, setSwitchingPath] = useState<string | undefined>(undefined);
+
+  const activeKey = root === undefined ? undefined : vaultKey(root);
+  const busy = switchingPath !== undefined;
+
+  const select = async (path: string) => {
+    if (busy) {
+      return;
+    }
+    setSwitchingPath(path);
+    try {
+      await switchVault(path);
+    } finally {
+      setSwitchingPath(undefined);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-stroke-0 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-ui text-text-0">Мои хранилища</span>
+          <span className="text-caption text-text-2">
+            Переключение между папками с заметками; список хранится на этом устройстве
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void pickVaultFolder(false)}>
+            <FolderOpen size={14} strokeWidth={1.75} />
+            Открыть другую…
+          </Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void pickVaultFolder(true)}>
+            <FolderPlus size={14} strokeWidth={1.75} />
+            Создать…
+          </Button>
+        </div>
+      </div>
+      {known.length === 0 ? (
+        <p className="text-caption text-text-2">Откройте папку — она появится здесь для быстрого переключения.</p>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <AnimatePresence initial={false}>
+            {known.map((vault) => {
+              const active = activeKey !== undefined && vaultKey(vault.path) === activeKey;
+              const switching = switchingPath === vault.path;
+              return (
+                <motion.div
+                  key={vaultKey(vault.path)}
+                  layout={!reduced}
+                  initial={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.98 }}
+                  transition={reduced ? REDUCED_CROSSFADE : { layout: springSnappy, default: springSnappy, opacity: { duration: 0.14 } }}
+                  className={cx(
+                    'group flex items-center gap-2.5 rounded-m border px-3 py-2 transition-colors duration-[120ms]',
+                    active ? 'border-accent/35 bg-bg-2' : 'border-stroke-0 bg-bg-2 hover:border-stroke-1 hover:bg-bg-3',
+                  )}
+                >
+                  <HardDrive
+                    size={15}
+                    strokeWidth={1.75}
+                    className={cx('shrink-0', active ? 'text-accent' : 'text-text-2')}
+                  />
+                  <button
+                    type="button"
+                    disabled={active || busy}
+                    onClick={() => void select(vault.path)}
+                    className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-ui text-text-0">{vault.name}</span>
+                      {active ? (
+                        <motion.span
+                          layoutId="settings-vault-active"
+                          transition={reduced ? { duration: 0 } : springSnappy}
+                          className="shrink-0 rounded-full bg-accent/15 px-1.5 py-px text-micro text-accent"
+                        >
+                          Активное
+                        </motion.span>
+                      ) : null}
+                    </span>
+                    <span className="truncate font-mono text-micro text-text-2">{vault.path}</span>
+                  </button>
+                  {switching ? (
+                    <Loader
+                      size={14}
+                      strokeWidth={1.75}
+                      className={cx('shrink-0 text-text-2', !reduced && 'animate-spin')}
+                    />
+                  ) : null}
+                  {!active ? (
+                    <Tooltip content="Убрать из списка" side="left">
+                      <button
+                        type="button"
+                        aria-label={`Убрать «${vault.name}» из списка`}
+                        onClick={() => forgetVault(vault.path)}
+                        className="flex size-6 shrink-0 items-center justify-center rounded-xs text-text-3 opacity-0 transition-[color,opacity,background-color] duration-[120ms] hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 active:scale-90 group-hover:opacity-100"
+                      >
+                        <X size={13} strokeWidth={1.75} />
+                      </button>
+                    </Tooltip>
+                  ) : null}
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsView() {
   const reducedMotion = useUiStore((s) => s.reducedMotion);
   const setReducedMotion = useUiStore((s) => s.setReducedMotion);
@@ -141,6 +281,9 @@ export function SettingsView() {
   const readingMode = useUiStore((s) => s.readingMode);
   const setReadingMode = useUiStore((s) => s.setReadingMode);
   const pushToast = useUiStore((s) => s.pushToast);
+
+  const updaterStatus = useUpdaterStore((s) => s.status);
+  const updaterAvailable = useUpdaterStore((s) => s.available);
 
   const info = useVaultStore((s) => s.info);
   const indexStatus = useVaultStore((s) => s.indexStatus);
@@ -157,6 +300,7 @@ export function SettingsView() {
   const [ping, setPing] = useState<PingState>({ state: 'idle' });
   const [reindexing, setReindexing] = useState(false);
   const [polled, setPolled] = useState<IndexStatus | undefined>(undefined);
+  const [appVersion, setAppVersion] = useState<string | undefined>(undefined);
 
   const detect = async () => {
     setCliState('checking');
@@ -182,6 +326,26 @@ export function SettingsView() {
     void detect();
     return () => {
       mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriAvailable()) {
+      return;
+    }
+    let active = true;
+    void getVersion().then(
+      (version) => {
+        if (active) {
+          setAppVersion(version);
+        }
+      },
+      () => {
+        // версия недоступна вне приложения — мягкая деградация
+      },
+    );
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -309,6 +473,7 @@ export function SettingsView() {
   };
 
   const command = cli?.mcpAddCommand ?? MCP_ADD_COMMAND;
+  const inTauri = isTauriAvailable();
   const indexView = reindexing && polled !== undefined ? polled : indexStatus;
   const indexBusy = reindexing || indexView.state !== 'idle';
   const indeterminate = indexView.total === 0;
@@ -382,6 +547,8 @@ export function SettingsView() {
                   <Chip label="Входящие" value={info.counts.inbox} />
                 </div>
               ) : null}
+
+              <KnownVaults />
 
               <div className="flex items-start justify-between gap-4 border-t border-stroke-0 py-3">
                 <div className="flex min-w-0 flex-col gap-1">
@@ -473,11 +640,14 @@ export function SettingsView() {
               id="appearance"
               icon={Palette}
               title="Внешний вид"
-              description="Анимации и режим чтения"
+              description="Тема, анимации и режим чтения"
               sectionRef={(el) => {
                 sectionEls.current.appearance = el;
               }}
             >
+              <Row title="Тема" hint="Палитра всего приложения, включая редактор">
+                <ThemeSelect />
+              </Row>
               <Row title="Режим чтения" hint="Крупный набор без интерфейса редактора">
                 <Switch checked={readingMode} onCheckedChange={setReadingMode} />
               </Row>
@@ -504,6 +674,69 @@ export function SettingsView() {
                     <span>1×</span>
                     <span>1.6×</span>
                   </div>
+                </div>
+              </Row>
+            </Section>
+
+            <Section
+              id="backup"
+              icon={GitBranch}
+              title="Резервные копии и история"
+              description="Снимки состояния хранилища и синхронизация с GitHub"
+              sectionRef={(el) => {
+                sectionEls.current.backup = el;
+              }}
+            >
+              <BackupSection />
+            </Section>
+
+            <Section
+              id="updates"
+              icon={Sparkles}
+              title="Обновления"
+              description="Приложение обновляется автоматически"
+              sectionRef={(el) => {
+                sectionEls.current.updates = el;
+              }}
+            >
+              <Row
+                title="Версия приложения"
+                hint={
+                  inTauri
+                    ? 'Проверьте и установите новую версию в один клик'
+                    : 'Доступно только в установленном приложении'
+                }
+              >
+                <div className="flex items-center gap-2.5">
+                  {updaterStatus === 'available' && updaterAvailable !== null ? (
+                    <span className="flex items-center gap-1.5 text-caption text-accent">
+                      <StatusDot kind="accent" pulse={!reduced} />
+                      Доступно v{updaterAvailable.version}
+                    </span>
+                  ) : null}
+                  {updaterStatus === 'uptodate' ? (
+                    <span className="flex items-center gap-1.5 text-caption text-ok">
+                      <Check size={13} strokeWidth={1.75} />
+                      Актуальная
+                    </span>
+                  ) : null}
+                  {updaterStatus === 'error' ? (
+                    <span className="text-caption text-danger">Не удалось проверить</span>
+                  ) : null}
+                  <span className="font-mono text-caption text-text-1">{appVersion ?? '—'}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void useUpdaterStore.getState().check(true)}
+                    disabled={!inTauri || updaterStatus === 'checking' || updaterStatus === 'downloading'}
+                  >
+                    <RefreshCw
+                      size={14}
+                      strokeWidth={1.75}
+                      className={cx(updaterStatus === 'checking' && !reduced && 'animate-spin')}
+                    />
+                    {updaterStatus === 'checking' ? 'Проверка…' : 'Проверить обновления'}
+                  </Button>
                 </div>
               </Row>
             </Section>

@@ -11,10 +11,23 @@ import type {
   BundleCreateResponse,
   ClaudeCliInfo,
   ContextBriefingResponse,
+  DailyNote,
+  DailyNoteParams,
+  DailyNotePeek,
+  DailyPruneParams,
+  DailyPruneResponse,
   DistillContextParams,
   DistillContextResponse,
   DistillSaveParams,
   DistillSaveResponse,
+  ExportWriteParams,
+  GitActionResult,
+  GitCommit,
+  GitDiffParams,
+  GitFileChange,
+  GitRestoreFileParams,
+  GitStatus,
+  GraphData,
   IdeaToTasksParams,
   IdeaToTasksResponse,
   IndexStatus,
@@ -56,6 +69,7 @@ import type {
   SetIconResponse,
   SetStatusParams,
   SetStatusResponse,
+  TagInfo,
   TaskCheckParams,
   TaskCheckResponse,
   TasksQueryParams,
@@ -198,5 +212,56 @@ export const commands = {
   },
   revealInExplorer(noteRef: string): Promise<void> {
     return invoke('reveal_in_explorer', { noteRef });
+  },
+  graphData(): Promise<GraphData> {
+    return invoke('graph_data');
+  },
+  tagsList(): Promise<TagInfo[]> {
+    return invoke('tags_list');
+  },
+  ensureDailyNote(params: DailyNoteParams): Promise<DailyNote> {
+    return invoke('ensure_daily_note', { params });
+  },
+  peekDailyNote(params: DailyNoteParams): Promise<DailyNotePeek> {
+    return invoke('peek_daily_note', { params });
+  },
+  pruneEmptyDailyNotes(params: DailyPruneParams): Promise<DailyPruneResponse> {
+    return invoke('prune_empty_daily_notes', { params });
+  },
+  exportWrite(params: ExportWriteParams): Promise<void> {
+    return invoke('export_write', { params });
+  },
+  gitStatus(): Promise<GitStatus> {
+    return invoke('git_status');
+  },
+  gitInit(): Promise<GitStatus> {
+    return invoke('git_init');
+  },
+  gitSnapshot(message?: string): Promise<GitActionResult> {
+    return invoke('git_snapshot', { message });
+  },
+  gitLog(limit?: number): Promise<GitCommit[]> {
+    return invoke('git_log', { limit });
+  },
+  gitCommitFiles(hash: string): Promise<GitFileChange[]> {
+    return invoke('git_commit_files', { hash });
+  },
+  gitDiff(params: GitDiffParams): Promise<string> {
+    return invoke('git_diff', { params });
+  },
+  gitRestoreCommit(hash: string): Promise<GitActionResult> {
+    return invoke('git_restore_commit', { hash });
+  },
+  gitRestoreFile(params: GitRestoreFileParams): Promise<GitActionResult> {
+    return invoke('git_restore_file', { params });
+  },
+  gitRemoteSet(url: string): Promise<GitStatus> {
+    return invoke('git_remote_set', { url });
+  },
+  gitPush(): Promise<GitActionResult> {
+    return invoke('git_push');
+  },
+  gitPull(): Promise<GitActionResult> {
+    return invoke('git_pull');
   },
 } as const;

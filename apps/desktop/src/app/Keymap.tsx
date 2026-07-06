@@ -1,8 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { exportNoteHtml, exportNoteMarkdown, printNote } from '../lib/exportNote';
 import type { ActionId } from '../stores/keybindingsStore';
 import { useKeybindingsStore } from '../stores/keybindingsStore';
+import { useNavStore } from '../stores/navStore';
 import { usePanesStore } from '../stores/panesStore';
 import { useTabsStore } from '../stores/tabsStore';
+import { useTemplatePickerStore } from '../stores/templatePickerStore';
 import { useUiStore } from '../stores/uiStore';
 import { useVaultStore } from '../stores/vaultStore';
 
@@ -27,8 +30,10 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'capture.quick',
   'note.new',
   'note.newChild',
+  'note.newFromTemplate',
   'note.copyPage',
   'editor.toggleReading',
+  'view.outline',
 ]);
 
 export function registerActionHandler(id: ActionId, handler: ActionHandler): () => void {
@@ -125,6 +130,12 @@ function runBuiltin(id: ActionId): boolean {
       ui.setRailView('settings');
       ui.setSidebarHidden(false);
       return true;
+    case 'nav.back':
+      useNavStore.getState().back();
+      return true;
+    case 'nav.forward':
+      useNavStore.getState().forward();
+      return true;
     case 'sidebar.toggleTree':
       ui.toggleSidebar();
       return true;
@@ -133,6 +144,9 @@ function runBuiltin(id: ActionId): boolean {
       return true;
     case 'aiFeed.toggle':
       ui.toggleRightPanel('aiFeed');
+      return true;
+    case 'view.outline':
+      ui.toggleRightPanel('outline');
       return true;
     case 'editor.toggleReading':
       ui.toggleReadingMode();
@@ -148,6 +162,33 @@ function runBuiltin(id: ActionId): boolean {
     case 'note.newChild':
       void useVaultStore.getState().createNote({ parent: useVaultStore.getState().currentRef });
       return true;
+    case 'note.newFromTemplate':
+      useTemplatePickerStore.getState().openPicker();
+      return true;
+    case 'note.exportHtml': {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        return false;
+      }
+      void exportNoteHtml(ref);
+      return true;
+    }
+    case 'note.exportMd': {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        return false;
+      }
+      void exportNoteMarkdown(ref);
+      return true;
+    }
+    case 'note.print': {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        return false;
+      }
+      void printNote(ref);
+      return true;
+    }
     case 'note.pin': {
       const ref = useVaultStore.getState().currentRef;
       if (ref !== undefined) {
@@ -213,6 +254,33 @@ export function Keymap() {
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Боковые кнопки мыши (3 — назад, 4 — вперёд) двигают историю заметок.
+    // Жест глобальный: по isEditableTarget не отсекаем — работает и в редакторе.
+    const suppress = (event: MouseEvent) => {
+      if (event.button === 3 || event.button === 4) {
+        event.preventDefault();
+      }
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.button === 3) {
+        event.preventDefault();
+        useNavStore.getState().back();
+      } else if (event.button === 4) {
+        event.preventDefault();
+        useNavStore.getState().forward();
+      }
+    };
+    window.addEventListener('pointerdown', suppress, { capture: true });
+    window.addEventListener('auxclick', suppress, { capture: true });
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      window.removeEventListener('pointerdown', suppress, { capture: true });
+      window.removeEventListener('auxclick', suppress, { capture: true });
+      window.removeEventListener('pointerup', onPointerUp);
     };
   }, []);
   return null;

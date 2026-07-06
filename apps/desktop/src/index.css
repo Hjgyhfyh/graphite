@@ -2,3 +2,18 @@
 @import "@graphite/ui/src/tokens.css";
 
 @source "../../../packages/ui/src";
+
+/*
+ * Кроссфейд палитры при смене темы: атрибут вешает startThemeCrossfade
+ * (src/theme.ts) на ~360 мс, цвета переливаются вместо жёсткого скачка.
+ * Правило вне @layer — перекрывает transition-утилиты Tailwind без !important;
+ * при reduced-motion атрибут не ставится вовсе, :not — страховка.
+ */
+html[data-theme-switching="true"]:not([data-reduced-motion="true"]) *,
+html[data-theme-switching="true"]:not([data-reduced-motion="true"]) *::before,
+html[data-theme-switching="true"]:not([data-reduced-motion="true"]) *::after {
+  transition-property: background-color, border-color, outline-color, text-decoration-color, color, fill, stroke, box-shadow;
+  transition-duration: 320ms;
+  transition-timing-function: var(--ease-out);
+  transition-delay: 0ms;
+}

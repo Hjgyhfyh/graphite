@@ -213,6 +213,39 @@
   --sh-3: var(--shadow-3);
 }
 
+/*
+ * Тема Dracula (draculatheme.com). Включается атрибутом data-theme на <html>
+ * (apps/desktop/src/theme.ts). Переопределяем только базовые цвета: производные
+ * (--color-*-dim, --color-status-*) и алиасы :root — var()-ссылки на этом же
+ * элементе, каскад пересчитывает их сам. html[...] нужен вместо [...] — иначе
+ * специфичность сравняется с :root и победит порядок правил в бандле.
+ */
+html[data-theme='dracula'] {
+  --color-bg-0: #191A21;
+  --color-bg-1: #21222C;
+  --color-bg-2: #282A36;
+  --color-bg-3: #353849;
+  --color-bg-4: #44475A;
+
+  --color-stroke-0: #353849;
+  --color-stroke-1: #44475A;
+
+  --color-text-0: #F8F8F2;
+  --color-text-1: #B6BAD4;
+  --color-text-2: #8691B3;
+  --color-text-3: #6272A4;
+
+  --color-accent: #BD93F9;
+  /* Выделение проходит через 28–45% color-mix (::selection, CodeMirror) —
+     токен ярче канонного #44475A, чтобы итоговая заливка совпала с ним. */
+  --color-selection: #6272A4;
+  --color-ai: #FF79C6;
+
+  --color-ok: #50FA7B;
+  --color-warn: #F1FA8C;
+  --color-danger: #FF5555;
+}
+
 @layer base {
   :root {
     color-scheme: dark;

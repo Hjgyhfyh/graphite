@@ -678,6 +678,115 @@ export interface SaveAttachmentResponse {
   reused: boolean;
 }
 
+export interface GitCommitBrief {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  date: string;
+}
+
+export interface GitStatus {
+  installed: boolean;
+  isRepo: boolean;
+  branch?: string;
+  changedFiles: number;
+  ahead: number;
+  behind: number;
+  hasRemote: boolean;
+  remoteUrl?: string;
+  lastCommit?: GitCommitBrief;
+}
+
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: string;
+  filesChanged: number;
+}
+
+export interface GitFileChange {
+  path: string;
+  status: string;
+}
+
+export interface GitActionResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface GitDiffParams {
+  hash: string;
+  path?: string;
+}
+
+export interface GitRestoreFileParams {
+  hash: string;
+  path: string;
+}
+
+export interface GraphNode {
+  ref: NoteRef;
+  title: string;
+  icon?: string;
+  color?: string;
+  degree: number;
+}
+
+export interface GraphEdge {
+  source: NoteRef;
+  target: NoteRef;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface TagInfo {
+  tag: string;
+  count: number;
+  refs: NoteRef[];
+}
+
+export interface DailyNoteParams {
+  date: string;
+  folder?: string;
+}
+
+export interface DailyNote {
+  ref: NoteRef;
+  created: boolean;
+  title: string;
+}
+
+export interface DailyNotePeek {
+  ref: NoteRef;
+  exists: boolean;
+  title: string;
+}
+
+export interface DailyPruneParams {
+  folder?: string;
+  dryRun?: boolean;
+}
+
+export interface DailyPruneItem {
+  ref: NoteRef;
+  date: string;
+  restoreToken?: string;
+}
+
+export interface DailyPruneResponse {
+  items: DailyPruneItem[];
+}
+
+export interface ExportWriteParams {
+  destPath: string;
+  contents: string;
+}
+
 export type NoteChangeKind = 'created' | 'modified' | 'removed' | 'moved';
 
 export interface NoteChangedEvent {

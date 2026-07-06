@@ -3,3 +3,10 @@ node_modules/
 dist/
 .DS_Store
 *.tsbuildinfo
+
+# Приватные ключи подписи апдейтера — никогда не коммитить
+*.key
+*.pem.key
+graphite-updater.key
+.tauri/
+/keys/

@@ -2,6 +2,7 @@ export type MdInline =
   | { readonly kind: 'text'; readonly value: string }
   | { readonly kind: 'strong'; readonly children: readonly MdInline[] }
   | { readonly kind: 'em'; readonly children: readonly MdInline[] }
+  | { readonly kind: 'del'; readonly children: readonly MdInline[] }
   | { readonly kind: 'code'; readonly value: string }
   | { readonly kind: 'wikilink'; readonly target: string; readonly label: string }
   | { readonly kind: 'link'; readonly href: string; readonly children: readonly MdInline[] };
@@ -134,6 +135,18 @@ export function parseInline(input: string, depth = 0): MdInline[] {
       }
     }
 
+    if (c === '~' && input[i + 1] === '~') {
+      if (input[i + 2] !== ' ' && input[i + 2] !== undefined) {
+        const end = findMarker(input, '~~', i + 2);
+        if (end > i + 1 && input[end - 1] !== ' ') {
+          flush();
+          out.push({ kind: 'del', children: descend(input.slice(i + 2, end)) });
+          i = end + 2;
+          continue;
+        }
+      }
+    }
+
     if (c === '*' || c === '_') {
       const boundaryOk = c === '*' || !isWordChar(input[i - 1]);
       if (boundaryOk && input[i + 1] !== ' ' && input[i + 1] !== undefined && input[i + 1] !== c) {
@@ -199,9 +212,12 @@ export function parseBlocks(source: string, baseOffset = 0): MdBlock[] {
     if (fence !== null) {
       const marker = fence[1][0];
       const lang = fence[2].trim();
+      // Закрывающая ограда — тот же символ и длина не короче открывающей
+      // (CommonMark); иначе блок «закрывается» не там и глотает текст после ```.
+      const closeRe = new RegExp(`^\\s{0,3}${marker === '`' ? '`' : '~'}{${fence[1].length},}\\s*$`);
       const body: string[] = [];
       i += 1;
-      while (i < n && !new RegExp(`^\\s{0,3}${marker === '`' ? '```+' : '~~~+'}\\s*$`).test(lines[i])) {
+      while (i < n && !closeRe.test(lines[i])) {
         body.push(lines[i]);
         i += 1;
       }

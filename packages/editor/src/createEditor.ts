@@ -17,7 +17,7 @@ import type { ImagePreviewOptions } from './imagePreview';
 import { livePreview } from './livePreview';
 import { taskCheckboxes } from './taskList';
 import { graphiteDark } from './theme';
-import { wikiLinkCompletion } from './wikilink';
+import { openWikiLinkPicker, wikiLinkCompletion } from './wikilink';
 import type { WikiLinkSource } from './wikilink';
 
 const external = Annotation.define<boolean>();
@@ -77,7 +77,8 @@ const markdownKeymap: readonly KeyBinding[] = [
   { key: 'Mod-i', preventDefault: true, run: (view) => toggleInlineFormat(view, '*') },
   { key: 'Mod-e', preventDefault: true, run: (view) => toggleInlineFormat(view, '`') },
   { key: 'Mod-Shift-x', preventDefault: true, run: (view) => toggleInlineFormat(view, '~~') },
-  { key: 'Ctrl-l', preventDefault: true, run: toggleChecklist },
+  { key: 'Mod-l', preventDefault: true, run: openWikiLinkPicker },
+  { key: 'Mod-Shift-l', preventDefault: true, run: toggleChecklist },
 ];
 
 export function createEditor(container: HTMLElement, options: CreateEditorOptions = {}): EditorHandle {

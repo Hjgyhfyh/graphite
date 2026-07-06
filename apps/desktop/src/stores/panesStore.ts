@@ -19,6 +19,7 @@ export interface PanesStore {
   setActivePane(id: string): void;
   setPaneActiveTab(paneId: string, tabId?: string): void;
   moveTabToPane(tabId: string, paneId: string): void;
+  reset(): void;
 }
 
 export function activeTab(state: PanesStore): { paneId: string; tabId?: string } {
@@ -108,6 +109,10 @@ export const usePanesStore = create<PanesStore>()((set, get) => ({
       });
       return { panes, activePaneId: paneId };
     });
+    syncCurrentRef(get());
+  },
+  reset: () => {
+    set({ panes: [{ id: INITIAL_PANE_ID, activeTabId: undefined }], activePaneId: INITIAL_PANE_ID });
     syncCurrentRef(get());
   },
 }));

@@ -25,6 +25,7 @@ import {
   FolderPlus,
   FolderSymlink,
   Import,
+  LayoutTemplate,
   Palette,
   Pencil,
   Pin,
@@ -40,6 +41,7 @@ import { Kbd, STAGGER_CAP, cx } from '@graphite/ui';
 import { useActionHandler } from '../../app/Keymap';
 import { springSnappy, springStandard, usePrefersReducedMotion } from '../../motion';
 import { usePanesStore } from '../../stores/panesStore';
+import { useTemplatePickerStore } from '../../stores/templatePickerStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type { NoteIconInfo } from '../../stores/vaultStore';
@@ -999,6 +1001,14 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
                   <FilePlus size={15} strokeWidth={1.75} className="text-text-2" />
                   <span className="flex-1">Новая заметка</span>
                   <Kbd>Ctrl+N</Kbd>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  className={MENU_ITEM}
+                  onSelect={() => useTemplatePickerStore.getState().openPicker()}
+                >
+                  <LayoutTemplate size={15} strokeWidth={1.75} className="text-text-2" />
+                  <span className="flex-1">Из шаблона…</span>
+                  <Kbd>Ctrl+Alt+N</Kbd>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className={MENU_ITEM} onSelect={() => createFolderFlow()}>
                   <FolderPlus size={15} strokeWidth={1.75} className="text-text-2" />

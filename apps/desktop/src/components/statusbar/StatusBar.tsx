@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
   Diamond,
   FileText,
+  GitBranch,
   Inbox,
   Library,
   ListTodo,
@@ -12,10 +16,13 @@ import {
   PanelRightClose,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Tooltip, cx } from '@graphite/ui';
+import { AnimatePresence, motion } from 'motion/react';
+import { Tooltip, cx, easePoints } from '@graphite/ui';
 import { GRAPHITE_EVENT, commands, isTauriAvailable } from '@graphite/bindings';
-import type { McpSessionEvent } from '@graphite/bindings';
+import type { McpSessionEvent, NoteChangedEvent } from '@graphite/bindings';
 import { Fade, Presence, usePrefersReducedMotion } from '../../motion';
+import { useGitStore } from '../../stores/gitStore';
+import { useNavStore } from '../../stores/navStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 
@@ -110,14 +117,154 @@ function McpIndicator({ active }: { active: boolean }) {
         aria-label={label}
         onClick={() => openRightPanel('aiFeed')}
         className={cx(
-          'flex items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors duration-[120ms] hover:bg-bg-3',
+          'flex items-center gap-1.5 rounded-xs px-1 py-0.5 transition-[background-color,color,transform] duration-[160ms] ease-out hover:bg-bg-3 active:scale-[0.97]',
           active ? 'text-ai' : 'text-text-3',
         )}
       >
-        <span className={cx('inline-flex origin-center', active && !reduced ? 'animate-pulse-mcp' : null)}>
-          <Diamond size={11} strokeWidth={1.75} fill="currentColor" aria-hidden />
+        <span className="relative inline-flex items-center justify-center">
+          <AnimatePresence>
+            {active && !reduced ? (
+              <motion.span
+                key="beacon"
+                aria-hidden
+                className="pointer-events-none absolute inset-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.35, ease: easePoints.out }}
+              >
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <motion.span
+                    className="rounded-full"
+                    style={{ width: 11, height: 11, backgroundColor: 'var(--ai)', filter: 'blur(3.5px)' }}
+                    animate={{ opacity: [0.24, 0.55, 0.24], scale: [0.85, 1.4, 0.85] }}
+                    transition={{ duration: 2.6, ease: easePoints.inOut, repeat: Infinity }}
+                  />
+                </span>
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <motion.span
+                    className="rounded-full"
+                    style={{ width: 11, height: 11, border: '1px solid var(--ai)' }}
+                    animate={{ opacity: [0.45, 0], scale: [0.7, 1.9] }}
+                    transition={{ duration: 2.6, ease: easePoints.out, repeat: Infinity, repeatDelay: 0.25 }}
+                  />
+                </span>
+              </motion.span>
+            ) : null}
+          </AnimatePresence>
+          {active && reduced ? (
+            <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <span
+                className="rounded-full"
+                style={{ width: 11, height: 11, backgroundColor: 'var(--ai)', filter: 'blur(3.5px)', opacity: 0.4 }}
+              />
+            </span>
+          ) : null}
+          <Diamond size={11} strokeWidth={1.75} fill="currentColor" aria-hidden className="relative block" />
         </span>
         <span className="font-mono text-micro">MCP</span>
+      </button>
+    </Tooltip>
+  );
+}
+
+function pluralChanges(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return 'изменение';
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return 'изменения';
+  }
+  return 'изменений';
+}
+
+function relativeStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
+  if (minutes < 1) {
+    return 'только что';
+  }
+  if (minutes < 60) {
+    return `${minutes} мин назад`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours} ч назад`;
+  }
+  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
+function NavHistoryControls() {
+  const canBack = useNavStore((s) => s.past.length > 0);
+  const canForward = useNavStore((s) => s.future.length > 0);
+  const buttonClass =
+    'group flex size-6 items-center justify-center rounded-xs text-text-2 transition-[background-color,color,transform,opacity] duration-[140ms] ease-out hover:bg-bg-3 hover:text-text-0 active:scale-[0.94] disabled:pointer-events-none disabled:opacity-30';
+  const iconClass = 'transition-transform duration-[140ms] ease-out';
+  return (
+    <div className="flex items-center gap-0.5">
+      <Tooltip content="Назад" side="top">
+        <button
+          type="button"
+          aria-label="Назад к прошлой заметке"
+          disabled={!canBack}
+          onClick={() => useNavStore.getState().back()}
+          className={buttonClass}
+        >
+          <ChevronLeft size={14} strokeWidth={1.75} className={cx(iconClass, 'group-hover:-translate-x-px')} />
+        </button>
+      </Tooltip>
+      <Tooltip content="Вперёд" side="top">
+        <button
+          type="button"
+          aria-label="Вперёд к следующей заметке"
+          disabled={!canForward}
+          onClick={() => useNavStore.getState().forward()}
+          className={buttonClass}
+        >
+          <ChevronRight size={14} strokeWidth={1.75} className={cx(iconClass, 'group-hover:translate-x-px')} />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+function GitIndicator() {
+  const status = useGitStore((s) => s.status);
+  const openTimeline = useGitStore((s) => s.openTimeline);
+
+  if (status === null || !status.isRepo) {
+    return null;
+  }
+  const changed = status.changedFiles;
+  const label = changed > 0 ? `${changed} ${pluralChanges(changed)}` : 'сохранено';
+  const tip =
+    status.lastCommit !== undefined
+      ? `Снимок: ${status.lastCommit.subject} · ${relativeStamp(status.lastCommit.date)}`
+      : 'История версий';
+  return (
+    <Tooltip content={tip} side="top">
+      <button
+        type="button"
+        aria-label={`История версий · ${label}`}
+        onClick={() => openTimeline()}
+        className={cx(
+          'flex items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+          changed > 0 ? 'text-text-1' : 'text-text-2',
+        )}
+      >
+        <GitBranch size={12} strokeWidth={1.75} aria-hidden />
+        <span className="tabular-nums">{label}</span>
+        {status.ahead > 0 ? (
+          <span className="flex items-center gap-0.5 text-accent">
+            <ArrowUp size={11} strokeWidth={2} aria-hidden />
+            {status.ahead}
+          </span>
+        ) : null}
       </button>
     </Tooltip>
   );
@@ -197,6 +344,35 @@ export function StatusBar() {
     };
   }, []);
 
+  useEffect(() => {
+    void useGitStore.getState().refreshStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriAvailable()) {
+      return;
+    }
+    let timer: number | undefined;
+    const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      timer = window.setTimeout(() => {
+        void useGitStore.getState().refreshStatus();
+      }, 400);
+      // Правки пользователя перезапускают дебаунс тихого авто-снимка.
+      if (event.payload.actor === 'user') {
+        useGitStore.getState().maybeAutoSnapshot();
+      }
+    });
+    return () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      void subscription.then((unlisten) => unlisten());
+    };
+  }, []);
+
   return (
     <footer className="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-stroke-0 bg-bg-1 px-2.5 text-micro text-text-2">
       <div className="flex min-w-0 items-center gap-2">
@@ -214,6 +390,13 @@ export function StatusBar() {
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2.5">
+        {info !== undefined ? (
+          <>
+            <NavHistoryControls />
+            <span aria-hidden className="h-3.5 w-px bg-stroke-0" />
+          </>
+        ) : null}
+        <GitIndicator />
         <IndexIndicator />
         <McpIndicator active={mcp.active} />
         <span aria-hidden className="h-3.5 w-px bg-stroke-0" />

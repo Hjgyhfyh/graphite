@@ -7,6 +7,12 @@ import { StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, CaptureApp, NoteApp } from './App';
+import { useUiStore } from './stores/uiStore';
+import { applyTheme } from './theme';
+
+// Тема из persist-стора — синхронно, до первого рендера: без вспышки базовой
+// палитры. Общий localStorage покрывает все окна (App/Capture/Note).
+applyTheme(useUiStore.getState().theme);
 
 const container = document.getElementById('root');
 if (container === null) {

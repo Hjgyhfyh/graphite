@@ -44,10 +44,16 @@ class FrontmatterCapsuleWidget extends WidgetType {
   }
 
   get estimatedHeight(): number {
-    return 40;
+    return 52;
   }
 
+  // Отбивка снизу и выравнивание по колонке текста — padding обёртки: карта
+  // высот CodeMirror меряет border-box виджета, внешние margin она не видит,
+  // и всё содержимое ниже уезжало бы мимо кликов.
   toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-gr-fm-wrap';
+
     const capsule = document.createElement('button');
     capsule.type = 'button';
     capsule.className = 'cm-gr-fm-capsule';
@@ -104,8 +110,9 @@ class FrontmatterCapsuleWidget extends WidgetType {
       view.focus();
     };
     capsule.addEventListener('mousedown', expand);
+    wrap.appendChild(capsule);
 
-    return capsule;
+    return wrap;
   }
 
   ignoreEvent(): boolean {

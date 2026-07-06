@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { Theme } from '../theme';
+import { applyTheme, isTheme } from '../theme';
 
 export const TREE_WIDTH_MIN = 240;
 export const TREE_WIDTH_MAX = 420;
@@ -15,8 +17,8 @@ export const ANIMATION_SPEED_DEFAULT = 1;
 
 const TOAST_DURATION_MS = 4000;
 
-export type RailView = 'tree' | 'search' | 'tasks' | 'plan' | 'settings';
-export type RightPanelTab = 'properties' | 'aiFeed' | 'links' | 'backlinks';
+export type RailView = 'tree' | 'search' | 'tasks' | 'plan' | 'graph' | 'daily' | 'tags' | 'settings';
+export type RightPanelTab = 'properties' | 'aiFeed' | 'links' | 'backlinks' | 'outline';
 
 export interface ToastAction {
   label: string;
@@ -42,6 +44,7 @@ export interface UiStore {
   readingMode: boolean;
   reducedMotion: boolean;
   animationSpeed: number;
+  theme: Theme;
   floatingCaptureOpen: boolean;
   onboardingDone: boolean;
   toasts: Toast[];
@@ -59,6 +62,7 @@ export interface UiStore {
   setReadingMode(on: boolean): void;
   setReducedMotion(on: boolean): void;
   setAnimationSpeed(speed: number): void;
+  setTheme(theme: Theme): void;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
   setOnboardingDone(done: boolean): void;
@@ -88,6 +92,7 @@ export const useUiStore = create<UiStore>()(
       readingMode: false,
       reducedMotion: false,
       animationSpeed: ANIMATION_SPEED_DEFAULT,
+      theme: 'default',
       floatingCaptureOpen: false,
       onboardingDone: false,
       toasts: [],
@@ -141,6 +146,10 @@ export const useUiStore = create<UiStore>()(
       setAnimationSpeed: (speed) => {
         set({ animationSpeed: clamp(speed, ANIMATION_SPEED_MIN, ANIMATION_SPEED_MAX) });
       },
+      setTheme: (theme) => {
+        set({ theme });
+        applyTheme(theme);
+      },
       setFloatingCaptureOpen: (open) => {
         set({ floatingCaptureOpen: open });
       },
@@ -173,6 +182,7 @@ export const useUiStore = create<UiStore>()(
         readingMode: s.readingMode,
         reducedMotion: s.reducedMotion,
         animationSpeed: s.animationSpeed,
+        theme: s.theme,
         onboardingDone: s.onboardingDone,
       }),
       merge: (persisted, current) => {
@@ -188,6 +198,7 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_MAX,
             ANIMATION_SPEED_DEFAULT,
           ),
+          theme: isTheme(saved.theme) ? saved.theme : 'default',
         };
       },
     },

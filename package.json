@@ -7,7 +7,8 @@
   },
   "scripts": {
     "typecheck": "pnpm -r run typecheck",
-    "build": "pnpm --filter desktop build"
+    "build": "pnpm --filter desktop build",
+    "test": "pnpm -r run test"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"

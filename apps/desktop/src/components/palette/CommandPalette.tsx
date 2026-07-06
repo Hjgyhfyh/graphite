@@ -1,14 +1,84 @@
 import { useEffect, useRef, useState } from 'react';
 import { Command } from 'cmdk';
 import { motion } from 'motion/react';
-import { ChevronRight, CornerDownLeft, FilePlus, Loader, PlugZap, Search } from 'lucide-react';
+import {
+  Camera,
+  ChevronRight,
+  CornerDownLeft,
+  FilePlus,
+  FolderOpen,
+  FolderPlus,
+  HardDrive,
+  History,
+  Loader,
+  PlugZap,
+  Search,
+  UploadCloud,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Kbd } from '@graphite/ui';
 import { commands, isGraphiteError } from '@graphite/bindings';
 import type { SearchHit } from '@graphite/bindings';
 import { runAction } from '../../app/Keymap';
 import { ACTIONS, chordKeys, useKeybindingsStore } from '../../stores/keybindingsStore';
+import { useGitStore } from '../../stores/gitStore';
 import { useUiStore } from '../../stores/uiStore';
+import { pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
+import { useVaultsStore, vaultKey } from '../../stores/vaultsStore';
+
+interface PaletteAction {
+  id: string;
+  title: string;
+  icon: LucideIcon;
+  run: () => void;
+}
+
+const BACKUP_ACTIONS: readonly PaletteAction[] = [
+  {
+    id: 'git.snapshot',
+    title: 'Сохранить точку восстановления',
+    icon: Camera,
+    run: () => {
+      void useGitStore.getState().snapshot();
+    },
+  },
+  {
+    id: 'git.timeline',
+    title: 'История версий',
+    icon: History,
+    run: () => {
+      useGitStore.getState().openTimeline();
+    },
+  },
+  {
+    id: 'git.push',
+    title: 'Резервная копия на GitHub',
+    icon: UploadCloud,
+    run: () => {
+      void useGitStore.getState().push();
+    },
+  },
+];
+
+const VAULT_ACTIONS: readonly PaletteAction[] = [
+  {
+    id: 'vault.openFolder',
+    title: 'Хранилище: открыть папку…',
+    icon: FolderOpen,
+    run: () => {
+      void pickVaultFolder(false);
+    },
+  },
+  {
+    id: 'vault.create',
+    title: 'Хранилище: создать новое…',
+    icon: FolderPlus,
+    run: () => {
+      void pickVaultFolder(true);
+    },
+  },
+];
 import { NoteIcon } from '../tree/NoteIcon';
 import { Presence, fadeVariants, popVariants, reducedFadeVariants, usePrefersReducedMotion } from '../../motion';
 
@@ -79,6 +149,8 @@ export function CommandPalette() {
   const bindings = useKeybindingsStore((s) => s.bindings);
   const tree = useVaultStore((s) => s.tree);
   const iconByRef = useVaultStore((s) => s.iconByRef);
+  const vaultRoot = useVaultStore((s) => s.info?.root);
+  const knownVaults = useVaultsStore((s) => s.known);
   const reduced = usePrefersReducedMotion();
   const [query, setQuery] = useState('');
   const [ftHits, setFtHits] = useState<SearchHit[]>([]);
@@ -155,6 +227,10 @@ export function CommandPalette() {
   const trimmed = query.trim();
   const hasQuery = trimmed.length > 0;
   const commandMatches = ACTIONS.filter((action) => action.id !== 'palette.open' && matches(query, action.title, action.group));
+  const backupMatches = BACKUP_ACTIONS.filter((action) => matches(query, action.title));
+  const activeVaultKey = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
+  const vaultMatches = knownVaults.filter((vault) => matches(query, vault.name, vault.path));
+  const vaultActionMatches = VAULT_ACTIONS.filter((action) => matches(query, action.title));
   const noteMatches = hasQuery
     ? tree.filter((node) => matches(query, node.title, node.path)).slice(0, 8)
     : [...tree].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 8);
@@ -234,6 +310,85 @@ export function CommandPalette() {
                         <ChordBadges chords={bindings[action.id] ?? []} />
                       </Command.Item>
                     ))}
+                  </Command.Group>
+                ) : null}
+
+                {backupMatches.length > 0 ? (
+                  <Command.Group heading="Резервные копии" className={HEADING}>
+                    {backupMatches.map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <Command.Item
+                          key={action.id}
+                          value={`backup-${action.id}`}
+                          keywords={[action.title]}
+                          onSelect={() => {
+                            close();
+                            action.run();
+                          }}
+                          className={ROW}
+                        >
+                          <Icon size={16} strokeWidth={1.75} className="shrink-0 text-text-3" />
+                          <span className="flex-1 truncate">{action.title}</span>
+                        </Command.Item>
+                      );
+                    })}
+                  </Command.Group>
+                ) : null}
+
+                {vaultMatches.length > 0 || vaultActionMatches.length > 0 ? (
+                  <Command.Group heading="Хранилища" className={HEADING}>
+                    {vaultMatches.map((vault) => {
+                      const active = activeVaultKey !== undefined && vaultKey(vault.path) === activeVaultKey;
+                      return (
+                        <Command.Item
+                          key={`vault-${vaultKey(vault.path)}`}
+                          value={`vault-${vaultKey(vault.path)}`}
+                          keywords={[vault.name, vault.path]}
+                          onSelect={() => {
+                            close();
+                            if (!active) {
+                              void switchVault(vault.path);
+                            }
+                          }}
+                          className={ROW}
+                        >
+                          <HardDrive
+                            size={16}
+                            strokeWidth={1.75}
+                            className={active ? 'shrink-0 text-accent' : 'shrink-0 text-text-3'}
+                          />
+                          <span className="flex-1 truncate">{vault.name}</span>
+                          {active ? (
+                            <span className="shrink-0 rounded-full bg-accent/15 px-1.5 py-px text-micro text-accent">
+                              активное
+                            </span>
+                          ) : (
+                            <span className="max-w-[45%] shrink-0 truncate font-mono text-micro text-text-3">
+                              {vault.path}
+                            </span>
+                          )}
+                        </Command.Item>
+                      );
+                    })}
+                    {vaultActionMatches.map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <Command.Item
+                          key={action.id}
+                          value={`vault-action-${action.id}`}
+                          keywords={[action.title]}
+                          onSelect={() => {
+                            close();
+                            action.run();
+                          }}
+                          className={ROW}
+                        >
+                          <Icon size={16} strokeWidth={1.75} className="shrink-0 text-text-3" />
+                          <span className="flex-1 truncate">{action.title}</span>
+                        </Command.Item>
+                      );
+                    })}
                   </Command.Group>
                 ) : null}
 

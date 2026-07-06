@@ -8,13 +8,20 @@ export type ActionId =
   | 'search.inNote'
   | 'view.tasks'
   | 'settings.open'
+  | 'nav.back'
+  | 'nav.forward'
   | 'note.new'
   | 'note.newChild'
+  | 'note.newFromTemplate'
   | 'note.rename'
   | 'note.delete'
   | 'note.copyPage'
   | 'note.pin'
+  | 'note.exportHtml'
+  | 'note.exportMd'
+  | 'note.print'
   | 'editor.toggleReading'
+  | 'editor.linkNote'
   | 'format.bold'
   | 'format.italic'
   | 'task.toggleLine'
@@ -29,6 +36,7 @@ export type ActionId =
   | 'sidebar.toggleTree'
   | 'sidebar.toggleRight'
   | 'aiFeed.toggle'
+  | 'view.outline'
   | 'capture.quick';
 
 export type ActionGroup = 'Навигация' | 'Заметки' | 'Редактор' | 'Вкладки и панели' | 'Прочее';
@@ -46,13 +54,20 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'search.inNote', title: 'Поиск в заметке', group: 'Навигация' },
   { id: 'view.tasks', title: 'Задачи', group: 'Навигация' },
   { id: 'settings.open', title: 'Настройки', group: 'Навигация' },
+  { id: 'nav.back', title: 'Назад', group: 'Навигация' },
+  { id: 'nav.forward', title: 'Вперёд', group: 'Навигация' },
   { id: 'note.new', title: 'Новая заметка', group: 'Заметки' },
   { id: 'note.newChild', title: 'Под-заметка', group: 'Заметки' },
+  { id: 'note.newFromTemplate', title: 'Заметка из шаблона…', group: 'Заметки' },
   { id: 'note.rename', title: 'Переименовать', group: 'Заметки' },
   { id: 'note.delete', title: 'Удалить в корзину', group: 'Заметки' },
   { id: 'note.copyPage', title: 'Скопировать для ИИ', group: 'Заметки' },
   { id: 'note.pin', title: 'Закрепить заметку', group: 'Заметки' },
+  { id: 'note.exportHtml', title: 'Экспорт в HTML…', group: 'Заметки' },
+  { id: 'note.exportMd', title: 'Сохранить копию .md…', group: 'Заметки' },
+  { id: 'note.print', title: 'Печать / PDF…', group: 'Заметки' },
   { id: 'editor.toggleReading', title: 'Режим чтения', group: 'Редактор' },
+  { id: 'editor.linkNote', title: 'Связать заметку', group: 'Редактор' },
   { id: 'format.bold', title: 'Жирный', group: 'Редактор' },
   { id: 'format.italic', title: 'Курсив', group: 'Редактор' },
   { id: 'task.toggleLine', title: 'Строка в чекбокс', group: 'Редактор' },
@@ -67,6 +82,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'sidebar.toggleTree', title: 'Скрыть дерево', group: 'Вкладки и панели' },
   { id: 'sidebar.toggleRight', title: 'Скрыть правую панель', group: 'Вкладки и панели' },
   { id: 'aiFeed.toggle', title: 'Лента ассистента', group: 'Вкладки и панели' },
+  { id: 'view.outline', title: 'Оглавление заметки', group: 'Вкладки и панели' },
   { id: 'capture.quick', title: 'Быстрая запись', group: 'Прочее' },
 ];
 
@@ -77,16 +93,23 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'search.inNote': ['Ctrl+F'],
   'view.tasks': ['Ctrl+Shift+T'],
   'settings.open': ['Ctrl+Comma'],
+  'nav.back': ['Alt+Left'],
+  'nav.forward': ['Alt+Right'],
   'note.new': ['Ctrl+N'],
   'note.newChild': ['Ctrl+Shift+N'],
+  'note.newFromTemplate': ['Ctrl+Alt+N'],
   'note.rename': ['F2'],
   'note.delete': ['Delete'],
   'note.copyPage': ['Ctrl+Shift+C'],
   'note.pin': ['Ctrl+Shift+P'],
+  'note.exportHtml': [],
+  'note.exportMd': [],
+  'note.print': [],
   'editor.toggleReading': ['Ctrl+E'],
+  'editor.linkNote': ['Ctrl+L'],
   'format.bold': ['Ctrl+B'],
   'format.italic': ['Ctrl+I'],
-  'task.toggleLine': ['Ctrl+L'],
+  'task.toggleLine': ['Ctrl+Shift+L'],
   'edit.undo': ['Ctrl+Z'],
   'edit.redo': ['Ctrl+Y', 'Ctrl+Shift+Z'],
   'tab.next': ['Ctrl+Tab'],
@@ -98,6 +121,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'sidebar.toggleTree': ['Ctrl+Backslash'],
   'sidebar.toggleRight': ['Alt+Backslash'],
   'aiFeed.toggle': ['Ctrl+Shift+A'],
+  'view.outline': ['Ctrl+Shift+O'],
   'capture.quick': ['Ctrl+Alt+Space'],
 };
 

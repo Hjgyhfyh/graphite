@@ -14,6 +14,7 @@ import { BundlePanel } from '../bundle/BundlePanel';
 import { AiFeedTab } from './AiFeedTab';
 import { BacklinksTab } from './BacklinksTab';
 import { LinksTab } from './LinksTab';
+import { OutlineTab } from './OutlineTab';
 import { PropertiesTab } from './PropertiesTab';
 
 export interface RightPanelProps {
@@ -27,6 +28,7 @@ const TABS: ReadonlyArray<{ id: RightPanelTab; label: string }> = [
   { id: 'aiFeed', label: 'ИИ-лента' },
   { id: 'links', label: 'Связи' },
   { id: 'backlinks', label: 'Бэклинки' },
+  { id: 'outline', label: 'Оглавление' },
 ];
 
 function NoNote({ children }: { children: ReactNode }) {
@@ -46,14 +48,14 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
   const tabs = useTabsStore((s) => s.tabs);
   const reduced = usePrefersReducedMotion();
 
-  const activeRef = useMemo<NoteRef | undefined>(() => {
+  const active = useMemo<{ ref: NoteRef | undefined; tabId: string | undefined }>(() => {
     const pane = panes.find((p) => p.id === activePaneId) ?? panes[0];
     const tabId = pane?.activeTabId;
     const editorTab = tabId !== undefined ? tabs.find((t) => t.id === tabId) : undefined;
     if (editorTab !== undefined && editorTab.kind === 'editor') {
-      return editorTab.noteRef;
+      return { ref: editorTab.noteRef, tabId: editorTab.id };
     }
-    return currentRef;
+    return { ref: currentRef, tabId: undefined };
   }, [panes, activePaneId, tabs, currentRef]);
 
   const resizeCleanup = useRef<(() => void) | null>(null);
@@ -88,8 +90,8 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
 
   const renderTab = () => {
     if (tab === 'properties') {
-      return activeRef !== undefined ? (
-        <PropertiesTab key={activeRef} noteRef={activeRef} />
+      return active.ref !== undefined ? (
+        <PropertiesTab key={active.ref} noteRef={active.ref} />
       ) : (
         <NoNote>Откройте заметку, чтобы увидеть её свойства</NoNote>
       );
@@ -98,18 +100,25 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
       return <AiFeedTab />;
     }
     if (tab === 'links') {
-      return activeRef !== undefined ? (
-        <div key={activeRef} className="flex flex-col">
-          <LinksTab noteRef={activeRef} />
+      return active.ref !== undefined ? (
+        <div key={active.ref} className="flex flex-col">
+          <LinksTab noteRef={active.ref} />
           <div className="border-t border-stroke-0" />
-          <BundlePanel noteRef={activeRef} />
+          <BundlePanel noteRef={active.ref} />
         </div>
       ) : (
         <NoNote>Откройте заметку, чтобы увидеть её связи</NoNote>
       );
     }
-    return activeRef !== undefined ? (
-      <BacklinksTab key={activeRef} noteRef={activeRef} />
+    if (tab === 'outline') {
+      return active.ref !== undefined ? (
+        <OutlineTab key={active.ref} noteRef={active.ref} tabId={active.tabId} />
+      ) : (
+        <NoNote>Откройте заметку, чтобы увидеть оглавление</NoNote>
+      );
+    }
+    return active.ref !== undefined ? (
+      <BacklinksTab key={active.ref} noteRef={active.ref} />
     ) : (
       <NoNote>Откройте заметку, чтобы увидеть бэклинки</NoNote>
     );

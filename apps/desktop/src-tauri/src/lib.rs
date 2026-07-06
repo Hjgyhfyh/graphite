@@ -1,6 +1,7 @@
 mod commands;
 mod dto;
 mod events;
+mod gitsync;
 mod rpc_handler;
 mod runtime;
 mod state;
@@ -64,6 +65,23 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::open_note_window,
             commands::note_abs_path,
             commands::reveal_in_explorer,
+            commands::graph_data,
+            commands::tags_list,
+            commands::ensure_daily_note,
+            commands::peek_daily_note,
+            commands::prune_empty_daily_notes,
+            commands::export_write,
+            gitsync::git_status,
+            gitsync::git_init,
+            gitsync::git_snapshot,
+            gitsync::git_log,
+            gitsync::git_commit_files,
+            gitsync::git_diff,
+            gitsync::git_restore_commit,
+            gitsync::git_restore_file,
+            gitsync::git_remote_set,
+            gitsync::git_push,
+            gitsync::git_pull,
         ])
         .events(collect_events![
             events::NoteChangedEvent,
@@ -254,6 +272,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(builder.invoke_handler())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -325,6 +345,9 @@ mod tests {
         assert!(out.contains("vaultInfo"));
         assert!(out.contains("quickCapture"));
         assert!(out.contains("openNoteWindow"));
+        assert!(out.contains("peekDailyNote"));
+        assert!(out.contains("pruneEmptyDailyNotes"));
+        assert!(out.contains("exportWrite"));
         assert!(out.contains("note_changed"));
         assert!(out.contains("ui_flash_note"));
     }

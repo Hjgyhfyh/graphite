@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ElementType, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import type { CSSProperties, ElementType, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
   Bold,
@@ -14,6 +14,7 @@ import {
   Heading3,
   ImagePlus,
   Italic,
+  Link2,
   PencilLine,
   Pilcrow,
   Scissors,
@@ -28,6 +29,7 @@ import {
   finishAttachmentUpload,
   headingLevelAt,
   inlineFormatState,
+  openWikiLinkPicker,
   parseBlocks,
   setHeadingLevel,
   splitFrontmatter,
@@ -50,12 +52,15 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { StatusPill, Tooltip, cx, easePoints } from '@graphite/ui';
 import type { NoteStatus } from '@graphite/ui';
+import { useEditorViewsStore } from '../../stores/editorViewsStore';
 import { titleFromRef, useTabsStore } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
-import { NoteIcon } from '../tree/NoteIcon';
+import { useActionHandler } from '../../app/Keymap';
+import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
 import { CopyPageButton } from '../bundle/CopyPageButton';
+import { ExportMenu } from './ExportMenu';
 
 export const WELCOME_NOTE_REF: NoteRef = 'path:Добро пожаловать.md';
 
@@ -83,6 +88,20 @@ const SAVE_DEBOUNCE_MS = 600;
 const READING_FONT = '"Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif';
 
 const pendingSaves = new Map<NoteRef, Promise<void>>();
+const liveEditorFlushes = new Set<() => void>();
+
+/**
+ * Форсирует автосейв всех открытых «грязных» редакторов и дожидается уже
+ * начатых записей. Нужен перед сменой хранилища: отложенный bufferSave
+ * резолвит ref через текущий корень и после переключения записал бы заметку
+ * уже в новый vault.
+ */
+export async function flushPendingSaves(): Promise<void> {
+  for (const flush of [...liveEditorFlushes]) {
+    flush();
+  }
+  await Promise.allSettled([...pendingSaves.values()]);
+}
 
 function describeError(error: unknown, fallback: string): string {
   if (isGraphiteError(error)) {
@@ -93,6 +112,33 @@ function describeError(error: unknown, fallback: string): string {
 
 function isExternalHref(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href.trim());
+}
+
+/**
+ * Фаззи-скоринг заголовка для пикера связей: все символы запроса встречаются
+ * по порядку; слитные совпадения и старты слов ценнее, разрывы штрафуются.
+ * `null` — заголовок не подходит.
+ */
+function fuzzyScore(needle: string, haystack: string): number | null {
+  let score = 0;
+  let at = 0;
+  let streak = 0;
+  for (const ch of needle) {
+    if (ch === ' ') {
+      streak = 0;
+      continue;
+    }
+    const found = haystack.indexOf(ch, at);
+    if (found === -1) {
+      return null;
+    }
+    const prev = found > 0 ? haystack[found - 1] : ' ';
+    const wordStart = prev === ' ' || prev === '-' || prev === '_' || prev === '/' || prev === '.';
+    streak = found === at ? streak + 1 : 1;
+    score += 1 + streak * 2 + (wordStart ? 6 : 0) - Math.min(found - at, 8) * 0.5;
+    at = found + 1;
+  }
+  return score;
 }
 
 function openExternal(href: string): void {
@@ -124,6 +170,12 @@ function vaultRootPath(): Promise<string | undefined> {
       return undefined;
     });
   return vaultRootPromise;
+}
+
+/** Сбрасывает кэш корня vault — вызывается при смене хранилища, иначе
+ * относительные пути картинок продолжат резолвиться от прежнего корня. */
+export function invalidateVaultRootCache(): void {
+  vaultRootPromise = null;
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -210,6 +262,7 @@ const HEADING_CLASS: Record<1 | 2 | 3 | 4 | 5 | 6, string> = {
 
 interface InlineContext {
   onOpenLink: (target: string) => void;
+  reduced: boolean;
 }
 
 function markerNumber(marker: string): string {
@@ -252,6 +305,12 @@ function renderInline(nodes: readonly MdInline[], keyPrefix: string, ctx: Inline
           <em key={key} className="italic">
             {renderInline(node.children, key, ctx)}
           </em>
+        );
+      case 'del':
+        return (
+          <del key={key} className="text-text-2 line-through decoration-text-3">
+            {renderInline(node.children, key, ctx)}
+          </del>
         );
       case 'code':
         return (
@@ -311,6 +370,7 @@ function inlineText(nodes: readonly MdInline[]): string {
         break;
       case 'strong':
       case 'em':
+      case 'del':
       case 'link':
         out += inlineText(node.children);
         break;
@@ -322,6 +382,69 @@ function inlineText(nodes: readonly MdInline[]): string {
     }
   }
   return out;
+}
+
+const COPY_RESET_MS = 1600;
+
+interface ReadingCodeBlockProps {
+  block: Extract<MdBlock, { kind: 'code' }>;
+  reduced: boolean;
+}
+
+function ReadingCodeBlock({ block, reduced }: ReadingCodeBlockProps) {
+  const [copied, setCopied] = useState(false);
+  const resetRef = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(resetRef.current), []);
+
+  const copy = () => {
+    void navigator.clipboard
+      .writeText(block.value)
+      .then(() => {
+        setCopied(true);
+        window.clearTimeout(resetRef.current);
+        resetRef.current = window.setTimeout(() => setCopied(false), COPY_RESET_MS);
+      })
+      .catch(() => {
+        useUiStore.getState().pushToast({ kind: 'error', text: 'Буфер обмена недоступен' });
+      });
+  };
+
+  return (
+    <div className="group relative mb-4">
+      <pre className="overflow-x-auto rounded-m border border-stroke-0 bg-bg-2 p-4">
+        <code className="font-mono text-[13.5px] leading-[22px] text-text-1">{block.value}</code>
+      </pre>
+      <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+        {block.lang !== undefined ? (
+          <span className="pointer-events-none rounded-full bg-bg-3/80 px-2 py-0.5 font-mono text-micro uppercase tracking-[0.06em] text-text-2 opacity-0 transition-opacity duration-[140ms] group-hover:opacity-100">
+            {block.lang}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={copy}
+          aria-label="Скопировать код"
+          title="Скопировать код"
+          className={cx(
+            'inline-flex h-7 w-7 items-center justify-center rounded-s border transition-all duration-[140ms]',
+            copied
+              ? 'border-ok/45 bg-bg-3 text-ok opacity-100'
+              : 'border-stroke-1 bg-bg-3 text-text-1 opacity-0 hover:bg-bg-4 hover:text-text-0 focus-visible:opacity-100 active:scale-95 group-hover:opacity-100',
+          )}
+        >
+          <motion.span
+            key={copied ? 'done' : 'idle'}
+            initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={reduced ? { duration: 0.08 } : springSnappy}
+            className="inline-flex"
+          >
+            {copied ? <Check size={13} strokeWidth={2.5} /> : <Copy size={13} strokeWidth={1.75} />}
+          </motion.span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 interface ReadingItemProps {
@@ -393,11 +516,7 @@ function renderBlock(block: MdBlock, key: string, ctx: InlineContext, onToggleTa
         </blockquote>
       );
     case 'code':
-      return (
-        <pre className="mb-4 overflow-x-auto rounded-m border border-stroke-0 bg-bg-1 p-4">
-          <code className="font-mono text-[13.5px] leading-[22px] text-text-1">{block.value}</code>
-        </pre>
-      );
+      return <ReadingCodeBlock block={block} reduced={ctx.reduced} />;
     case 'list':
       return (
         <div className="mb-4 flex flex-col gap-1.5">
@@ -602,7 +721,7 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: Readin
     );
   }, [entries, blocks]);
 
-  const ctx: InlineContext = { onOpenLink };
+  const ctx: InlineContext = { onOpenLink, reduced };
   return (
     <motion.div
       key="reading"
@@ -732,6 +851,11 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
     close();
   };
 
+  const runLink = () => {
+    close();
+    openWikiLinkPicker(view);
+  };
+
   const runHeading = (level: HeadingLevel) => {
     setHeadingLevel(view, level);
     close();
@@ -790,6 +914,17 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
           </button>
         ))}
         <div aria-hidden className="mx-1.5 my-1 h-px bg-stroke-0" />
+        <button
+          type="button"
+          role="menuitem"
+          onClick={runLink}
+          className={cx(MENU_ROW, 'text-text-1 hover:bg-bg-3 hover:text-text-0')}
+        >
+          <Link2 size={15} strokeWidth={1.75} className="shrink-0" />
+          <span className="flex-1 text-left">Связать заметку</span>
+          <span className="font-mono text-micro text-text-3">Ctrl+L</span>
+        </button>
+        <div aria-hidden className="mx-1.5 my-1 h-px bg-stroke-0" />
         <p className="px-2.5 pb-1 pt-1.5 text-micro font-medium uppercase tracking-[0.08em] text-text-3">
           Размер текста
         </p>
@@ -845,9 +980,12 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
 export interface EditorPaneProps {
   tabId: string;
   noteRef: NoteRef;
+  /** Черновик ещё не существующего файла: редактор стартует с него без чтения
+   * диска, а на диск документ ложится штатным автосейвом при первом вводе. */
+  initialDoc?: string;
 }
 
-export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
+export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<EditorHandle | null>(null);
   const baseRevRef = useRef('');
@@ -862,6 +1000,22 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
   const readingMode = useUiStore((s) => s.readingMode);
   const toggleReadingMode = useUiStore((s) => s.toggleReadingMode);
   const reduced = usePrefersReducedMotion();
+
+  // Цвет выделения текста повторяет цвет иконки файла (#1): переопределяем
+  // --selection/--selection-dim на корне панели — каскад уходит и в CodeMirror
+  // (.cm-selectionBackground), и в нативный ::selection режима чтения. Нет
+  // цвета у файла — переменные не трогаем, работает глобальный ирис.
+  const iconColor = useVaultStore((s) => s.iconByRef[noteRef]?.color);
+  const selectionStyle = useMemo<CSSProperties | undefined>(() => {
+    const tint = resolveIconColor(iconColor);
+    if (tint === undefined) {
+      return undefined;
+    }
+    return {
+      '--selection': tint,
+      '--selection-dim': `color-mix(in srgb, ${tint} 40%, transparent)`,
+    } as unknown as CSSProperties;
+  }, [iconColor]);
 
   const [docText, setDocText] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -888,6 +1042,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
             handle.markAi(range.from, range.to);
           }
         }
+        useEditorViewsStore.getState().bumpDocVersion();
       }
     },
     [noteRef, tabId, setDirty],
@@ -978,28 +1133,42 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
     }
   }, [isWelcome, persist]);
 
+  useEffect(() => {
+    liveEditorFlushes.add(flushSave);
+    return () => {
+      liveEditorFlushes.delete(flushSave);
+    };
+  }, [flushSave]);
+
   const linkSource = useCallback((query: string): WikiLinkItem[] => {
     const nodes = useVaultStore.getState().tree;
     const needle = query.trim().toLowerCase();
     const seen = new Set<string>();
-    const items: WikiLinkItem[] = [];
+    const scored: { item: WikiLinkItem; score: number }[] = [];
     for (const node of nodes) {
       const title = node.title.trim();
       if (title.length === 0) {
         continue;
       }
       const lower = title.toLowerCase();
-      if (seen.has(lower) || (needle.length > 0 && !lower.includes(needle))) {
+      if (seen.has(lower)) {
+        continue;
+      }
+      const score = needle.length === 0 ? 0 : fuzzyScore(needle, lower);
+      if (score === null) {
         continue;
       }
       seen.add(lower);
       const dir = node.path.includes('/') ? node.path.slice(0, node.path.lastIndexOf('/')) : undefined;
-      items.push({ label: title, detail: dir });
-      if (items.length >= 40) {
+      scored.push({ item: { label: title, detail: dir }, score });
+      if (needle.length === 0 && scored.length >= 40) {
         break;
       }
     }
-    return items;
+    if (needle.length > 0) {
+      scored.sort((a, b) => b.score - a.score);
+    }
+    return scored.slice(0, 40).map((entry) => entry.item);
   }, []);
 
   const openLink = useCallback((target: string) => {
@@ -1014,6 +1183,17 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       useUiStore.getState().pushToast({ kind: 'info', text: `Заметка «${target}» пока не найдена` });
     }
   }, []);
+
+  // «Связать заметку» из палитры и глобального хоткея: фокусируем редактор и
+  // открываем пикер; внутри самого редактора Ctrl+L обрабатывает CodeMirror.
+  useActionHandler('editor.linkNote', () => {
+    const handle = editorRef.current;
+    if (handle === null || handle.view.state.readOnly || useUiStore.getState().readingMode) {
+      return;
+    }
+    handle.focus();
+    openWikiLinkPicker(handle.view);
+  });
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1050,9 +1230,11 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
           dirtyRef.current = true;
           setDirty(tabId, true);
           scheduleSave();
+          useEditorViewsStore.getState().bumpDocVersion();
         },
       });
       editorRef.current = handle;
+      useEditorViewsStore.getState().register(tabId, noteRef, handle.view);
       if (!useUiStore.getState().readingMode) {
         handle.focus();
       }
@@ -1062,6 +1244,13 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       baseRevRef.current = '';
       setLoaded(true);
       mount(WELCOME_DOC, true);
+    } else if (initialDoc !== undefined) {
+      // Виргинальный буфер: файла на диске ещё нет, поэтому не читаем его.
+      // Первый ввод уйдёт через persist с пустым baseRev — buffer_save создаст
+      // файл вместе с недостающими папками.
+      baseRevRef.current = '';
+      setLoaded(true);
+      mount(initialDoc);
     } else {
       const prior = pendingSaves.get(noteRef);
       Promise.resolve(prior)
@@ -1092,10 +1281,11 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       disposed = true;
       flushSave();
       setMenu(null);
+      useEditorViewsStore.getState().unregister(tabId);
       editorRef.current?.destroy();
       editorRef.current = null;
     };
-  }, [tabId, noteRef, isWelcome, linkSource, scheduleSave, flushSave, setDirty]);
+  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, scheduleSave, flushSave, setDirty]);
 
   useEffect(() => {
     if (readingMode) {
@@ -1309,6 +1499,7 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
       docRef.current = next;
       setDocText(next);
       editorRef.current?.setDoc(next);
+      useEditorViewsStore.getState().bumpDocVersion();
       if (!isWelcome) {
         dirtyRef.current = true;
         setDirty(tabId, true);
@@ -1342,7 +1533,11 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
   }, []);
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col" onContextMenu={handleContextMenu}>
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      style={selectionStyle}
+      onContextMenu={handleContextMenu}
+    >
       <div
         ref={hostRef}
         className="min-h-0 flex-1 overflow-hidden"
@@ -1414,6 +1609,9 @@ export function EditorPane({ tabId, noteRef }: EditorPaneProps) {
             )}
           </button>
         </Tooltip>
+        <div className="pointer-events-auto">
+          <ExportMenu noteRef={noteRef} />
+        </div>
         <div className="pointer-events-auto">
           <CopyPageButton noteRef={noteRef} />
         </div>

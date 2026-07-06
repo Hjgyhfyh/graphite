@@ -16,16 +16,22 @@ export const graphiteDark = EditorView.theme(
       lineHeight: '26px',
       justifyContent: 'center',
     },
+    // Раскладка метрик: вертикальные поля — на .cm-content, горизонтальные — на
+    // .cm-line. drawSelection компенсирует только padding строк, поэтому боковые
+    // поля на контенте растягивали бы выделение за пределы текста; вертикальные
+    // margin здесь запрещены совсем — карта высот меряет border-box.
     '.cm-content': {
       maxWidth: 'calc(72ch + 48px)',
       minWidth: '0',
       flexGrow: '1',
       flexShrink: '1',
-      padding: '48px 24px 96px',
+      padding: '48px 0 96px',
+      fontSize: '15.5px',
+      lineHeight: '26px',
       caretColor: 'var(--accent)',
     },
     '.cm-line': {
-      padding: '0 2px',
+      padding: '0 24px',
     },
     '.cm-cursor, .cm-dropCursor': {
       borderLeft: '2px solid var(--accent)',
@@ -94,16 +100,62 @@ export const graphiteDark = EditorView.theme(
       color: 'var(--text-0)',
       overflow: 'hidden',
     },
+    '.cm-tooltip.cm-tooltip-autocomplete': {
+      padding: '4px',
+      backgroundColor: 'var(--bg-2)',
+      boxShadow: 'var(--sh-3)',
+      animation: 'cm-gr-pop-in 140ms cubic-bezier(0.22, 1, 0.36, 1) both',
+      transformOrigin: 'top left',
+    },
+    '.cm-tooltip-above.cm-tooltip-autocomplete': {
+      transformOrigin: 'bottom left',
+    },
     '.cm-tooltip.cm-tooltip-autocomplete > ul': {
       fontFamily: 'var(--font-ui, system-ui, sans-serif)',
+      minWidth: '236px',
+      maxWidth: '360px',
+      maxHeight: '264px',
     },
     '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
-      padding: '3px 8px',
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: '10px',
+      padding: '5px 9px',
+      borderRadius: 'var(--r-xs, 6px)',
+      fontSize: '13px',
+      lineHeight: '18px',
       color: 'var(--text-1)',
+      transition: 'background-color 80ms var(--ease-out), color 80ms var(--ease-out)',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li:hover': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 6%, transparent)',
     },
     '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-      backgroundColor: 'var(--bg-3)',
+      backgroundColor: 'color-mix(in srgb, var(--accent) 12%, transparent)',
       color: 'var(--text-0)',
+    },
+    '.cm-completionLabel': {
+      flex: '0 1 auto',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    '.cm-completionDetail': {
+      marginLeft: 'auto',
+      flexShrink: '0',
+      maxWidth: '45%',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontStyle: 'normal',
+      fontSize: '10.5px',
+      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      color: 'var(--text-3)',
+    },
+    '.cm-completionMatchedText': {
+      textDecoration: 'none',
+      color: 'var(--accent)',
+      fontWeight: '600',
     },
     '.cm-placeholder': {
       color: 'var(--text-2)',
@@ -133,18 +185,27 @@ export const graphiteDark = EditorView.theme(
     },
     '.cm-gr-h4': {
       fontSize: '16px',
-      lineHeight: '24px',
+      lineHeight: '26px',
       fontWeight: '600',
       color: 'var(--text-1)',
     },
     '.cm-gr-h5': {
       fontSize: '15.5px',
+      lineHeight: '26px',
       fontWeight: '600',
       color: 'var(--text-2)',
     },
     '.cm-gr-h6': {
       fontSize: '15.5px',
+      lineHeight: '26px',
       fontWeight: '600',
+      color: 'var(--text-2)',
+    },
+    // Объявлен до .cm-gr-mark: тильды внутри зачёркивания остаются приглушёнными.
+    '.cm-gr-strike': {
+      textDecoration: 'line-through',
+      textDecorationColor: 'var(--text-3)',
+      textDecorationThickness: '1px',
       color: 'var(--text-2)',
     },
     '.cm-gr-mark': {
@@ -173,24 +234,89 @@ export const graphiteDark = EditorView.theme(
     '.cm-gr-list-mark': {
       color: 'var(--accent)',
     },
+    // Вертикальная планка цитаты — через ::before: границы строки начинаются
+    // за 24px до колонки текста, а border-left рисовался бы по краю строки.
     '.cm-gr-quote': {
-      borderLeft: '2px solid var(--stroke-1)',
-      paddingLeft: '14px',
+      position: 'relative',
+      paddingLeft: '38px',
       color: 'var(--text-1)',
       fontStyle: 'italic',
+    },
+    '.cm-gr-quote::before': {
+      content: '""',
+      position: 'absolute',
+      left: '24px',
+      top: '0',
+      bottom: '0',
+      width: '2px',
+      borderRadius: '2px',
+      backgroundColor: 'var(--stroke-1)',
     },
     '.cm-gr-fence': {
       fontFamily: 'var(--font-mono, ui-monospace, monospace)',
       fontSize: '13.5px',
       lineHeight: '22px',
-      backgroundColor: 'var(--bg-1)',
+      backgroundColor: 'var(--bg-2)',
       color: 'var(--text-1)',
+    },
+    '.cm-gr-fence-open': {
+      position: 'relative',
+      paddingTop: '8px',
+      borderTopLeftRadius: 'var(--r-s, 10px)',
+      borderTopRightRadius: 'var(--r-s, 10px)',
+    },
+    '.cm-gr-fence-close': {
+      paddingBottom: '8px',
+      borderBottomLeftRadius: 'var(--r-s, 10px)',
+      borderBottomRightRadius: 'var(--r-s, 10px)',
+    },
+    '.cm-gr-copy': {
+      position: 'absolute',
+      top: '6px',
+      right: '10px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '24px',
+      height: '24px',
+      padding: '0',
+      border: '1px solid var(--stroke-1)',
+      borderRadius: 'var(--r-xs, 6px)',
+      backgroundColor: 'var(--bg-3)',
+      color: 'var(--text-1)',
+      cursor: 'pointer',
+      opacity: '0',
+      pointerEvents: 'none',
+      transform: 'translateY(-2px)',
+      transition:
+        'opacity 140ms var(--ease-out), transform 140ms var(--ease-out), background-color 120ms var(--ease-out), color 120ms var(--ease-out), border-color 120ms var(--ease-out)',
+    },
+    '.cm-gr-fence-open:hover .cm-gr-copy, .cm-gr-copy.cm-gr-copy-done': {
+      opacity: '1',
+      pointerEvents: 'auto',
+      transform: 'translateY(0)',
+    },
+    '.cm-gr-copy:hover': {
+      backgroundColor: 'var(--bg-4)',
+      color: 'var(--text-0)',
+    },
+    '.cm-gr-copy:active': {
+      transform: 'scale(0.94)',
+    },
+    // Свежая иконка при подмене innerHTML (копия ↔ галочка) въезжает «пыхом».
+    '.cm-gr-copy svg': {
+      animation: 'cm-gr-icon-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both',
+    },
+    '.cm-gr-copy-done': {
+      color: 'var(--ok)',
+      borderColor: 'color-mix(in srgb, var(--ok) 45%, transparent)',
     },
     '.cm-gr-hr': {
       position: 'relative',
       color: 'var(--text-3)',
     },
     '.cm-gr-frontmatter': {
+      position: 'relative',
       fontFamily: 'var(--font-mono, ui-monospace, monospace)',
       fontSize: '12px',
       lineHeight: '19px',
@@ -199,15 +325,28 @@ export const graphiteDark = EditorView.theme(
       letterSpacing: '0',
       color: 'var(--text-2)',
       backgroundColor: 'color-mix(in srgb, var(--bg-2) 55%, transparent)',
-      boxShadow: 'inset 2px 0 0 0 var(--stroke-1)',
-      paddingLeft: '12px',
+      paddingLeft: '36px',
+    },
+    '.cm-gr-frontmatter::before': {
+      content: '""',
+      position: 'absolute',
+      left: '24px',
+      top: '0',
+      bottom: '0',
+      width: '2px',
+      backgroundColor: 'var(--stroke-1)',
+    },
+    // Отбивка капсулы — padding обёртки, не margin: margin блочного виджета не
+    // попадает в карту высот CodeMirror и смещает попадание кликов ниже по тексту.
+    '.cm-gr-fm-wrap': {
+      padding: '0 24px 14px',
     },
     '.cm-gr-fm-capsule': {
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
       width: '100%',
-      margin: '0 0 14px',
+      margin: '0',
       padding: '8px 12px',
       backgroundColor: 'var(--bg-1)',
       border: '1px solid var(--stroke-0)',
@@ -413,13 +552,21 @@ export const graphiteDark = EditorView.theme(
       from: { backgroundColor: 'var(--ai-dim)' },
       to: { backgroundColor: 'transparent' },
     },
-    '[data-reduced-motion="true"] & .cm-gr-fm-capsule, [data-reduced-motion="true"] & .cm-gr-upload, [data-reduced-motion="true"] & .cm-gr-img-el, [data-reduced-motion="true"] & .cm-gr-img-shimmer':
+    '[data-reduced-motion="true"] & .cm-gr-fm-capsule, [data-reduced-motion="true"] & .cm-gr-upload, [data-reduced-motion="true"] & .cm-gr-img-el, [data-reduced-motion="true"] & .cm-gr-img-shimmer, [data-reduced-motion="true"] & .cm-tooltip-autocomplete, [data-reduced-motion="true"] & .cm-gr-copy svg':
       {
         animation: 'none',
       },
     '@keyframes cm-gr-spin': {
       from: { transform: 'rotate(0deg)' },
       to: { transform: 'rotate(360deg)' },
+    },
+    '@keyframes cm-gr-icon-in': {
+      from: { opacity: '0', transform: 'scale(0.55)' },
+      to: { opacity: '1', transform: 'scale(1)' },
+    },
+    '@keyframes cm-gr-pop-in': {
+      from: { opacity: '0', transform: 'translateY(-3px) scale(0.98)' },
+      to: { opacity: '1', transform: 'translateY(0) scale(1)' },
     },
     '@keyframes cm-gr-rise-in': {
       from: { opacity: '0', transform: 'translateY(3px)' },

@@ -10,8 +10,10 @@ import type {
   TreeNode,
   VaultInfoResponse,
 } from '@graphite/bindings';
+import { useNavStore } from './navStore';
 import { useTabsStore } from './tabsStore';
 import { useUiStore } from './uiStore';
+import { useVaultsStore } from './vaultsStore';
 
 export interface NoteIconInfo {
   icon?: string;
@@ -217,16 +219,19 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   openVault: async (path) => {
     const info = await commands.vaultOpen(path);
     set({ info });
+    useVaultsStore.getState().remember(info.root);
     await get().loadTree();
   },
   createVault: async (path) => {
     const info = await commands.vaultCreate(path);
     set({ info });
+    useVaultsStore.getState().remember(info.root);
     await get().loadTree();
   },
   openNote: (ref) => {
     useTabsStore.getState().open(ref);
     set({ currentRef: ref });
+    useNavStore.getState().record(ref);
   },
   flashNote: (ref) => {
     set({ currentRef: ref });
@@ -337,6 +342,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       const result = await commands.noteRename({ ref, newTitle: title });
       const nextRef = refFromPath(result.pathNew);
       useTabsStore.getState().remapRef(ref, { ref: nextRef, title });
+      useNavStore.getState().remap(ref, nextRef);
       set((s) => ({ currentRef: s.currentRef === ref ? nextRef : s.currentRef }));
       await get().loadTree();
     } catch (error) {
@@ -349,6 +355,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       for (const tab of useTabsStore.getState().tabs.filter((t) => t.noteRef === ref)) {
         useTabsStore.getState().close(tab.id);
       }
+      useNavStore.getState().drop(ref);
       set((s) => ({ currentRef: s.currentRef === ref ? undefined : s.currentRef }));
       await get().loadTree();
       void get().loadInfo();
@@ -377,6 +384,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       const nextRef = refFromPath(result.pathNew);
       const title = useTabsStore.getState().tabs.find((t) => t.noteRef === ref)?.title ?? '';
       useTabsStore.getState().remapRef(ref, { ref: nextRef, title });
+      useNavStore.getState().remap(ref, nextRef);
       set((s) => ({ currentRef: s.currentRef === ref ? nextRef : s.currentRef }));
       await get().loadTree();
     } catch (error) {
