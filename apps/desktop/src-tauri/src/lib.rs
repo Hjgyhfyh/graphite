@@ -256,7 +256,7 @@ fn journal_external_event(
     let op = vault_core::JournalOp {
         op_id: ulid::Ulid::new().to_string(),
         ts: vault_core::writer::now_iso_utc(),
-        actor: Actor::External,
+        actor: vault_core::Actor::External,
         session: None,
         tool: None,
         summary,
