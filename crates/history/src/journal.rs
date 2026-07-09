@@ -101,6 +101,24 @@ pub fn read_op(journal_dir: &Path, op_id: &str) -> Result<JournalOp, HistoryErro
     found.ok_or_else(|| HistoryError::NotFound(format!("journal op {op_id}")))
 }
 
+/// Последний известный `after`-хэш файла по журналу (`blake3:<64hex>`): свежайшая
+/// операция, затронувшая ровно этот путь, и её состояние файла после мутации.
+/// Используется как `before`-хэш при фиксации внешней правки — так undo такой
+/// правки находит своё исходное содержимое в объектном хранилище. Нет записей по
+/// пути или последняя оставила файл отсутствующим (`after: None`) → `None`.
+pub fn last_after_for_path(journal_dir: &Path, path: &str) -> Option<String> {
+    let mut found = None;
+    let _ = scan_ops(journal_dir, None, |op| {
+        if let Some(change) = op.files.iter().find(|c| c.path == path) {
+            found = change.after.clone();
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    found
+}
+
 /// Все операции сессии, новые первыми.
 pub fn read_session_ops(journal_dir: &Path, session: &str) -> Result<Vec<JournalOp>, HistoryError> {
     let mut out = Vec::new();

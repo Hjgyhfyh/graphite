@@ -33,6 +33,7 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 ulid = { workspace = true }
 base64 = { workspace = true }
+chrono = { workspace = true }
 vault-core = { path = "../../../crates/vault-core" }
 history = { path = "../../../crates/history" }
 rpc = { path = "../../../crates/rpc" }

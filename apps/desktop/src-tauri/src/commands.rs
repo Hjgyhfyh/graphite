@@ -1234,6 +1234,21 @@ pub fn detect_claude_cli() -> Result<ClaudeCliInfo, GraphiteError> {
     })
 }
 
+fn thought_title() -> String {
+    use chrono::{Datelike, Timelike};
+    let months = [
+        "янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек",
+    ];
+    let now = chrono::Local::now();
+    format!(
+        "Мысль · {} {} {:02}:{:02}",
+        now.day(),
+        months[now.month0() as usize],
+        now.hour(),
+        now.minute()
+    )
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> {
@@ -1247,8 +1262,8 @@ pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> 
         .unwrap_or("Быстрая заметка")
         .trim_start_matches(['#', '-', '*', ' '])
         .trim();
-    let title: String = if first.is_empty() {
-        "Быстрая заметка".to_string()
+    let title: String = if first.chars().count() < 2 {
+        thought_title()
     } else {
         first.chars().take(60).collect()
     };

@@ -6,8 +6,8 @@ pub mod undo;
 
 pub use error::HistoryError;
 pub use journal::{
-    activity, append_op, mark_undone, new_op_id, now_ts, read_op, read_ops, read_session_ops,
-    JournalFilter,
+    activity, append_op, last_after_for_path, mark_undone, new_op_id, now_ts, read_op, read_ops,
+    read_session_ops, JournalFilter,
 };
 pub use model::{Actor, FileChange, JournalOp};
 pub use snapshot::{hash_hex, labeled_hash};

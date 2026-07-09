@@ -57,10 +57,42 @@ export function CaptureApp() {
     let unlisten: (() => void) | undefined;
     void getCurrentWindow()
       .listen('capture-shown', () => {
-        setText('');
         setError(null);
         setSaving(false);
         requestAnimationFrame(focusInput);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [focusInput]);
+
+  // Окно принимает ввод сразу после set_focus() на нативной стороне, ещё до
+  // прихода 'capture-shown': держим textarea сфокусированной на каждом фокусе
+  // окна, а поле чистим только когда окно реально скрылось (Esc, сохранение,
+  // закрытие) — блюр видимого окна оставляет черновик на месте.
+  useEffect(() => {
+    if (!isTauriAvailable()) {
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) {
+          requestAnimationFrame(focusInput);
+        } else {
+          void getCurrentWindow()
+            .isVisible()
+            .then((visible) => {
+              if (!visible) {
+                setText('');
+                setError(null);
+                setSaving(false);
+              }
+            });
+        }
       })
       .then((fn) => {
         unlisten = fn;
@@ -91,6 +123,8 @@ export function CaptureApp() {
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
+      setText('');
+      setError(null);
       void hideSelfWindow();
     } else if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -119,7 +153,6 @@ export function CaptureApp() {
           ref={textareaRef}
           autoFocus
           value={text}
-          readOnly={saving}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
           aria-label="Текст быстрой записи"

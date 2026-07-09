@@ -172,6 +172,122 @@ fn register_global_shortcut(app: &tauri::AppHandle) {
     }
 }
 
+/// Кап на снапшот внешней правки: файлы крупнее в объектное хранилище не кладём
+/// (журнал всё равно фиксирует событие), чтобы редкий гигантский .md не раздувал
+/// историю.
+const EXTERNAL_SNAPSHOT_CAP: u64 = 5 * 1024 * 1024;
+
+/// Фиксирует внешнее изменение файла в истории (журнал + объектное хранилище),
+/// повторяя путь ядра для собственных правок. `before`-хэш берётся из журнала
+/// (последний известный `after` этого пути) — для правки/удаления/переноса это
+/// исходное содержимое, чей снапшот уже лежит в хранилище, поэтому undo такой
+/// операции восстанавливает файл; для нового файла `before` нет (первая фиксация
+/// заводит цепочку). Всё best-effort: вернёт записанную операцию для рассылки в
+/// ленту либо `None`, если журнал не удалось дописать — реиндекс это не срывает.
+fn journal_external_event(
+    root: &Path,
+    event: &vault_core::watcher::WatchEvent,
+) -> Option<vault_core::JournalOp> {
+    use vault_core::watcher::WatchEventKind;
+
+    let journal_dir = vault_core::vault::history::journal_dir(root);
+    let path = event.path.clone();
+
+    // `after`-хэш свежих байт файла на диске и решение, класть ли снапшот: только
+    // для существующих файлов в пределах капа. Ошибку чтения трактуем как «файла
+    // нет» — событие всё равно попадёт в журнал (для истории), просто без after.
+    let read_after = |rel: &str| -> (Option<String>, bool) {
+        let Ok(abs) = vault_core::writer::vault_abs_path(root, rel) else {
+            return (None, false);
+        };
+        let too_big = std::fs::metadata(&abs).map(|m| m.len() > EXTERNAL_SNAPSHOT_CAP).unwrap_or(false);
+        if too_big {
+            return match std::fs::read(&abs) {
+                Ok(bytes) => (Some(::history::snapshot::labeled_hash(&bytes)), false),
+                Err(_) => (None, false),
+            };
+        }
+        match std::fs::read(&abs) {
+            Ok(bytes) => (Some(::history::snapshot::labeled_hash(&bytes)), true),
+            Err(_) => (None, false),
+        }
+    };
+
+    let (summary, files, snapshot_after) = match &event.kind {
+        WatchEventKind::Created => {
+            let (after, snap) = read_after(&path);
+            (
+                format!("Внешнее создание: {path}"),
+                vec![vault_core::FileChange { path: path.clone(), before: None, after }],
+                snap,
+            )
+        }
+        WatchEventKind::Modified => {
+            let before = ::history::last_after_for_path(&journal_dir, &path);
+            let (after, snap) = read_after(&path);
+            (
+                format!("Внешнее изменение: {path}"),
+                vec![vault_core::FileChange { path: path.clone(), before, after }],
+                snap,
+            )
+        }
+        WatchEventKind::Removed => {
+            let before = ::history::last_after_for_path(&journal_dir, &path);
+            (
+                format!("Внешнее удаление: {path}"),
+                vec![vault_core::FileChange { path: path.clone(), before, after: None }],
+                false,
+            )
+        }
+        WatchEventKind::Moved { from } => {
+            let before_from = ::history::last_after_for_path(&journal_dir, from);
+            let (after, snap) = read_after(&path);
+            (
+                format!("Внешний перенос: {from} → {path}"),
+                vec![
+                    vault_core::FileChange { path: from.clone(), before: before_from, after: None },
+                    vault_core::FileChange { path: path.clone(), before: None, after },
+                ],
+                snap,
+            )
+        }
+    };
+
+    let op = vault_core::JournalOp {
+        op_id: ulid::Ulid::new().to_string(),
+        ts: vault_core::writer::now_iso_utc(),
+        actor: Actor::External,
+        session: None,
+        tool: None,
+        summary,
+        files,
+        undone: false,
+    };
+
+    // `record` дописывает журнал и кладёт after-снапшоты присутствующих файлов;
+    // для крупных/удалённых/перенесённых-источников снапшот не нужен, тогда пишем
+    // только журнал через `append_op`.
+    let recorded = if snapshot_after {
+        vault_core::vault::history::record(root, &op).is_ok()
+    } else {
+        ::history::append_op(&journal_dir, &op).is_ok()
+    };
+    if recorded {
+        Some(op)
+    } else {
+        None
+    }
+}
+
+/// Рассылает операцию журнала в ленту активности (`journal_op`), как это делает
+/// ядро после собственных мутаций. Форма serde у dto и канонического типа
+/// совпадает (CONTRACT §2), поэтому конвертация — round-trip через serde_json.
+fn emit_journal_op(app: &tauri::AppHandle, op: &vault_core::JournalOp) {
+    if let Ok(dto_op) = serde_json::to_value(op).and_then(serde_json::from_value::<dto::JournalOp>) {
+        let _ = app.emit("journal_op", events::JournalOpEvent { op: dto_op });
+    }
+}
+
 /// Запускает наблюдение за смонтированным vault и транслирует изменения в
 /// событие `note_changed`. Свои записи гасятся общим эхо-набором писателя.
 fn start_vault_watcher(
@@ -184,8 +300,14 @@ fn start_vault_watcher(
     vault_core::watcher::start(root, echo, move |events| {
         for event in events {
             let path = event.path.clone();
-            // Внешняя правка (свои записи echo уже отфильтровал) должна попасть в
-            // индекс, иначе поиск/задачи/связи по ней остаются устаревшими.
+            // Корень ядра под коротким локом — journaling ниже работает с ним без
+            // удержания мьютекса (трогает только .graphite/history и .graphite/journal).
+            let root = commands::lock_core().as_ref().map(|s| s.root.clone());
+            // Внешнее изменение (свои записи echo уже отфильтровал) фиксируем в
+            // истории ДО реиндекса: иначе OneDrive-синк/прямые правки .md/любой
+            // внешний редактор в таймлайн не попадают и откатить их нечем.
+            let journaled = root.as_ref().and_then(|root| journal_external_event(root, &event));
+            // …и в индекс, иначе поиск/задачи/связи по правке остаются устаревшими.
             {
                 let mut guard = commands::lock_core();
                 if let Some(state) = guard.as_mut() {
@@ -221,6 +343,9 @@ fn start_vault_watcher(
                 from,
             };
             let _ = app.emit("note_changed", payload);
+            if let Some(op) = &journaled {
+                emit_journal_op(&app, op);
+            }
         }
     })
 }
