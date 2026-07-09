@@ -12,6 +12,7 @@ import type {
   UiFlashNoteEvent,
   UiOpenNoteEvent,
 } from '@graphite/bindings';
+import { BriefView } from '../components/brief/BriefView';
 import { CommandPalette } from '../components/palette/CommandPalette';
 import { QuickSwitcher } from '../components/palette/QuickSwitcher';
 import { FloatingCapture } from '../components/capture/FloatingCapture';
@@ -231,6 +232,9 @@ function CenterView() {
   } else if (railView === 'tasks') {
     viewKey = 'tasks';
     view = <TasksView />;
+  } else if (railView === 'brief') {
+    viewKey = 'brief';
+    view = <BriefView />;
   } else if (railView === 'plan') {
     viewKey = 'plan';
     view = <KanbanView />;

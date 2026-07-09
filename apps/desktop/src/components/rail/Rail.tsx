@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   Search,
   Settings,
+  Sparkles,
   SquareKanban,
   Tag,
   X,
@@ -27,6 +28,7 @@ import {
   reducedFadeVariants,
   usePrefersReducedMotion,
 } from '../../motion';
+import { openBriefView } from '../../stores/briefStore';
 import { useUiStore } from '../../stores/uiStore';
 import type { RailView } from '../../stores/uiStore';
 import { forgetVault, pickVaultFolder, switchVault } from '../../stores/vaultActions';
@@ -43,6 +45,7 @@ const MAIN_ITEMS: readonly RailItem[] = [
   { view: 'tree', label: 'Заметки', icon: FileText },
   { view: 'search', label: 'Поиск', icon: Search },
   { view: 'tasks', label: 'Задачи', icon: ListChecks },
+  { view: 'brief', label: 'Бриф для Claude', icon: Sparkles },
   { view: 'plan', label: 'Канбан — скоро', icon: SquareKanban },
   { view: 'graph', label: 'Граф связей', icon: Network },
   { view: 'daily', label: 'Дневник', icon: CalendarDays },
@@ -250,6 +253,10 @@ export function Rail() {
   const sidebarShown = sidebarView && !sidebarHidden;
 
   const selectView = (view: RailView) => {
+    if (view === 'brief') {
+      openBriefView();
+      return;
+    }
     setRailView(view);
     if (view === 'tree' || view === 'search') {
       setSidebarHidden(false);

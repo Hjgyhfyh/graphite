@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { exportNoteHtml, exportNoteMarkdown, printNote } from '../lib/exportNote';
+import { openBriefView } from '../stores/briefStore';
 import type { ActionId } from '../stores/keybindingsStore';
 import { useKeybindingsStore } from '../stores/keybindingsStore';
 import { useNavStore } from '../stores/navStore';
@@ -19,6 +20,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'search.global',
   'settings.open',
   'view.tasks',
+  'view.brief',
   'sidebar.toggleTree',
   'sidebar.toggleRight',
   'aiFeed.toggle',
@@ -125,6 +127,9 @@ function runBuiltin(id: ActionId): boolean {
     case 'view.tasks':
       ui.setRailView('tasks');
       ui.setSidebarHidden(false);
+      return true;
+    case 'view.brief':
+      openBriefView();
       return true;
     case 'settings.open':
       ui.setRailView('settings');

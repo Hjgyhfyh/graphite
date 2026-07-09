@@ -17,7 +17,7 @@ export const ANIMATION_SPEED_DEFAULT = 1;
 
 const TOAST_DURATION_MS = 4000;
 
-export type RailView = 'tree' | 'search' | 'tasks' | 'plan' | 'graph' | 'daily' | 'tags' | 'settings';
+export type RailView = 'tree' | 'search' | 'tasks' | 'brief' | 'plan' | 'graph' | 'daily' | 'tags' | 'settings';
 export type RightPanelTab = 'properties' | 'aiFeed' | 'links' | 'backlinks' | 'outline';
 
 export interface ToastAction {

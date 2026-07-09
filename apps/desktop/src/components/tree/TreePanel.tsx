@@ -742,6 +742,9 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       .onDragDropEvent((event) => {
         const payload = event.payload;
         if (payload.type === 'enter') {
+          if (useUiStore.getState().railView === 'brief') {
+            return;
+          }
           if (payload.paths.length > 0) {
             setDropCount(payload.paths.length);
           }
@@ -749,6 +752,9 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
           setDropCount(undefined);
         } else if (payload.type === 'drop') {
           setDropCount(undefined);
+          if (useUiStore.getState().railView === 'brief') {
+            return;
+          }
           if (payload.paths.length > 0) {
             void useVaultStore.getState().addPathNotes(payload.paths);
           }
