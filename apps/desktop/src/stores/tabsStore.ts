@@ -243,7 +243,13 @@ export const useTabsStore = create<TabsStore>()((set, get) => ({
     panes.setActivePane(tab.paneId);
   },
   setDirty: (id, dirty) => {
-    set((s) => ({ tabs: s.tabs.map((tab) => (tab.id === id ? { ...tab, dirty } : tab)) }));
+    set((s) => {
+      const current = s.tabs.find((tab) => tab.id === id);
+      if (current === undefined || current.dirty === dirty) {
+        return s;
+      }
+      return { tabs: s.tabs.map((tab) => (tab.id === id ? { ...tab, dirty } : tab)) };
+    });
   },
   remapRef: (oldRef, next) => {
     const oldDir = folderDir(oldRef);

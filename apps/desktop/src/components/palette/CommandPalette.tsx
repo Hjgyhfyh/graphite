@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Command } from 'cmdk';
 import { motion } from 'motion/react';
 import {
@@ -224,18 +224,34 @@ export function CommandPalette() {
     };
   }, [query, open]);
 
-  const trimmed = query.trim();
+  // Отложенный запрос уводит O(N) fold+fuzzy по дереву с критического пути ввода:
+  // Command.Input остаётся на живом query, а тяжёлый матчинг и все производные от
+  // него флаги считаются от dq — так список и «Создать «{…}»» согласованы.
+  const dq = useDeferredValue(query);
+  const trimmed = dq.trim();
   const hasQuery = trimmed.length > 0;
-  const commandMatches = ACTIONS.filter((action) => action.id !== 'palette.open' && matches(query, action.title, action.group));
-  const backupMatches = BACKUP_ACTIONS.filter((action) => matches(query, action.title));
   const activeVaultKey = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
-  const vaultMatches = knownVaults.filter((vault) => matches(query, vault.name, vault.path));
-  const vaultActionMatches = VAULT_ACTIONS.filter((action) => matches(query, action.title));
-  const noteMatches = hasQuery
-    ? tree.filter((node) => matches(query, node.title, node.path)).slice(0, 8)
-    : [...tree].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 8);
-  const noteRefs = new Set(noteMatches.map((node) => node.ref));
-  const ftUnique = ftHits.filter((hit) => !noteRefs.has(hit.ref));
+  const commandMatches = useMemo(
+    () => ACTIONS.filter((action) => action.id !== 'palette.open' && matches(dq, action.title, action.group)),
+    [dq],
+  );
+  const backupMatches = useMemo(() => BACKUP_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);
+  const vaultMatches = useMemo(
+    () => knownVaults.filter((vault) => matches(dq, vault.name, vault.path)),
+    [dq, knownVaults],
+  );
+  const vaultActionMatches = useMemo(() => VAULT_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);
+  const noteMatches = useMemo(
+    () =>
+      hasQuery
+        ? tree.filter((node) => matches(dq, node.title, node.path)).slice(0, 8)
+        : [...tree].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 8),
+    [dq, hasQuery, tree],
+  );
+  const ftUnique = useMemo(() => {
+    const noteRefs = new Set(noteMatches.map((node) => node.ref));
+    return ftHits.filter((hit) => !noteRefs.has(hit.ref));
+  }, [noteMatches, ftHits]);
 
   return (
     <Presence>

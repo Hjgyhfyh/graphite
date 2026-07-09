@@ -18,12 +18,16 @@ const ALPHA_MIN = 0.012;
 const ALPHA_DECAY = 0.986;
 const REPULSION = 1050;
 const REPULSION_CUTOFF = 250;
+const GRID_MIN_NODES = 151;
+const GRID_KEY_OFFSET = 32768;
+const GRID_KEY_STRIDE = 65536;
 const CENTER_PULL = 0.02;
 const FRICTION = 0.72;
 const MAX_SPEED = 16;
 const LABEL_MIN_R = 4.6;
 const LABEL_FULL_R = 7.5;
 const AMBIENT_LABEL_CAP = 140;
+const GLOW_CLUSTER_CAP = 24;
 const SETTLE_TICKS_MAX = 600;
 const PREWARM_TICKS = 60;
 const CLICK_SLOP_PX = 4;
@@ -88,6 +92,8 @@ interface Engine {
   h: number;
   dpr: number;
   theme: ThemeColors;
+  gridBuckets: Map<number, number[]>;
+  gridScratch: number[];
 }
 
 type DragState =
@@ -178,6 +184,8 @@ function createEngine(): Engine {
     h: 1,
     dpr: 1,
     theme: readTheme(),
+    gridBuckets: new Map(),
+    gridScratch: [],
   };
 }
 
@@ -208,33 +216,106 @@ function simTick(e: Engine): void {
 
   const n = nodes.length;
   const cutoff2 = REPULSION_CUTOFF * REPULSION_CUTOFF;
-  for (let i = 0; i < n; i += 1) {
-    const a = nodes[i];
-    for (let j = i + 1; j < n; j += 1) {
-      const b = nodes[j];
-      let dx = b.x - a.x;
-      let dy = b.y - a.y;
-      let d2 = dx * dx + dy * dy;
-      if (d2 >= cutoff2) {
+  if (n < GRID_MIN_NODES) {
+    for (let i = 0; i < n; i += 1) {
+      const a = nodes[i];
+      for (let j = i + 1; j < n; j += 1) {
+        const b = nodes[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 >= cutoff2) {
+          continue;
+        }
+        if (d2 < 0.01) {
+          dx = (((i + j) % 7) - 3) * 0.17 + 0.05;
+          dy = (((i * 31 + j) % 5) - 2) * 0.17 + 0.05;
+          d2 = dx * dx + dy * dy;
+        }
+        const d = Math.sqrt(d2);
+        const minDist = a.r + b.r + 5;
+        let f = (REPULSION * alpha) / d2;
+        if (d < minDist) {
+          f += ((minDist - d) / d) * 0.45;
+        }
+        const fx = dx * f;
+        const fy = dy * f;
+        a.vx -= fx;
+        a.vy -= fy;
+        b.vx += fx;
+        b.vy += fy;
+      }
+    }
+  } else {
+    const buckets = e.gridBuckets;
+    for (const bucket of buckets.values()) {
+      bucket.length = 0;
+    }
+    const inv = 1 / REPULSION_CUTOFF;
+    for (let i = 0; i < n; i += 1) {
+      const nd = nodes[i];
+      const cxi = Math.floor(nd.x * inv) + GRID_KEY_OFFSET;
+      const cyi = Math.floor(nd.y * inv) + GRID_KEY_OFFSET;
+      const key = cyi * GRID_KEY_STRIDE + cxi;
+      let bucket = buckets.get(key);
+      if (bucket === undefined) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push(i);
+    }
+    const scratch = e.gridScratch;
+    for (let i = 0; i < n; i += 1) {
+      const a = nodes[i];
+      const cxi = Math.floor(a.x * inv) + GRID_KEY_OFFSET;
+      const cyi = Math.floor(a.y * inv) + GRID_KEY_OFFSET;
+      scratch.length = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        const rowKey = (cyi + oy) * GRID_KEY_STRIDE;
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const bucket = buckets.get(rowKey + cxi + ox);
+          if (bucket === undefined) {
+            continue;
+          }
+          for (let bi = 0; bi < bucket.length; bi += 1) {
+            const j = bucket[bi];
+            if (j > i) {
+              scratch.push(j);
+            }
+          }
+        }
+      }
+      if (scratch.length === 0) {
         continue;
       }
-      if (d2 < 0.01) {
-        dx = (((i + j) % 7) - 3) * 0.17 + 0.05;
-        dy = (((i * 31 + j) % 5) - 2) * 0.17 + 0.05;
-        d2 = dx * dx + dy * dy;
+      scratch.sort((p, q) => p - q);
+      for (let si = 0; si < scratch.length; si += 1) {
+        const j = scratch[si];
+        const b = nodes[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 >= cutoff2) {
+          continue;
+        }
+        if (d2 < 0.01) {
+          dx = (((i + j) % 7) - 3) * 0.17 + 0.05;
+          dy = (((i * 31 + j) % 5) - 2) * 0.17 + 0.05;
+          d2 = dx * dx + dy * dy;
+        }
+        const d = Math.sqrt(d2);
+        const minDist = a.r + b.r + 5;
+        let f = (REPULSION * alpha) / d2;
+        if (d < minDist) {
+          f += ((minDist - d) / d) * 0.45;
+        }
+        const fx = dx * f;
+        const fy = dy * f;
+        a.vx -= fx;
+        a.vy -= fy;
+        b.vx += fx;
+        b.vy += fy;
       }
-      const d = Math.sqrt(d2);
-      const minDist = a.r + b.r + 5;
-      let f = (REPULSION * alpha) / d2;
-      if (d < minDist) {
-        f += ((minDist - d) / d) * 0.45;
-      }
-      const fx = dx * f;
-      const fy = dy * f;
-      a.vx -= fx;
-      a.vy -= fy;
-      b.vx += fx;
-      b.vy += fy;
     }
   }
 
@@ -407,11 +488,13 @@ function drawScene(e: Engine, ctx: CanvasRenderingContext2D, labelsOn: boolean):
       ctx.fillStyle = theme.grid;
       const x0 = ((tx % step) + step) % step;
       const y0 = ((ty % step) + step) % step;
+      const dots = new Path2D();
       for (let gx = x0 - step; gx < w + step; gx += step) {
         for (let gy = y0 - step; gy < h + step; gy += step) {
-          ctx.fillRect(gx - 0.75, gy - 0.75, 1.5, 1.5);
+          dots.rect(gx - 0.75, gy - 0.75, 1.5, 1.5);
         }
       }
+      ctx.fill(dots);
     }
   }
 
@@ -421,6 +504,22 @@ function drawScene(e: Engine, ctx: CanvasRenderingContext2D, labelsOn: boolean):
   if (hover >= 0 && hover < nodes.length) {
     litSet = new Set(e.adjacency[hover]);
     litSet.add(hover);
+  }
+
+  // Свечение узлов кластера дорого (shadowBlur); на гигантских хабах ограничиваем его
+  // самыми крупными узлами кластера (order отсортирован по радиусу) плюс наведённым.
+  let glowSet: Set<number> | null = null;
+  if (litSet !== null && litSet.size > GLOW_CLUSTER_CAP) {
+    glowSet = new Set<number>();
+    if (hover >= 0) {
+      glowSet.add(hover);
+    }
+    for (let oi = e.order.length - 1; oi >= 0 && glowSet.size < GLOW_CLUSTER_CAP; oi -= 1) {
+      const idx = e.order[oi];
+      if (litSet.has(idx)) {
+        glowSet.add(idx);
+      }
+    }
   }
 
   // Рёбра: обычные одним батчем, рёбра ховер-кластера — акцентом поверх.
@@ -488,7 +587,7 @@ function drawScene(e: Engine, ctx: CanvasRenderingContext2D, labelsOn: boolean):
       sr *= 1 + 0.12 * dim;
     }
     ctx.globalAlpha = alpha;
-    if (litSet !== null && bright && dim > 0.03) {
+    if (litSet !== null && bright && dim > 0.03 && (glowSet === null || glowSet.has(i))) {
       ctx.shadowColor = nd.fill;
       ctx.shadowBlur = (hovered ? 20 : 11) * dim;
     }

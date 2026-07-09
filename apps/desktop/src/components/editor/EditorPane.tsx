@@ -1227,8 +1227,10 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
             return;
           }
           docRef.current = next;
-          dirtyRef.current = true;
-          setDirty(tabId, true);
+          if (!dirtyRef.current) {
+            dirtyRef.current = true;
+            setDirty(tabId, true);
+          }
           scheduleSave();
           useEditorViewsStore.getState().bumpDocVersion();
         },

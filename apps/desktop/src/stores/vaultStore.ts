@@ -200,7 +200,29 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
             pinnedNotes.add(node.ref);
           }
         }
-        return { tree: response.nodes, iconByRef, pinnedNotes };
+        // Полная перезагрузка от вотчера/автосейва часто приносит идентичный набор
+        // узлов. Сохраняем прежнюю ссылку tree, если ничего рендеримого не
+        // изменилось, — иначе каждый no-op пересобирает forest и все useMemo([tree]).
+        const same =
+          full &&
+          s.tree.length === response.nodes.length &&
+          response.nodes.every((n, i) => {
+            const p = s.tree[i];
+            return (
+              p !== undefined &&
+              p.ref === n.ref &&
+              p.path === n.path &&
+              p.title === n.title &&
+              p.type === n.type &&
+              p.status === n.status &&
+              p.childrenCount === n.childrenCount &&
+              p.updated === n.updated &&
+              p.icon === n.icon &&
+              p.iconColor === n.iconColor &&
+              p.pinned === n.pinned
+            );
+          });
+        return { tree: same ? s.tree : response.nodes, iconByRef, pinnedNotes };
       });
     } catch {
       if (seq === treeLoadSeq) {

@@ -126,7 +126,8 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
     syncActive();
     scroller.addEventListener('scroll', syncActive, { passive: true });
     return () => scroller.removeEventListener('scroll', syncActive);
-  }, [view, docVersion, headings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, headings]);
 
   const jumpTo = (heading: MdHeading) => {
     if (view === undefined) {

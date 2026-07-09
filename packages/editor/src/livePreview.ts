@@ -90,6 +90,7 @@ const FRONTMATTER_LINE = lineDeco('cm-gr-frontmatter');
 function buildDecorations(view: EditorView): DecorationSet {
   const items: Range<Decoration>[] = [];
   const doc = view.state.doc;
+  const tree = syntaxTree(view.state);
 
   const fmEnd = frontmatterEnd(doc);
 
@@ -120,7 +121,7 @@ function buildDecorations(view: EditorView): DecorationSet {
         line = doc.lineAt(line.to + 1);
       }
     }
-    syntaxTree(view.state).iterate({
+    tree.iterate({
       from,
       to,
       enter: (node) => {

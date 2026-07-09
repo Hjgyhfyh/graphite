@@ -170,7 +170,36 @@ export function QuickSwitcher() {
   const [query, setQuery] = useState('');
   const [holdMode, setHoldMode] = useState(false);
 
-  const items = useMemo(() => buildItems(query, tabs, tree, mru, iconByRef), [query, tabs, tree, mru, iconByRef]);
+  // Тяжёлый fold+fuzzy зависит от структуры вкладок, но НЕ от их dirty — иначе
+  // флип «не сохранено» на каждый кейстрок в редакторе гонял бы пересчёт всего
+  // списка. Ключ собираем без dirty; сами объекты читаем через ref для порядка.
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const tabKey = useMemo(
+    () =>
+      tabs
+        .map(
+          (t) =>
+            `${t.id}|${t.order}|${t.title}|${t.noteRef}|${t.kind}|${t.pinned ? 1 : 0}|${t.icon ?? ''}|${t.iconColor ?? ''}`,
+        )
+        .join('\u0000'),
+    [tabs],
+  );
+  const heavyItems = useMemo(
+    () => buildItems(query, tabsRef.current, tree, mru, iconByRef),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query, tabKey, tree, mru, iconByRef],
+  );
+  // Точку dirty и Pin докидываем дешёвым финальным проходом из свежего снимка —
+  // без fold/fuzzy, поэтому индикатор «не сохранено» обновляется мгновенно.
+  const items = useMemo(() => {
+    const byId = new Map(tabs.map((t) => [t.id, t]));
+    return heavyItems.map((item) =>
+      item.kind === 'tab' && item.tabId !== undefined
+        ? { ...item, dirty: byId.get(item.tabId)?.dirty, pinned: byId.get(item.tabId)?.pinned }
+        : item,
+    );
+  }, [heavyItems, tabs]);
 
   const openRef = useRef(open);
   const indexRef = useRef(index);

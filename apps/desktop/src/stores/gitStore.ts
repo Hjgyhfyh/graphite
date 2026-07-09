@@ -43,7 +43,7 @@ export interface GitStore {
   autoPush: boolean;
   error: string | null;
 
-  refreshStatus(): Promise<void>;
+  refreshStatus(opts?: { silent?: boolean }): Promise<void>;
   init(): Promise<void>;
   snapshot(message?: string, opts?: SnapshotOptions): Promise<void>;
   loadLog(): Promise<void>;
@@ -133,12 +133,15 @@ export const useGitStore = create<GitStore>()(
       autoPush: false,
       error: null,
 
-      refreshStatus: async () => {
+      refreshStatus: async (opts) => {
         if (!isTauriAvailable()) {
           set({ status: null });
           return;
         }
-        set({ statusLoading: true });
+        const silent = opts?.silent ?? false;
+        if (!silent) {
+          set({ statusLoading: true });
+        }
         try {
           const status = await commands.gitStatus();
           set({ status, error: null });
@@ -146,7 +149,9 @@ export const useGitStore = create<GitStore>()(
           // Прежний статус не сбрасываем: разовый сбой не должен гасить индикатор.
           set({ error: reason(error, 'Не удалось получить статус истории') });
         } finally {
-          set({ statusLoading: false });
+          if (!silent) {
+            set({ statusLoading: false });
+          }
         }
       },
 

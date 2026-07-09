@@ -26,6 +26,9 @@ import { useNavStore } from '../../stores/navStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 
+/** Дебаунс git-статуса на note_changed: не гонять пачку git-процессов на каждый автосейв. */
+const GIT_STATUS_DEBOUNCE_MS = 4000;
+
 function vaultLabel(root: string | undefined): string {
   if (root === undefined || root.length === 0) {
     return 'Vault не открыт';
@@ -305,29 +308,6 @@ export function StatusBar() {
   }, []);
 
   useEffect(() => {
-    let timer: number | undefined;
-    const schedule = () => {
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-      timer = window.setTimeout(() => {
-        void useVaultStore.getState().loadInfo();
-      }, 200);
-    };
-    const unsubscribe = useVaultStore.subscribe((state, prev) => {
-      if (state.tree !== prev.tree) {
-        schedule();
-      }
-    });
-    return () => {
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-      unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
@@ -358,8 +338,8 @@ export function StatusBar() {
         window.clearTimeout(timer);
       }
       timer = window.setTimeout(() => {
-        void useGitStore.getState().refreshStatus();
-      }, 400);
+        void useGitStore.getState().refreshStatus({ silent: true });
+      }, GIT_STATUS_DEBOUNCE_MS);
       // Правки пользователя перезапускают дебаунс тихого авто-снимка.
       if (event.payload.actor === 'user') {
         useGitStore.getState().maybeAutoSnapshot();
