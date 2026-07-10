@@ -34,6 +34,18 @@ jobs:
       - name: Build frontend
         run: pnpm --filter desktop build
 
+      # Тело релиза — из RELEASE_NOTES.md в корне (обновляется перед каждым тегом).
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            if [ -f RELEASE_NOTES.md ]; then cat RELEASE_NOTES.md; else echo 'Автосборка Graphite. Обновление прилетит в приложение автоматически.'; fi
+            echo ''
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -44,7 +56,7 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: 'Graphite ${{ github.ref_name }}'
-          releaseBody: 'Автосборка Graphite. Обновление прилетит в приложение автоматически.'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ''
