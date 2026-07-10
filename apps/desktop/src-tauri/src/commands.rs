@@ -407,6 +407,9 @@ fn mount_vault(path: &str, create: bool) -> Result<VaultInfoResponse, GraphiteEr
     };
     crate::runtime::save_last_vault(&root);
     *lock_core() = Some(CoreState { root: root.clone(), index });
+    // Если корень — известная sync-реплика, активировать её (фоновый цикл
+    // подхватит по интервалу). Не sync-корень снимает прежнюю активную реплику.
+    crate::sync::activate_for_root(&root);
     // Тёплый полный rebuild — в фоне: окно не блокируется на «тысячах файлов».
     // Дерево и счётчики (обход ФС) корректны сразу; поиск/задачи/связи работают
     // на сохранённом индексе и догоняются фоном. Смонтированное соединение видит

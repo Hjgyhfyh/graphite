@@ -137,6 +137,21 @@ export function IconPicker({
           align={align}
           sideOffset={8}
           collisionPadding={8}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onInteractOutside={(event) => {
+            // Хвост закрывающегося контекст-меню (фокус/pointerup из него) —
+            // не взаимодействие снаружи, иначе пикер захлопывается до первого клика.
+            const fromMenu = event.detail.originalEvent
+              .composedPath()
+              .some(
+                (target) =>
+                  target instanceof Element &&
+                  (target.hasAttribute('data-radix-menu-content') || target.getAttribute('role') === 'menu'),
+              );
+            if (fromMenu) {
+              event.preventDefault();
+            }
+          }}
           className={cx(
             'z-50 origin-(--radix-popover-content-transform-origin) rounded-m border border-stroke-1 bg-bg-2 shadow-3',
             mode === 'color' ? 'w-60 p-3' : 'w-72 p-3',

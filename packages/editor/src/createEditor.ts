@@ -3,13 +3,13 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { Annotation, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { EditorView, drawSelection, dropCursor, highlightSpecialChars, keymap } from '@codemirror/view';
 import type { KeyBinding } from '@codemirror/view';
 import { aiTouchField, clearAiTouched, setAiTouched } from './aiTouch';
 import { toggleInlineFormat } from './formatting';
-import { frontmatterFold } from './frontmatterFold';
+import { frontmatterHide } from './frontmatterHide';
 import { imageAttachments } from './imageInsert';
 import type { AttachmentSaveOptions } from './imageInsert';
 import { imagePreviews } from './imagePreview';
@@ -31,6 +31,8 @@ export interface CreateEditorOptions {
   linkSource?: WikiLinkSource;
   attachments?: AttachmentSaveOptions;
   images?: ImagePreviewOptions;
+  /** Прятать YAML-блок свойств в начале документа (по умолчанию включено). */
+  hideFrontmatter?: boolean;
 }
 
 export interface EditorHandle {
@@ -38,6 +40,7 @@ export interface EditorHandle {
   getDoc(): string;
   setDoc(doc: string): void;
   markAi(from: number, to: number): void;
+  setHideFrontmatter(hide: boolean): void;
   focus(): void;
   destroy(): void;
 }
@@ -82,7 +85,11 @@ const markdownKeymap: readonly KeyBinding[] = [
 ];
 
 export function createEditor(container: HTMLElement, options: CreateEditorOptions = {}): EditorHandle {
-  const { initialDoc = '', readOnly = false, onChange, linkSource, attachments, images } = options;
+  const { initialDoc = '', readOnly = false, onChange, linkSource, attachments, images, hideFrontmatter = true } = options;
+
+  // Compartment на инстанс: «скрыть/показать свойства» переключается на живом
+  // редакторе без пересоздания, не задевая undo-стек и позицию скролла.
+  const frontmatterCompartment = new Compartment();
 
   const updateListener = EditorView.updateListener.of((update) => {
     if (!update.docChanged || onChange === undefined) {
@@ -119,7 +126,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       EditorView.lineWrapping,
       markdown({ base: markdownLanguage }),
       livePreview,
-      frontmatterFold,
+      frontmatterCompartment.of(hideFrontmatter ? frontmatterHide() : []),
       taskCheckboxes,
       aiTouchField,
       ...(attachments !== undefined && !readOnly ? [imageAttachments(attachments)] : []),
@@ -190,6 +197,9 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
         },
         annotations: external.of(true),
       });
+    },
+    setHideFrontmatter: (hide) => {
+      view.dispatch({ effects: frontmatterCompartment.reconfigure(hide ? frontmatterHide() : []) });
     },
     markAi: (from, to) => {
       const max = view.state.doc.length;

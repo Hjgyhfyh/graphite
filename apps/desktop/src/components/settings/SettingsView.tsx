@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { getVersion } from '@tauri-apps/api/app';
 import {
   Check,
+  Cloud,
   Copy,
   Database,
   FolderOpen,
@@ -13,6 +14,7 @@ import {
   Keyboard,
   Loader,
   Palette,
+  PanelLeft,
   Plug,
   RefreshCw,
   Sparkles,
@@ -29,20 +31,25 @@ import {
   ANIMATION_SPEED_MIN,
   useUiStore,
 } from '../../stores/uiStore';
+import { isSyncPath, useSyncStore } from '../../stores/syncStore';
 import { useUpdaterStore } from '../../stores/updaterStore';
 import { forgetVault, pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useVaultsStore, vaultKey } from '../../stores/vaultsStore';
 import { BackupSection } from '../backup/BackupSection';
 import { KeybindingsEditor } from './KeybindingsEditor';
+import { RailLayoutEditor } from './RailLayoutEditor';
+import { SyncSection } from './SyncSection';
 import { ThemeSelect } from './ThemeSelect';
 
 const MCP_ADD_COMMAND = 'claude mcp add graphite';
 
 const SECTIONS = [
   { id: 'storage', title: 'Хранилище', icon: Database },
+  { id: 'sync', title: 'Синхронизация', icon: Cloud },
   { id: 'mcp', title: 'Ассистент', icon: Plug },
   { id: 'appearance', title: 'Внешний вид', icon: Palette },
+  { id: 'sidebar', title: 'Боковая панель', icon: PanelLeft },
   { id: 'backup', title: 'Копии', icon: GitBranch },
   { id: 'updates', title: 'Обновления', icon: Sparkles },
   { id: 'keys', title: 'Клавиши', icon: Keyboard },
@@ -160,6 +167,8 @@ function delay(ms: number): Promise<void> {
 function KnownVaults() {
   const known = useVaultsStore((s) => s.known);
   const root = useVaultStore((s) => s.info?.root);
+  const syncCodes = useSyncStore((s) => s.codes);
+  const syncStatus = useSyncStore((s) => s.status);
   const reduced = usePrefersReducedMotion();
   const [switchingPath, setSwitchingPath] = useState<string | undefined>(undefined);
 
@@ -206,6 +215,8 @@ function KnownVaults() {
             {known.map((vault) => {
               const active = activeKey !== undefined && vaultKey(vault.path) === activeKey;
               const switching = switchingPath === vault.path;
+              const sync = isSyncPath(syncCodes, syncStatus, vault.path);
+              const VaultIcon = sync ? Cloud : HardDrive;
               return (
                 <motion.div
                   key={vaultKey(vault.path)}
@@ -219,7 +230,7 @@ function KnownVaults() {
                     active ? 'border-accent/35 bg-bg-2' : 'border-stroke-0 bg-bg-2 hover:border-stroke-1 hover:bg-bg-3',
                   )}
                 >
-                  <HardDrive
+                  <VaultIcon
                     size={15}
                     strokeWidth={1.75}
                     className={cx('shrink-0', active ? 'text-accent' : 'text-text-2')}
@@ -280,6 +291,8 @@ export function SettingsView() {
   const setAnimationSpeed = useUiStore((s) => s.setAnimationSpeed);
   const readingMode = useUiStore((s) => s.readingMode);
   const setReadingMode = useUiStore((s) => s.setReadingMode);
+  const showPropsInText = useUiStore((s) => s.showPropsInText);
+  const setShowPropsInText = useUiStore((s) => s.setShowPropsInText);
   const pushToast = useUiStore((s) => s.pushToast);
 
   const updaterStatus = useUpdaterStore((s) => s.status);
@@ -587,6 +600,18 @@ export function SettingsView() {
             </Section>
 
             <Section
+              id="sync"
+              icon={Cloud}
+              title="Синхронизация"
+              description="Одно хранилище на нескольких устройствах — по секретному коду"
+              sectionRef={(el) => {
+                sectionEls.current.sync = el;
+              }}
+            >
+              <SyncSection />
+            </Section>
+
+            <Section
               id="mcp"
               icon={Plug}
               title="Ассистент (MCP)"
@@ -651,6 +676,9 @@ export function SettingsView() {
               <Row title="Режим чтения" hint="Крупный набор без интерфейса редактора">
                 <Switch checked={readingMode} onCheckedChange={setReadingMode} />
               </Row>
+              <Row title="Свойства в тексте" hint="Показывать YAML-блок в начале заметки — по умолчанию он скрыт, свойства правятся на панели справа">
+                <Switch checked={showPropsInText} onCheckedChange={setShowPropsInText} />
+              </Row>
               <Row title="Меньше движения" hint="Заменяет анимации коротким кроссфейдом">
                 <Switch checked={reducedMotion} onCheckedChange={setReducedMotion} />
               </Row>
@@ -676,6 +704,18 @@ export function SettingsView() {
                   </div>
                 </div>
               </Row>
+            </Section>
+
+            <Section
+              id="sidebar"
+              icon={PanelLeft}
+              title="Боковая панель"
+              description="Порядок и видимость разделов на рейке слева"
+              sectionRef={(el) => {
+                sectionEls.current.sidebar = el;
+              }}
+            >
+              <RailLayoutEditor />
             </Section>
 
             <Section

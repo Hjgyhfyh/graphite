@@ -48,6 +48,7 @@ import {
   springStandard,
   usePrefersReducedMotion,
 } from '../motion';
+import { initSyncStore } from '../stores/syncStore';
 import { useUiStore } from '../stores/uiStore';
 import type { Toast } from '../stores/uiStore';
 import { useUpdaterStore } from '../stores/updaterStore';
@@ -281,6 +282,8 @@ export function AppShell() {
   useEffect(() => {
     void bootstrapVault();
   }, []);
+
+  useEffect(() => initSyncStore(), []);
 
   useEffect(() => {
     if (!isTauriAvailable()) {

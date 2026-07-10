@@ -726,6 +726,32 @@ export interface GitRestoreFileParams {
   path: string;
 }
 
+export interface SyncCreateResult {
+  code: string;
+  path: string;
+}
+
+export interface SyncJoinResult {
+  path: string;
+}
+
+export type SyncState = 'idle' | 'syncing' | 'error';
+
+export interface SyncStatusDto {
+  state: SyncState;
+  lastSyncAt?: string;
+  lastError?: string;
+  active: boolean;
+  root?: string;
+}
+
+export interface SyncStatusEvent {
+  state: SyncState;
+  lastSyncAt?: string;
+  lastError?: string;
+  active: boolean;
+}
+
 export interface GraphNode {
   ref: NoteRef;
   title: string;

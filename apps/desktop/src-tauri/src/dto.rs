@@ -1220,6 +1220,38 @@ pub struct GitRestoreFileParams {
     pub path: String,
 }
 
+/// Результат создания sync-хранилища: код доступа (показать один раз,
+/// восстановить нельзя) и путь созданной локальной реплики.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncCreateResult {
+    pub code: String,
+    pub path: String,
+}
+
+/// Результат подключения по коду: путь локальной реплики после первичного pull.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncJoinResult {
+    pub path: String,
+}
+
+/// Состояние синхронизации активной реплики для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusDto {
+    /// "idle" | "syncing" | "error".
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_sync_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// Есть ли активная sync-реплика (смонтирована и в конфиге).
+    pub active: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+}
+
 /// Узел «Графа связей»: одна существующая заметка хранилища.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

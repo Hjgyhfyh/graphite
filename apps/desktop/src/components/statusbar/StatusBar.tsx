@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ChevronLeft,
   ChevronRight,
+  Cloud,
   Diamond,
   FileText,
   GitBranch,
@@ -23,6 +24,7 @@ import type { McpSessionEvent, NoteChangedEvent } from '@graphite/bindings';
 import { Fade, Presence, usePrefersReducedMotion } from '../../motion';
 import { useGitStore } from '../../stores/gitStore';
 import { useNavStore } from '../../stores/navStore';
+import { humanSyncError, useSyncStore } from '../../stores/syncStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 
@@ -236,6 +238,56 @@ function NavHistoryControls() {
   );
 }
 
+function clockStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function SyncIndicator() {
+  const status = useSyncStore((s) => s.status);
+  const busy = useSyncStore((s) => s.busy);
+  const reduced = usePrefersReducedMotion();
+
+  if (!status.active) {
+    return null;
+  }
+  const syncing = busy || status.state === 'syncing';
+  const failed = status.state === 'error' && !syncing;
+  const tip = syncing
+    ? 'Синхронизация…'
+    : failed
+      ? humanSyncError(status.lastError)
+      : status.lastSyncAt !== undefined
+        ? `Синхронизировано · ${clockStamp(status.lastSyncAt)}`
+        : 'Ждёт первой синхронизации';
+  return (
+    <Tooltip content={tip} side="top">
+      <button
+        type="button"
+        aria-label={`Синхронизация: ${tip}`}
+        onClick={() => void useSyncStore.getState().syncNow()}
+        className={cx(
+          'flex items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors duration-[120ms] hover:bg-bg-3',
+          failed ? 'text-danger' : 'text-text-2 hover:text-text-0',
+        )}
+      >
+        <Cloud size={12} strokeWidth={1.75} aria-hidden />
+        <span
+          aria-hidden
+          className={cx(
+            'size-1.5 rounded-full',
+            failed ? 'bg-danger' : syncing ? 'bg-warn' : 'bg-ok',
+            syncing && !reduced && 'animate-pulse',
+          )}
+        />
+      </button>
+    </Tooltip>
+  );
+}
+
 function GitIndicator() {
   const status = useGitStore((s) => s.status);
   const openTimeline = useGitStore((s) => s.openTimeline);
@@ -376,6 +428,7 @@ export function StatusBar() {
             <span aria-hidden className="h-3.5 w-px bg-stroke-0" />
           </>
         ) : null}
+        <SyncIndicator />
         <GitIndicator />
         <IndexIndicator />
         <McpIndicator active={mcp.active} />

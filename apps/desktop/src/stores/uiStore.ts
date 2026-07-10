@@ -18,7 +18,21 @@ export const ANIMATION_SPEED_DEFAULT = 1;
 const TOAST_DURATION_MS = 4000;
 
 export type RailView = 'tree' | 'search' | 'tasks' | 'brief' | 'plan' | 'graph' | 'daily' | 'tags' | 'settings';
+export type RailItemView = Exclude<RailView, 'settings'>;
 export type RightPanelTab = 'properties' | 'aiFeed' | 'links' | 'backlinks' | 'outline';
+
+// Дефолтный порядок настраиваемых разделов рейки; кнопка настроек в него не входит —
+// её нельзя скрыть или переместить.
+export const RAIL_DEFAULT_ORDER: readonly RailItemView[] = [
+  'tree',
+  'search',
+  'tasks',
+  'brief',
+  'plan',
+  'graph',
+  'daily',
+  'tags',
+];
 
 export interface ToastAction {
   label: string;
@@ -34,6 +48,8 @@ export interface Toast {
 
 export interface UiStore {
   railView: RailView;
+  railOrder: RailItemView[];
+  railHidden: RailItemView[];
   sidebarHidden: boolean;
   rightPanelOpen: boolean;
   rightPanelTab: RightPanelTab;
@@ -42,6 +58,7 @@ export interface UiStore {
   paletteOpen: boolean;
   quickSwitcherOpen: boolean;
   readingMode: boolean;
+  showPropsInText: boolean;
   reducedMotion: boolean;
   animationSpeed: number;
   theme: Theme;
@@ -49,6 +66,9 @@ export interface UiStore {
   onboardingDone: boolean;
   toasts: Toast[];
   setRailView(v: RailView): void;
+  setRailOrder(order: RailItemView[]): void;
+  toggleRailItemHidden(view: RailItemView): void;
+  resetRailLayout(): void;
   toggleSidebar(): void;
   setSidebarHidden(hidden: boolean): void;
   toggleRightPanel(tab?: RightPanelTab): void;
@@ -60,6 +80,7 @@ export interface UiStore {
   setQuickSwitcherOpen(open: boolean): void;
   toggleReadingMode(): void;
   setReadingMode(on: boolean): void;
+  setShowPropsInText(on: boolean): void;
   setReducedMotion(on: boolean): void;
   setAnimationSpeed(speed: number): void;
   setTheme(theme: Theme): void;
@@ -78,10 +99,47 @@ function hydrateNumber(value: unknown, min: number, max: number, fallback: numbe
   return typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : fallback;
 }
 
+function isRailItemView(value: unknown): value is RailItemView {
+  return typeof value === 'string' && (RAIL_DEFAULT_ORDER as readonly string[]).includes(value);
+}
+
+// Чинит сохранённую раскладку рейки под текущий набор разделов: неизвестные id
+// отбрасываются, дубли схлопываются, недостающие разделы дописываются в конец
+// в дефолтном порядке (новые view будущих версий появляются видимыми).
+export function normalizeRailOrder(
+  order: unknown,
+  hidden: unknown,
+): { railOrder: RailItemView[]; railHidden: RailItemView[] } {
+  const railOrder: RailItemView[] = [];
+  if (Array.isArray(order)) {
+    for (const id of order) {
+      if (isRailItemView(id) && !railOrder.includes(id)) {
+        railOrder.push(id);
+      }
+    }
+  }
+  for (const id of RAIL_DEFAULT_ORDER) {
+    if (!railOrder.includes(id)) {
+      railOrder.push(id);
+    }
+  }
+  const railHidden: RailItemView[] = [];
+  if (Array.isArray(hidden)) {
+    for (const id of hidden) {
+      if (isRailItemView(id) && !railHidden.includes(id)) {
+        railHidden.push(id);
+      }
+    }
+  }
+  return { railOrder, railHidden };
+}
+
 export const useUiStore = create<UiStore>()(
   persist(
     (set, get) => ({
       railView: 'tree',
+      railOrder: [...RAIL_DEFAULT_ORDER],
+      railHidden: [],
       sidebarHidden: false,
       rightPanelOpen: true,
       rightPanelTab: 'properties',
@@ -90,6 +148,7 @@ export const useUiStore = create<UiStore>()(
       paletteOpen: false,
       quickSwitcherOpen: false,
       readingMode: false,
+      showPropsInText: false,
       reducedMotion: false,
       animationSpeed: ANIMATION_SPEED_DEFAULT,
       theme: 'default',
@@ -98,6 +157,19 @@ export const useUiStore = create<UiStore>()(
       toasts: [],
       setRailView: (v) => {
         set({ railView: v });
+      },
+      setRailOrder: (order) => {
+        set((s) => normalizeRailOrder(order, s.railHidden));
+      },
+      toggleRailItemHidden: (view) => {
+        set((s) => ({
+          railHidden: s.railHidden.includes(view)
+            ? s.railHidden.filter((v) => v !== view)
+            : [...s.railHidden, view],
+        }));
+      },
+      resetRailLayout: () => {
+        set({ railOrder: [...RAIL_DEFAULT_ORDER], railHidden: [] });
       },
       toggleSidebar: () => {
         set((s) => ({ sidebarHidden: !s.sidebarHidden }));
@@ -140,6 +212,9 @@ export const useUiStore = create<UiStore>()(
       setReadingMode: (on) => {
         set({ readingMode: on });
       },
+      setShowPropsInText: (on) => {
+        set({ showPropsInText: on });
+      },
       setReducedMotion: (on) => {
         set({ reducedMotion: on });
       },
@@ -174,12 +249,15 @@ export const useUiStore = create<UiStore>()(
     {
       name: 'graphite.ui',
       partialize: (s) => ({
+        railOrder: s.railOrder,
+        railHidden: s.railHidden,
         sidebarHidden: s.sidebarHidden,
         rightPanelOpen: s.rightPanelOpen,
         rightPanelTab: s.rightPanelTab,
         treeWidth: s.treeWidth,
         rightWidth: s.rightWidth,
         readingMode: s.readingMode,
+        showPropsInText: s.showPropsInText,
         reducedMotion: s.reducedMotion,
         animationSpeed: s.animationSpeed,
         theme: s.theme,
@@ -199,6 +277,7 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_DEFAULT,
           ),
           theme: isTheme(saved.theme) ? saved.theme : 'default',
+          ...normalizeRailOrder(saved.railOrder, saved.railHidden),
         };
       },
     },

@@ -1,0 +1,25 @@
+[Unit]
+Description=Graphite Sync (notes sync HTTP service, protocol v1)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/graphite-sync
+Environment=GRAPHITE_SYNC_DATA=/var/lib/graphite-sync
+Environment=GRAPHITE_SYNC_PORT=8130
+ExecStart=/opt/graphite-sync/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8130 --workers 1
+Restart=always
+RestartSec=2
+MemoryMax=300M
+
+# Hardening (лёгкое, без слома доступа к /var/lib/graphite-sync)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/graphite-sync
+
+[Install]
+WantedBy=multi-user.target

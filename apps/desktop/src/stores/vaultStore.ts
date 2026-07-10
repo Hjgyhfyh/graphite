@@ -30,7 +30,6 @@ export interface VaultStore {
   info?: VaultInfoResponse;
   tree: TreeNode[];
   childrenByRef: Record<NoteRef, TreeNode[]>;
-  collapsedFolders: Set<string>;
   currentRef?: NoteRef;
   indexStatus: IndexStatus;
   pinnedNotes: Set<NoteRef>;
@@ -44,7 +43,6 @@ export interface VaultStore {
   flashNote(ref: NoteRef): void;
   applyNoteChanged(e: NoteChangedEvent): void;
   setIndexStatus(s: IndexProgressEvent): void;
-  setFolderCollapsed(id: string, collapsed: boolean): void;
   createNote(opts?: CreateNoteOptions): Promise<void>;
   createFolder(parent?: NoteRef, title?: string): Promise<NoteRef | undefined>;
   addPathNotes(paths: string[], parent?: NoteRef): Promise<number>;
@@ -169,7 +167,6 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   info: undefined,
   tree: [],
   childrenByRef: {},
-  collapsedFolders: new Set<string>(),
   currentRef: undefined,
   indexStatus: { state: 'idle', done: 0, total: 0 },
   pinnedNotes: new Set<NoteRef>(),
@@ -275,20 +272,6 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         done: e.done,
         total: e.total,
       },
-    });
-  },
-  setFolderCollapsed: (id, collapsed) => {
-    set((s) => {
-      if (s.collapsedFolders.has(id) === collapsed) {
-        return s;
-      }
-      const collapsedFolders = new Set(s.collapsedFolders);
-      if (collapsed) {
-        collapsedFolders.add(id);
-      } else {
-        collapsedFolders.delete(id);
-      }
-      return { collapsedFolders };
     });
   },
   createNote: async (opts) => {

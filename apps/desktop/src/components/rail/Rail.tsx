@@ -2,38 +2,35 @@ import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import * as Popover from '@radix-ui/react-popover';
 import {
-  CalendarDays,
   Check,
-  FileText,
+  Cloud,
   FolderOpen,
   FolderPlus,
   HardDrive,
-  ListChecks,
   Loader,
-  Network,
   PanelLeft,
   PanelLeftClose,
-  Search,
   Settings,
-  Sparkles,
-  SquareKanban,
-  Tag,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { SyncState } from '@graphite/bindings';
 import { Tooltip, cx, springTransition } from '@graphite/ui';
 import {
+  REDUCED_CROSSFADE,
   listContainerVariants,
   listItemVariants,
   reducedFadeVariants,
   usePrefersReducedMotion,
 } from '../../motion';
 import { openBriefView } from '../../stores/briefStore';
+import { isSyncPath, useSyncStore } from '../../stores/syncStore';
 import { useUiStore } from '../../stores/uiStore';
 import type { RailView } from '../../stores/uiStore';
 import { forgetVault, pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useVaultsStore, vaultKey, vaultName } from '../../stores/vaultsStore';
+import { RAIL_META } from './railItems';
 
 interface RailItem {
   view: RailView;
@@ -41,21 +38,17 @@ interface RailItem {
   icon: LucideIcon;
 }
 
-const MAIN_ITEMS: readonly RailItem[] = [
-  { view: 'tree', label: 'Заметки', icon: FileText },
-  { view: 'search', label: 'Поиск', icon: Search },
-  { view: 'tasks', label: 'Задачи', icon: ListChecks },
-  { view: 'brief', label: 'Бриф для Claude', icon: Sparkles },
-  { view: 'plan', label: 'Канбан — скоро', icon: SquareKanban },
-  { view: 'graph', label: 'Граф связей', icon: Network },
-  { view: 'daily', label: 'Дневник', icon: CalendarDays },
-  { view: 'tags', label: 'Теги', icon: Tag },
-];
-
 const SETTINGS_ITEM: RailItem = { view: 'settings', label: 'Настройки', icon: Settings };
 
 const VAULT_ACTION_ROW =
   'flex h-8 w-full select-none items-center gap-2 rounded-s px-2 text-left text-ui text-text-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0';
+
+/** Цвет точки-индикатора состояния синхронизации. */
+const SYNC_DOT_CLASS: Record<SyncState, string> = {
+  idle: 'bg-ok',
+  syncing: 'bg-warn',
+  error: 'bg-danger',
+};
 
 interface RailButtonProps {
   item: RailItem;
@@ -103,12 +96,16 @@ function RailButton({ item, active, onSelect }: RailButtonProps) {
 function VaultSwitch() {
   const info = useVaultStore((s) => s.info);
   const known = useVaultsStore((s) => s.known);
+  const syncCodes = useSyncStore((s) => s.codes);
+  const syncStatus = useSyncStore((s) => s.status);
   const reduced = usePrefersReducedMotion();
   const [open, setOpen] = useState(false);
   const [switchingPath, setSwitchingPath] = useState<string | undefined>(undefined);
 
   const busy = switchingPath !== undefined;
   const activeKey = info === undefined ? undefined : vaultKey(info.root);
+  const activeIsSync = info !== undefined && isSyncPath(syncCodes, syncStatus, info.root);
+  const TriggerIcon = activeIsSync ? Cloud : HardDrive;
   const label = info === undefined ? 'Хранилище' : `Хранилище — ${vaultName(info.root)}`;
 
   const select = async (path: string) => {
@@ -140,9 +137,16 @@ function VaultSwitch() {
               open ? 'bg-bg-3 text-text-0' : 'text-text-1 hover:bg-bg-3 hover:text-text-0',
             )}
           >
-            <HardDrive size={18} strokeWidth={1.75} />
+            <TriggerIcon size={18} strokeWidth={1.75} />
             {info !== undefined ? (
-              <span aria-hidden className="absolute right-[7px] top-[7px] size-1.5 rounded-full bg-ok" />
+              <span
+                aria-hidden
+                className={cx(
+                  'absolute right-[7px] top-[7px] size-1.5 rounded-full',
+                  activeIsSync ? SYNC_DOT_CLASS[syncStatus.state] : 'bg-ok',
+                  activeIsSync && syncStatus.state === 'syncing' && !reduced && 'animate-pulse',
+                )}
+              />
             ) : null}
           </button>
         </Popover.Trigger>
@@ -170,6 +174,13 @@ function VaultSwitch() {
               <AnimatePresence initial={false}>
                 {known.map((vault) => {
                   const active = activeKey !== undefined && vaultKey(vault.path) === activeKey;
+                  const sync = isSyncPath(syncCodes, syncStatus, vault.path);
+                  // Живое состояние есть только у активной реплики — точку рисуем на ней.
+                  const liveState =
+                    sync && syncStatus.active && syncStatus.root !== undefined && vaultKey(syncStatus.root) === vaultKey(vault.path)
+                      ? syncStatus.state
+                      : undefined;
+                  const ItemIcon = sync ? Cloud : HardDrive;
                   return (
                     <motion.div
                       key={vaultKey(vault.path)}
@@ -189,11 +200,21 @@ function VaultSwitch() {
                       >
                         <span
                           className={cx(
-                            'flex size-6 shrink-0 items-center justify-center rounded-xs border bg-bg-1 transition-colors duration-[120ms]',
+                            'relative flex size-6 shrink-0 items-center justify-center rounded-xs border bg-bg-1 transition-colors duration-[120ms]',
                             active ? 'border-accent/40 text-accent' : 'border-stroke-0 text-text-2',
                           )}
                         >
-                          <HardDrive size={13} strokeWidth={1.75} />
+                          <ItemIcon size={13} strokeWidth={1.75} />
+                          {liveState !== undefined ? (
+                            <span
+                              aria-hidden
+                              className={cx(
+                                'absolute -right-0.5 -top-0.5 size-1.5 rounded-full ring-2 ring-bg-2',
+                                SYNC_DOT_CLASS[liveState],
+                                liveState === 'syncing' && !reduced && 'animate-pulse',
+                              )}
+                            />
+                          ) : null}
                         </span>
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-ui text-text-0">{vault.name}</span>
@@ -245,9 +266,16 @@ function VaultSwitch() {
 export function Rail() {
   const railView = useUiStore((s) => s.railView);
   const setRailView = useUiStore((s) => s.setRailView);
+  const railOrder = useUiStore((s) => s.railOrder);
+  const railHidden = useUiStore((s) => s.railHidden);
   const sidebarHidden = useUiStore((s) => s.sidebarHidden);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const setSidebarHidden = useUiStore((s) => s.setSidebarHidden);
+  const reduced = usePrefersReducedMotion();
+
+  const mainItems: RailItem[] = railOrder
+    .filter((view) => !railHidden.includes(view))
+    .map((view) => ({ view, ...RAIL_META[view] }));
 
   const sidebarView = railView === 'tree' || railView === 'search';
   const sidebarShown = sidebarView && !sidebarHidden;
@@ -275,7 +303,7 @@ export function Rail() {
   return (
     <nav
       aria-label="Разделы"
-      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke-0 bg-bg-1 py-2"
+      className="relative flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke-0 bg-bg-1 py-2"
     >
       <Tooltip content={sidebarShown ? 'Скрыть панель заметок' : 'Показать панель заметок'} side="right">
         <button
@@ -293,9 +321,20 @@ export function Rail() {
         </button>
       </Tooltip>
       <span aria-hidden className="my-1 h-px w-5 rounded-full bg-stroke-0" />
-      {MAIN_ITEMS.map((item) => (
-        <RailButton key={item.view} item={item} active={railView === item.view} onSelect={selectView} />
-      ))}
+      <AnimatePresence initial={false} mode="popLayout">
+        {mainItems.map((item) => (
+          <motion.div
+            key={item.view}
+            layout={!reduced}
+            initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+            transition={reduced ? REDUCED_CROSSFADE : springTransition('snappy')}
+          >
+            <RailButton item={item} active={railView === item.view} onSelect={selectView} />
+          </motion.div>
+        ))}
+      </AnimatePresence>
       <div className="flex-1" />
       <VaultSwitch />
       <RailButton item={SETTINGS_ITEM} active={railView === SETTINGS_ITEM.view} onSelect={selectView} />

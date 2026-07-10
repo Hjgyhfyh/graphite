@@ -1,4 +1,4 @@
-import type { IndexProgressEvent, JournalOpEvent, McpSessionEvent, NoteChangedEvent, NoteRef } from './types';
+import type { IndexProgressEvent, JournalOpEvent, McpSessionEvent, NoteChangedEvent, NoteRef, SyncStatusEvent } from './types';
 
 export interface UiOpenNoteEvent {
   ref: NoteRef;
@@ -15,6 +15,7 @@ export interface GraphiteEventMap {
   mcp_session: McpSessionEvent;
   ui_open_note: UiOpenNoteEvent;
   ui_flash_note: UiFlashNoteEvent;
+  sync_status: SyncStatusEvent;
   'capture-shown': void;
 }
 
@@ -27,5 +28,6 @@ export const GRAPHITE_EVENT = {
   mcpSession: 'mcp_session',
   uiOpenNote: 'ui_open_note',
   uiFlashNote: 'ui_flash_note',
+  syncStatus: 'sync_status',
   captureShown: 'capture-shown',
 } as const satisfies Record<string, GraphiteEventName>;

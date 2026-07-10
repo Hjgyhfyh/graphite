@@ -39,7 +39,6 @@ async function mountVault(path: string, create: boolean): Promise<VaultInfoRespo
     info,
     tree: [],
     childrenByRef: {},
-    collapsedFolders: new Set<string>(),
     currentRef: undefined,
     pinnedNotes: new Set<NoteRef>(),
     iconByRef: {},

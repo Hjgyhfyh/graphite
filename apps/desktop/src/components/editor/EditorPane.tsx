@@ -999,6 +999,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const setDirty = useTabsStore((s) => s.setDirty);
   const readingMode = useUiStore((s) => s.readingMode);
   const toggleReadingMode = useUiStore((s) => s.toggleReadingMode);
+  const showPropsInText = useUiStore((s) => s.showPropsInText);
   const reduced = usePrefersReducedMotion();
 
   // Цвет выделения текста повторяет цвет иконки файла (#1): переопределяем
@@ -1212,6 +1213,9 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       const handle = createEditor(host, {
         initialDoc: content,
         readOnly,
+        // Снимок через getState: живое переключение идёт реконфигурацией ниже,
+        // без пересоздания редактора (иначе терялись бы undo и позиция).
+        hideFrontmatter: !useUiStore.getState().showPropsInText,
         linkSource,
         attachments: readOnly
           ? undefined
@@ -1297,6 +1301,10 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       editorRef.current?.focus();
     }
   }, [readingMode, loaded]);
+
+  useEffect(() => {
+    editorRef.current?.setHideFrontmatter(!showPropsInText);
+  }, [showPropsInText]);
 
   // Синк окон одной заметки (#4): buffer_save другого окна (и любые внешние
   // правки) приходят событием note_changed. Своя запись узнаётся по rev; при

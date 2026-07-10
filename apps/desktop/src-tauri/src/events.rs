@@ -65,3 +65,17 @@ pub struct UiOpenNoteEvent {
 pub struct UiFlashNoteEvent {
     pub r#ref: NoteRef,
 }
+
+/// Статус синхронизации на фронт: перерисовать индикатор при idle/syncing/error.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "sync_status")]
+pub struct SyncStatusEvent {
+    /// "idle" | "syncing" | "error".
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_sync_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub active: bool,
+}

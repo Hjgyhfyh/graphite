@@ -16,6 +16,8 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import {
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Columns2,
   Copy,
   FilePlus,
@@ -37,14 +39,16 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { NoteRef, TreeNode } from '@graphite/bindings';
 import { commands, isTauriAvailable } from '@graphite/bindings';
-import { Kbd, STAGGER_CAP, cx } from '@graphite/ui';
+import { Kbd, STAGGER_CAP, Tooltip, cx } from '@graphite/ui';
 import { useActionHandler } from '../../app/Keymap';
 import { springSnappy, springStandard, usePrefersReducedMotion } from '../../motion';
 import { usePanesStore } from '../../stores/panesStore';
 import { useTemplatePickerStore } from '../../stores/templatePickerStore';
+import { useTreeStateStore } from '../../stores/treeStateStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import type { NoteIconInfo } from '../../stores/vaultStore';
+import { vaultKey } from '../../stores/vaultsStore';
 import { IconPicker } from './IconPicker';
 import { NoteIcon } from './NoteIcon';
 
@@ -224,6 +228,20 @@ function buildForest(nodes: readonly TreeNode[]): ArNode[] {
   };
   sortRec(roots);
   return roots;
+}
+
+function collectFolderIds(nodes: readonly ArNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (list: readonly ArNode[]) => {
+    for (const node of list) {
+      if (node.children !== null) {
+        ids.push(node.id);
+        walk(node.children);
+      }
+    }
+  };
+  walk(nodes);
+  return ids;
 }
 
 function EmptyState() {
@@ -674,10 +692,13 @@ function PinnedRow({ item }: { item: PinnedItem }) {
 export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const tree = useVaultStore((s) => s.tree);
   const currentRef = useVaultStore((s) => s.currentRef);
-  const vaultReady = useVaultStore((s) => s.info !== undefined);
+  const vaultRoot = useVaultStore((s) => s.info?.root);
   const pinnedNotes = useVaultStore((s) => s.pinnedNotes);
   const iconByRef = useVaultStore((s) => s.iconByRef);
   const reduced = usePrefersReducedMotion();
+
+  const vaultReady = vaultRoot !== undefined;
+  const vk = useMemo(() => (vaultRoot === undefined ? undefined : vaultKey(vaultRoot)), [vaultRoot]);
 
   const treeRef = useRef<TreeApi<ArNode> | undefined>(undefined);
   const [listRef, size] = useElementSize();
@@ -689,6 +710,8 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const openTimer = useRef<number | undefined>(undefined);
   const moveTimer = useRef<number | undefined>(undefined);
   const renameTimer = useRef<number | undefined>(undefined);
+  const iconTimer = useRef<number | undefined>(undefined);
+  const bulkToggle = useRef(false);
 
   const forest = useMemo(() => buildForest(tree), [tree]);
   const pinned = useMemo(
@@ -702,17 +725,20 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
 
   const initialOpenState = useMemo(() => {
     const state: Record<string, boolean> = {};
-    for (const id of useVaultStore.getState().collapsedFolders) {
-      state[id] = false;
+    if (vk !== undefined) {
+      for (const id of useTreeStateStore.getState().getExpanded(vk)) {
+        state[id] = true;
+      }
     }
     return state;
-  }, []);
+  }, [vk]);
 
   useEffect(() => {
     return () => {
       window.clearTimeout(openTimer.current);
       window.clearTimeout(moveTimer.current);
       window.clearTimeout(renameTimer.current);
+      window.clearTimeout(iconTimer.current);
     };
   }, []);
 
@@ -805,7 +831,10 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   }, []);
 
   const requestIcon = useCallback((request: IconRequest) => {
-    setIconRequest(request);
+    // Монтируем пикер следующим тиком: контекст-меню при закрытии возвращает фокус,
+    // и свежий Popover принял бы это за взаимодействие снаружи и сразу закрылся.
+    window.clearTimeout(iconTimer.current);
+    iconTimer.current = window.setTimeout(() => setIconRequest(request), 0);
   }, []);
 
   const newNoteInside = useCallback((parent: NoteRef) => {
@@ -850,14 +879,54 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
 
   const handleToggle = useCallback(
     (id: string) => {
+      if (bulkToggle.current) {
+        return;
+      }
       const open = treeRef.current?.isOpen(id) === true;
-      useVaultStore.getState().setFolderCollapsed(id, !open);
+      if (vk !== undefined) {
+        useTreeStateStore.getState().toggle(vk, id, open);
+      }
       if (open) {
         flagOpened(id);
       }
     },
-    [flagOpened],
+    [vk, flagOpened],
   );
+
+  // openAll/closeAll шлют onToggle на каждый узел — на большом дереве это тысячи
+  // одиночных записей и массовая reveal-анимация. Глушим обработчик флагом и
+  // сохраняем итог одним setExpanded.
+  const collapseAll = useCallback(() => {
+    const api = treeRef.current;
+    if (api === undefined) {
+      return;
+    }
+    bulkToggle.current = true;
+    try {
+      api.closeAll();
+    } finally {
+      bulkToggle.current = false;
+    }
+    if (vk !== undefined) {
+      useTreeStateStore.getState().setExpanded(vk, []);
+    }
+  }, [vk]);
+
+  const expandAll = useCallback(() => {
+    const api = treeRef.current;
+    if (api === undefined) {
+      return;
+    }
+    bulkToggle.current = true;
+    try {
+      api.openAll();
+    } finally {
+      bulkToggle.current = false;
+    }
+    if (vk !== undefined) {
+      useTreeStateStore.getState().setExpanded(vk, collectFolderIds(forest));
+    }
+  }, [vk, forest]);
 
   const handleRename = useCallback<RenameHandler<ArNode>>(({ node, name }) => {
     if (node.data.virtual === true) {
@@ -979,58 +1048,84 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       <header className="flex h-9 shrink-0 items-center justify-between px-4 text-caption text-text-2">
         <span>Заметки</span>
         {vaultReady ? (
-          <DropdownMenu.Root open={plusOpen} onOpenChange={setPlusOpen}>
-            <DropdownMenu.Trigger asChild>
-              <button
-                type="button"
-                aria-label="Создать"
-                className={cx(
-                  'rounded-xs p-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0',
-                  plusOpen ? 'bg-bg-3 text-accent' : 'text-text-2',
-                )}
-              >
-                <motion.span
-                  className="flex"
-                  animate={{ rotate: plusOpen ? 90 : 0 }}
-                  transition={reduced ? { duration: 0 } : springSnappy}
+          <div className="flex items-center gap-0.5">
+            {forest.length > 0 ? (
+              <>
+                <Tooltip content="Развернуть все" side="bottom">
+                  <button
+                    type="button"
+                    aria-label="Развернуть все"
+                    onClick={expandAll}
+                    className="rounded-xs p-1 text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+                  >
+                    <ChevronsUpDown size={15} strokeWidth={1.75} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Свернуть все" side="bottom">
+                  <button
+                    type="button"
+                    aria-label="Свернуть все"
+                    onClick={collapseAll}
+                    className="rounded-xs p-1 text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+                  >
+                    <ChevronsDownUp size={15} strokeWidth={1.75} />
+                  </button>
+                </Tooltip>
+              </>
+            ) : null}
+            <DropdownMenu.Root open={plusOpen} onOpenChange={setPlusOpen}>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  aria-label="Создать"
+                  className={cx(
+                    'rounded-xs p-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+                    plusOpen ? 'bg-bg-3 text-accent' : 'text-text-2',
+                  )}
                 >
-                  <Plus size={14} strokeWidth={1.75} />
-                </motion.span>
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content align="end" sideOffset={6} className={DD_CONTENT}>
-                <DropdownMenu.Item
-                  className={MENU_ITEM}
-                  onSelect={() => void useVaultStore.getState().createNote()}
-                >
-                  <FilePlus size={15} strokeWidth={1.75} className="text-text-2" />
-                  <span className="flex-1">Новая заметка</span>
-                  <Kbd>Ctrl+N</Kbd>
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  className={MENU_ITEM}
-                  onSelect={() => useTemplatePickerStore.getState().openPicker()}
-                >
-                  <LayoutTemplate size={15} strokeWidth={1.75} className="text-text-2" />
-                  <span className="flex-1">Из шаблона…</span>
-                  <Kbd>Ctrl+Alt+N</Kbd>
-                </DropdownMenu.Item>
-                <DropdownMenu.Item className={MENU_ITEM} onSelect={() => createFolderFlow()}>
-                  <FolderPlus size={15} strokeWidth={1.75} className="text-text-2" />
-                  <span className="flex-1">Новая папка</span>
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator className="my-1 h-px bg-stroke-0" />
-                <DropdownMenu.Item
-                  className={MENU_ITEM}
-                  onSelect={() => void useVaultStore.getState().createNote({ title: 'Новый план', type: 'plan' })}
-                >
-                  <SquareKanban size={15} strokeWidth={1.75} className="text-text-2" />
-                  <span className="flex-1">Новый план</span>
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
+                  <motion.span
+                    className="flex"
+                    animate={{ rotate: plusOpen ? 90 : 0 }}
+                    transition={reduced ? { duration: 0 } : springSnappy}
+                  >
+                    <Plus size={14} strokeWidth={1.75} />
+                  </motion.span>
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content align="end" sideOffset={6} className={DD_CONTENT}>
+                  <DropdownMenu.Item
+                    className={MENU_ITEM}
+                    onSelect={() => void useVaultStore.getState().createNote()}
+                  >
+                    <FilePlus size={15} strokeWidth={1.75} className="text-text-2" />
+                    <span className="flex-1">Новая заметка</span>
+                    <Kbd>Ctrl+N</Kbd>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className={MENU_ITEM}
+                    onSelect={() => useTemplatePickerStore.getState().openPicker()}
+                  >
+                    <LayoutTemplate size={15} strokeWidth={1.75} className="text-text-2" />
+                    <span className="flex-1">Из шаблона…</span>
+                    <Kbd>Ctrl+Alt+N</Kbd>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className={MENU_ITEM} onSelect={() => createFolderFlow()}>
+                    <FolderPlus size={15} strokeWidth={1.75} className="text-text-2" />
+                    <span className="flex-1">Новая папка</span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="my-1 h-px bg-stroke-0" />
+                  <DropdownMenu.Item
+                    className={MENU_ITEM}
+                    onSelect={() => void useVaultStore.getState().createNote({ title: 'Новый план', type: 'plan' })}
+                  >
+                    <SquareKanban size={15} strokeWidth={1.75} className="text-text-2" />
+                    <span className="flex-1">Новый план</span>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
         ) : null}
       </header>
 
@@ -1055,11 +1150,12 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
             <div ref={listRef} className="min-h-0 flex-1">
               {forest.length > 0 ? (
                 <Tree<ArNode>
+                  key={vk ?? 'vault'}
                   ref={treeRef}
                   data={forest}
                   idAccessor="id"
                   childrenAccessor="children"
-                  openByDefault
+                  openByDefault={false}
                   initialOpenState={initialOpenState}
                   width={size.width > 0 ? size.width : width}
                   height={size.height > 0 ? size.height : 600}

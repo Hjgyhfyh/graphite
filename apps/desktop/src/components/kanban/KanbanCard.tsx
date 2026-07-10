@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HTMLAttributes, KeyboardEvent, PointerEvent as ReactPointerEvent, Ref, RefObject } from 'react';
+import type { HTMLAttributes, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, Ref, RefObject } from 'react';
 import { motion } from 'motion/react';
-import { Pin } from 'lucide-react';
-import { cx } from '@graphite/ui';
+import * as Popover from '@radix-ui/react-popover';
+import { PenLine, Pin } from 'lucide-react';
+import { Tooltip, cx } from '@graphite/ui';
 import { commands, isGraphiteError } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
 import { NoteIcon } from '../tree/NoteIcon';
 import { REDUCED_CROSSFADE, springSnappy, springStandard } from '../../motion';
+import { CARD_ALIAS_MAX } from '../../stores/boardStore';
 import { formatUpdated, typeFallbackIcon, typeLabel } from './columns';
 import type { KanbanCardData } from './columns';
 
@@ -90,10 +92,11 @@ function useCardTags(ref: string, updated: string, elementRef: RefObject<HTMLEle
 export interface CardSurfaceProps extends HTMLAttributes<HTMLDivElement> {
   card: KanbanCardData;
   tags: string[];
+  titleAction?: ReactNode;
   ref?: Ref<HTMLDivElement>;
 }
 
-export function CardSurface({ card, tags, className, ref, ...rest }: CardSurfaceProps) {
+export function CardSurface({ card, tags, titleAction, className, ref, ...rest }: CardSurfaceProps) {
   const updatedLabel = formatUpdated(card.updated);
   return (
     <div
@@ -108,10 +111,16 @@ export function CardSurface({ card, tags, className, ref, ...rest }: CardSurface
         <span className="mt-px shrink-0">
           <NoteIcon icon={card.icon} color={card.iconColor} size={15} fallback={typeFallbackIcon(card.type)} />
         </span>
-        <h3 className="line-clamp-2 min-w-0 flex-1 text-ui text-text-0">{card.title}</h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="line-clamp-2 text-ui text-text-0">{card.alias ?? card.title}</h3>
+          {card.alias !== undefined ? (
+            <p className="mt-0.5 line-clamp-1 text-micro text-text-3">{card.title}</p>
+          ) : null}
+        </div>
         {card.pinned === true ? (
           <Pin size={12} strokeWidth={1.75} className="mt-0.5 shrink-0 text-text-3" aria-hidden />
         ) : null}
+        {titleAction}
       </div>
 
       {tags.length > 0 ? (
@@ -136,6 +145,111 @@ export function CardSurface({ card, tags, className, ref, ...rest }: CardSurface
   );
 }
 
+interface CardAliasButtonProps {
+  card: KanbanCardData;
+  onAliasChange(ref: NoteRef, alias: string): void;
+}
+
+function CardAliasButton({ card, onAliasChange }: CardAliasButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      setDraft(card.alias ?? '');
+    }
+    setOpen(next);
+  };
+
+  const commit = () => {
+    onAliasChange(card.ref, draft);
+    setOpen(false);
+  };
+
+  const clear = () => {
+    onAliasChange(card.ref, '');
+    setOpen(false);
+  };
+
+  return (
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+      <Tooltip content="Подпись на доске">
+        <Popover.Trigger asChild>
+          <button
+            type="button"
+            aria-label={`Подпись для «${card.title}»`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            className={cx(
+              'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-xs transition-[color,opacity,background-color] duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+              open
+                ? 'bg-bg-3 text-text-0 opacity-100'
+                : 'text-text-3 opacity-0 focus-visible:opacity-100 group-hover:opacity-100',
+            )}
+          >
+            <PenLine size={12} strokeWidth={1.75} />
+          </button>
+        </Popover.Trigger>
+      </Tooltip>
+      <Popover.Portal>
+        {/* Портал рендерится в body, но React-события всплывают по дереву компонентов
+            до кликабельной карточки — гасим их, чтобы ввод не открывал заметку. */}
+        <Popover.Content
+          side="bottom"
+          align="end"
+          sideOffset={6}
+          collisionPadding={8}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          className="z-50 w-64 origin-(--radix-popover-content-transform-origin) animate-pop rounded-m border border-stroke-1 bg-bg-2 p-2.5 shadow-3"
+        >
+          <p className="text-micro uppercase tracking-wide text-text-3">Подпись на доске</p>
+          <input
+            autoFocus
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                commit();
+              } else if (event.key === 'Escape') {
+                setOpen(false);
+              }
+            }}
+            maxLength={CARD_ALIAS_MAX}
+            placeholder={card.title}
+            aria-label="Подпись карточки"
+            className="mt-1.5 h-7 w-full rounded-s border border-stroke-1 bg-bg-1 px-2 text-ui text-text-0 outline-none placeholder:text-text-3 focus:border-accent/50"
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-micro text-text-3">Видна только на доске</span>
+            <div className="flex items-center gap-1">
+              {card.alias !== undefined ? (
+                <button
+                  type="button"
+                  onClick={clear}
+                  className="rounded-xs px-1.5 py-0.5 text-caption text-text-2 transition-colors duration-[120ms] hover:bg-danger/10 hover:text-danger"
+                >
+                  Убрать
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={commit}
+                className="rounded-xs px-1.5 py-0.5 text-caption text-accent transition-colors duration-[120ms] hover:bg-accent/10"
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 export interface KanbanCardProps {
   card: KanbanCardData;
   reduced: boolean;
@@ -143,6 +257,7 @@ export interface KanbanCardProps {
   settling: boolean;
   onLift(event: ReactPointerEvent<HTMLElement>, card: KanbanCardData, tags: string[]): void;
   onOpen(ref: NoteRef): void;
+  onAliasChange(ref: NoteRef, alias: string): void;
   consumeDropClick(): boolean;
   registerCard(ref: NoteRef, el: HTMLElement): void;
   unregisterCard(ref: NoteRef, el: HTMLElement): void;
@@ -155,6 +270,7 @@ export function KanbanCard({
   settling,
   onLift,
   onOpen,
+  onAliasChange,
   consumeDropClick,
   registerCard,
   unregisterCard,
@@ -205,6 +321,7 @@ export function KanbanCard({
         ref={attachSurface}
         card={card}
         tags={tags}
+        titleAction={<CardAliasButton card={card} onAliasChange={onAliasChange} />}
         role="button"
         tabIndex={0}
         aria-label={`Открыть «${card.title}»`}

@@ -37,3 +37,4 @@ chrono = { workspace = true }
 vault-core = { path = "../../../crates/vault-core" }
 history = { path = "../../../crates/history" }
 rpc = { path = "../../../crates/rpc" }
+sync-core = { path = "../../../crates/sync-core" }

@@ -1,15 +1,19 @@
 import { CheckCircle2, CircleDot, ClipboardList, Inbox, PencilRuler, Snowflake } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { isGraphiteError } from '@graphite/bindings';
 import type { NoteType, Status, TreeNode } from '@graphite/bindings';
+import { DEFAULT_ORDER } from '../../stores/boardStore';
+import type { BoardConfig, ColumnConfig } from '../../stores/boardStore';
+import { resolveIconColor, resolveIconComponent } from '../tree/NoteIcon';
 
 export interface KanbanCardData extends TreeNode {
   status: Status;
   sortStamp: number;
+  alias?: string;
 }
 
-export interface ColumnDef {
-  status: Status;
+export interface ColumnMeta {
   label: string;
   icon: LucideIcon;
   iconClass: string;
@@ -17,65 +21,95 @@ export interface ColumnDef {
   hint: string;
 }
 
-export const COLUMNS: readonly ColumnDef[] = [
-  {
-    status: 'inbox',
+export const DEFAULT_COLUMN_META: Record<Status, ColumnMeta> = {
+  inbox: {
     label: 'Входящие',
     icon: Inbox,
     iconClass: 'text-status-inbox',
     tintClass: 'bg-status-inbox/15',
     hint: 'Пусто. Ловите искры на Ctrl+Alt+Space.',
   },
-  {
-    status: 'shaping',
+  shaping: {
     label: 'Проработка',
     icon: PencilRuler,
     iconClass: 'text-status-shaping',
     tintClass: 'bg-status-shaping/15',
     hint: 'Нет заметок в проработке.',
   },
-  {
-    status: 'planned',
+  planned: {
     label: 'План',
     icon: ClipboardList,
     iconClass: 'text-status-plan',
     tintClass: 'bg-status-plan/15',
     hint: 'Здесь появятся планы.',
   },
-  {
-    status: 'active',
+  active: {
     label: 'В работе',
     icon: CircleDot,
     iconClass: 'text-status-doing',
     tintClass: 'bg-status-doing/15',
     hint: 'Ничего в работе.',
   },
-  {
-    status: 'done',
+  done: {
     label: 'Готово',
     icon: CheckCircle2,
     iconClass: 'text-status-done',
     tintClass: 'bg-status-done/15',
     hint: 'Пока ничего не завершено.',
   },
-  {
-    status: 'iced',
+  iced: {
     label: 'Лёд',
     icon: Snowflake,
     iconClass: 'text-status-ice',
     tintClass: 'bg-status-ice/15',
     hint: 'Заморозки нет.',
   },
-];
+};
 
-const STATUS_SET: ReadonlySet<Status> = new Set<Status>([
-  'inbox',
-  'shaping',
-  'planned',
-  'active',
-  'done',
-  'iced',
-]);
+export interface ResolvedColumn {
+  status: Status;
+  label: string;
+  defaultLabel: string;
+  icon: LucideIcon;
+  iconClass?: string;
+  iconStyle?: CSSProperties;
+  tintClass?: string;
+  tintStyle?: CSSProperties;
+  hint: string;
+  hidden: boolean;
+}
+
+/** Колонка с учётом настроек доски: кастомный цвет заменяет штатные токены статуса. */
+export function resolveColumn(status: Status, config?: ColumnConfig): ResolvedColumn {
+  const meta = DEFAULT_COLUMN_META[status];
+  const tint = resolveIconColor(config?.iconColor);
+  const customIcon = config?.icon !== undefined && config.icon.length > 0;
+  return {
+    status,
+    label: config?.label !== undefined && config.label.length > 0 ? config.label : meta.label,
+    defaultLabel: meta.label,
+    icon: customIcon ? resolveIconComponent(config?.icon) : meta.icon,
+    iconClass: tint === undefined ? meta.iconClass : undefined,
+    iconStyle: tint === undefined ? undefined : { color: tint },
+    tintClass: tint === undefined ? meta.tintClass : undefined,
+    tintStyle: tint === undefined ? undefined : { backgroundColor: `color-mix(in srgb, ${tint} 16%, transparent)` },
+    hint: meta.hint,
+    hidden: config?.hidden === true,
+  };
+}
+
+export function resolveColumns(config: BoardConfig, includeHidden = false): ResolvedColumn[] {
+  const columns: ResolvedColumn[] = [];
+  for (const status of config.order) {
+    const column = resolveColumn(status, config.columns[status]);
+    if (includeHidden || !column.hidden) {
+      columns.push(column);
+    }
+  }
+  return columns;
+}
+
+const STATUS_SET: ReadonlySet<Status> = new Set<Status>(DEFAULT_ORDER);
 
 const PIPELINE_TYPES: ReadonlySet<NoteType> = new Set<NoteType>(['note', 'project', 'plan']);
 

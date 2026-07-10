@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "graphite-app"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1729,6 +1729,7 @@ dependencies = [
  "serde_json",
  "specta",
  "specta-typescript",
+ "sync-core",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1746,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "graphite-mcp"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "rmcp",
  "rpc",
@@ -1866,7 +1867,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "history"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "blake3",
  "rpc",
@@ -3451,6 +3452,7 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -3557,7 +3559,7 @@ dependencies = [
 
 [[package]]
 name = "rpc"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "interprocess",
@@ -4276,6 +4278,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "sync-core"
+version = "0.1.5"
+dependencies = [
+ "chrono",
+ "hex",
+ "rand",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5381,7 +5398,7 @@ dependencies = [
 
 [[package]]
 name = "vault-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "blake3",
  "comrak",

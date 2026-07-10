@@ -69,6 +69,9 @@ import type {
   SetIconResponse,
   SetStatusParams,
   SetStatusResponse,
+  SyncCreateResult,
+  SyncJoinResult,
+  SyncStatusDto,
   TagInfo,
   TaskCheckParams,
   TaskCheckResponse,
@@ -263,5 +266,20 @@ export const commands = {
   },
   gitPull(): Promise<GitActionResult> {
     return invoke('git_pull');
+  },
+  syncCreate(destPath: string, copyFromCurrent: boolean): Promise<SyncCreateResult> {
+    return invoke('sync_create', { destPath, copyFromCurrent });
+  },
+  syncJoin(destPath: string, code: string): Promise<SyncJoinResult> {
+    return invoke('sync_join', { destPath, code });
+  },
+  syncStatus(): Promise<SyncStatusDto> {
+    return invoke('sync_status');
+  },
+  syncNow(): Promise<SyncStatusDto> {
+    return invoke('sync_now');
+  },
+  syncDetach(): Promise<void> {
+    return invoke('sync_detach');
   },
 } as const;

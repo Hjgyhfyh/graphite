@@ -5,6 +5,7 @@ mod gitsync;
 mod rpc_handler;
 mod runtime;
 mod state;
+mod sync;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -82,6 +83,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             gitsync::git_remote_set,
             gitsync::git_push,
             gitsync::git_pull,
+            sync::sync_create,
+            sync::sync_join,
+            sync::sync_status,
+            sync::sync_now,
+            sync::sync_detach,
         ])
         .events(collect_events![
             events::NoteChangedEvent,
@@ -90,6 +96,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::McpSessionEvent,
             events::UiOpenNoteEvent,
             events::UiFlashNoteEvent,
+            events::SyncStatusEvent,
         ])
 }
 
@@ -425,6 +432,7 @@ pub fn run() {
             let mcp_item = build_tray(app)?;
             register_global_shortcut(app.handle());
             spawn_watcher_supervisor(app.handle().clone());
+            sync::spawn_sync_supervisor(app.handle().clone());
 
             let rpc_slot: Arc<Mutex<Option<rpc::ServerHandle>>> = Arc::new(Mutex::new(None));
             app.manage(rpc_slot.clone());
@@ -475,5 +483,11 @@ mod tests {
         assert!(out.contains("exportWrite"));
         assert!(out.contains("note_changed"));
         assert!(out.contains("ui_flash_note"));
+        assert!(out.contains("syncCreate"));
+        assert!(out.contains("syncJoin"));
+        assert!(out.contains("syncStatus"));
+        assert!(out.contains("syncNow"));
+        assert!(out.contains("syncDetach"));
+        assert!(out.contains("sync_status"));
     }
 }
