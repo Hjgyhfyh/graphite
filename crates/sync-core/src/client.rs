@@ -123,6 +123,26 @@ fn parse_vault_body(body: &str) -> SyncResult<(String, i64)> {
     Ok((b.vault_id, b.rev))
 }
 
+/// Percent-кодирование значения query-параметра (RFC 3986): нетронутыми
+/// остаются только unreserved-символы, остальные байты UTF-8 → `%XX`.
+/// Слэши тоже кодируются — для значения параметра это допустимо, сервер
+/// раскодирует. Своя реализация, потому что reqwest собран без фичи `query`.
+pub fn encode_query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for b in value.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{b:02X}"));
+            }
+        }
+    }
+    out
+}
+
 /// Гарантирует установленный процессный крипто-провайдер rustls (ring). reqwest
 /// собран с `rustls-no-provider`, поэтому провайдер должен быть выбран до TLS.
 /// Вызов идемпотентен: повторная установка (например, после плагина обновлений
@@ -156,6 +176,10 @@ impl SyncClient {
 
     fn url(&self, suffix: &str) -> String {
         format!("{}{}", self.base, suffix)
+    }
+
+    fn file_url(&self, path: &str) -> String {
+        format!("{}?path={}", self.url("/v1/file"), encode_query_value(path))
     }
 
     fn bearer(&self) -> String {
@@ -216,9 +240,8 @@ impl SyncClient {
     pub fn get_file(&self, path: &str) -> SyncResult<Option<Vec<u8>>> {
         let resp = self
             .http
-            .get(self.url("/v1/file"))
+            .get(self.file_url(path))
             .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .query(&[("path", path)])
             .send()
             .map_err(|e| SyncError::Http(format!("get_file: {e}")))?;
         let status = resp.status().as_u16();
@@ -243,9 +266,8 @@ impl SyncClient {
         paths::validate(path)?;
         let mut req = self
             .http
-            .put(self.url("/v1/file"))
+            .put(self.file_url(path))
             .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .query(&[("path", path)])
             .body(body.to_vec());
         if let Some(h) = if_hash {
             req = req.header("X-If-Hash", h);
@@ -273,9 +295,8 @@ impl SyncClient {
         paths::validate(path)?;
         let mut req = self
             .http
-            .delete(self.url("/v1/file"))
-            .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .query(&[("path", path)]);
+            .delete(self.file_url(path))
+            .header(reqwest::header::AUTHORIZATION, self.bearer());
         if let Some(h) = if_hash {
             req = req.header("X-If-Hash", h);
         }
@@ -368,6 +389,15 @@ mod tests {
             parse_vault_body(r#"{"vaultId":"abc123def456","rev":0}"#).unwrap(),
             ("abc123def456".to_string(), 0)
         );
+    }
+
+    #[test]
+    fn query_value_encoding() {
+        assert_eq!(encode_query_value("notes/a.md"), "notes%2Fa.md");
+        assert_eq!(encode_query_value("Дневник/2026-07-10.md"), "%D0%94%D0%BD%D0%B5%D0%B2%D0%BD%D0%B8%D0%BA%2F2026-07-10.md");
+        assert_eq!(encode_query_value("a b+c&d=e?f#g"), "a%20b%2Bc%26d%3De%3Ff%23g");
+        assert_eq!(encode_query_value("A-Z_0.9~z"), "A-Z_0.9~z");
+        assert_eq!(encode_query_value(""), "");
     }
 
     #[test]
