@@ -18,6 +18,7 @@
     "@codemirror/state": "^6.7.0",
     "@codemirror/view": "^6.43.4",
     "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@graphite/bindings": "workspace:*",
     "@graphite/editor": "workspace:*",
@@ -39,6 +40,7 @@
     "motion": "^12.42.2",
     "react": "^19.2.7",
     "react-arborist": "^3.12.0",
+    "react-dnd-touch-backend": "^14.1.1",
     "react-dom": "^19.2.7",
     "zustand": "^5.0.14"
   },

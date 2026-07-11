@@ -22,6 +22,9 @@ function flattenInline(nodes: readonly MdInline[]): string {
       case 'code':
         out += node.value;
         break;
+      case 'tag':
+        out += `#${node.value}`;
+        break;
       case 'strong':
       case 'em':
       case 'del':

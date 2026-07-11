@@ -231,6 +231,12 @@ export const graphiteDark = EditorView.theme(
       color: 'var(--accent)',
       textUnderlineOffset: '2px',
     },
+    '.cm-gr-tag': {
+      color: 'var(--accent)',
+      backgroundColor: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+      borderRadius: 'var(--r-full, 999px)',
+      padding: '0.06em 0.45em',
+    },
     '.cm-gr-list-mark': {
       color: 'var(--accent)',
     },

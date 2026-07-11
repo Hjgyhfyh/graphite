@@ -813,7 +813,7 @@ export interface ExportWriteParams {
   contents: string;
 }
 
-export type NoteChangeKind = 'created' | 'modified' | 'removed' | 'moved';
+export type NoteChangeKind = 'created' | 'modified' | 'removed' | 'moved' | 'bufferbody';
 
 export interface NoteChangedEvent {
   ref: NoteRef;
@@ -835,4 +835,32 @@ export interface JournalOpEvent {
 export interface McpSessionEvent {
   active: boolean;
   session?: string;
+}
+
+/** Запись истории отправленных промтов (`.graphite/prompts/YYYY-MM.jsonl`). */
+export interface PromptLogEntry {
+  id: string;
+  ts: string;
+  /** Откуда отправлено: copyPage | bundle | prompt | brief. */
+  source: string;
+  title: string;
+  chars: number;
+  refs?: string[];
+  text: string;
+}
+
+/** Строка списка истории — без текста промта. */
+export interface PromptLogMeta {
+  id: string;
+  ts: string;
+  source: string;
+  title: string;
+  chars: number;
+}
+
+export interface PromptLogAppendParams {
+  source: string;
+  title: string;
+  refs?: string[];
+  text: string;
 }

@@ -26,6 +26,7 @@ export type ActionId =
   | 'format.bold'
   | 'format.italic'
   | 'task.toggleLine'
+  | 'task.sweepDone'
   | 'edit.undo'
   | 'edit.redo'
   | 'tab.next'
@@ -38,7 +39,8 @@ export type ActionId =
   | 'sidebar.toggleRight'
   | 'aiFeed.toggle'
   | 'view.outline'
-  | 'capture.quick';
+  | 'capture.quick'
+  | 'prompts.history';
 
 export type ActionGroup = 'Навигация' | 'Заметки' | 'Редактор' | 'Вкладки и панели' | 'Прочее';
 
@@ -73,6 +75,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'format.bold', title: 'Жирный', group: 'Редактор' },
   { id: 'format.italic', title: 'Курсив', group: 'Редактор' },
   { id: 'task.toggleLine', title: 'Строка в чекбокс', group: 'Редактор' },
+  { id: 'task.sweepDone', title: 'Убрать сделанное в «Готово»', group: 'Редактор' },
   { id: 'edit.undo', title: 'Отменить', group: 'Редактор' },
   { id: 'edit.redo', title: 'Повторить', group: 'Редактор' },
   { id: 'tab.next', title: 'Следующая вкладка', group: 'Вкладки и панели' },
@@ -86,6 +89,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'aiFeed.toggle', title: 'Лента ассистента', group: 'Вкладки и панели' },
   { id: 'view.outline', title: 'Оглавление заметки', group: 'Вкладки и панели' },
   { id: 'capture.quick', title: 'Быстрая запись', group: 'Прочее' },
+  { id: 'prompts.history', title: 'История промтов', group: 'Прочее' },
 ];
 
 export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
@@ -113,6 +117,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'format.bold': ['Ctrl+B'],
   'format.italic': ['Ctrl+I'],
   'task.toggleLine': ['Ctrl+Shift+L'],
+  'task.sweepDone': ['Ctrl+Shift+D'],
   'edit.undo': ['Ctrl+Z'],
   'edit.redo': ['Ctrl+Y', 'Ctrl+Shift+Z'],
   'tab.next': ['Ctrl+Tab'],
@@ -126,6 +131,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'aiFeed.toggle': ['Ctrl+Shift+A'],
   'view.outline': ['Ctrl+Shift+O'],
   'capture.quick': ['Ctrl+Alt+Space'],
+  'prompts.history': [],
 };
 
 const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta', 'OS', 'AltGraph', 'ContextMenu']);

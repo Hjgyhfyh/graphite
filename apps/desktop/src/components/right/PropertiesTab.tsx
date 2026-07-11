@@ -42,6 +42,10 @@ const STATUS_DOT: Record<NoteStatus, string> = {
 
 const PRIORITY_ORDER: readonly Priority[] = ['urgent', 'high', 'normal', 'low'];
 
+/** Автосейв тела шлёт `bufferbody` каждые ~600 мс печати — свойства перечитываем
+ *  ленивым дебаунсом, мгновенно реагируя только на структурные правки. */
+const BUFFER_BODY_RELOAD_MS = 1000;
+
 const PRIORITY_META: Record<Priority, { label: string; chip: string; dot: string }> = {
   urgent: { label: 'Срочно', chip: 'bg-danger/15 text-danger', dot: 'bg-danger' },
   high: { label: 'Важно', chip: 'bg-warn/15 text-warn', dot: 'bg-warn' },
@@ -127,12 +131,31 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
     if (!isTauriAvailable()) {
       return;
     }
+    let timer: number | undefined;
     const subscription = listen<NoteChangedEvent>(GRAPHITE_EVENT.noteChanged, (event) => {
-      if (event.payload.ref === noteRef && event.payload.rev !== revRef.current) {
-        void load();
+      if (event.payload.ref !== noteRef || event.payload.rev === revRef.current) {
+        return;
       }
+      if (event.payload.kind === 'bufferbody') {
+        if (timer !== undefined) {
+          window.clearTimeout(timer);
+        }
+        timer = window.setTimeout(() => {
+          timer = undefined;
+          void load();
+        }, BUFFER_BODY_RELOAD_MS);
+        return;
+      }
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+      void load();
     });
     return () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
       void subscription.then((unlisten) => unlisten());
     };
   }, [noteRef, load]);

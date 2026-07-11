@@ -10,3 +10,6 @@ dist/
 graphite-updater.key
 .tauri/
 /keys/
+
+# Локальные настройки Claude Code
+.claude/

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { exportNoteHtml, exportNoteMarkdown, printNote } from '../lib/exportNote';
 import { openBriefView } from '../stores/briefStore';
+import { openPromptHistory } from '../stores/promptHistoryStore';
 import type { ActionId } from '../stores/keybindingsStore';
 import { useKeybindingsStore } from '../stores/keybindingsStore';
 import { useNavStore } from '../stores/navStore';
@@ -35,6 +36,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'note.newFromTemplate',
   'note.copyPage',
   'editor.toggleReading',
+  'task.sweepDone',
   'view.outline',
 ]);
 
@@ -130,6 +132,9 @@ function runBuiltin(id: ActionId): boolean {
       return true;
     case 'view.brief':
       openBriefView();
+      return true;
+    case 'prompts.history':
+      openPromptHistory();
       return true;
     case 'settings.open':
       ui.setRailView('settings');
@@ -245,6 +250,11 @@ export function runAction(id: ActionId): boolean {
 export function Keymap() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Клавиша, уже обработанная редактором (CodeMirror ставит preventDefault),
+      // не должна вдобавок запускать глобальный экшен.
+      if (event.defaultPrevented) {
+        return;
+      }
       const id = useKeybindingsStore.getState().matchEvent(event);
       if (id === null) {
         return;

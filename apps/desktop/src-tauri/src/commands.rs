@@ -714,13 +714,13 @@ fn note_create_impl(
     Ok((resp, text))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn vault_info() -> Result<VaultInfoResponse, GraphiteError> {
     vault_info_impl()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn vault_tree(params: VaultTreeParams) -> Result<VaultTreeResponse, GraphiteError> {
     let root = current_root()?;
@@ -838,7 +838,7 @@ fn child_node(root: &Path, meta: &vault_core::NoteMeta) -> TreeNode {
     node_for(&meta.path, &meta.title, &abs, count)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_read(params: NoteReadParams) -> Result<NoteReadResponse, GraphiteError> {
     let root = current_root()?;
@@ -870,7 +870,7 @@ pub fn note_read(params: NoteReadParams) -> Result<NoteReadResponse, GraphiteErr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn search(params: SearchParams) -> Result<SearchResponse, GraphiteError> {
     with_core(|s| {
@@ -880,7 +880,7 @@ pub fn search(params: SearchParams) -> Result<SearchResponse, GraphiteError> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn links_get(params: LinksGetParams) -> Result<LinksGetResponse, GraphiteError> {
     with_core(|s| {
@@ -890,7 +890,7 @@ pub fn links_get(params: LinksGetParams) -> Result<LinksGetResponse, GraphiteErr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn activity_get(params: ActivityGetParams) -> Result<ActivityGetResponse, GraphiteError> {
     with_core(|s| {
@@ -900,7 +900,7 @@ pub fn activity_get(params: ActivityGetParams) -> Result<ActivityGetResponse, Gr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn context_briefing() -> Result<ContextBriefingResponse, GraphiteError> {
     with_core(|s| {
@@ -909,7 +909,7 @@ pub fn context_briefing() -> Result<ContextBriefingResponse, GraphiteError> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_create(params: NoteCreateParams) -> Result<NoteCreateResponse, GraphiteError> {
     let (resp, text) = note_create_impl(
@@ -925,7 +925,7 @@ pub fn note_create(params: NoteCreateParams) -> Result<NoteCreateResponse, Graph
     Ok(resp)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_edit(params: NoteEditParams) -> Result<NoteEditResponse, GraphiteError> {
     with_core(|s| {
@@ -936,7 +936,7 @@ pub fn note_edit(params: NoteEditParams) -> Result<NoteEditResponse, GraphiteErr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_move(params: NoteMoveParams) -> Result<NoteMoveResponse, GraphiteError> {
     with_core(|s| {
@@ -947,7 +947,7 @@ pub fn note_move(params: NoteMoveParams) -> Result<NoteMoveResponse, GraphiteErr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_rename(params: NoteRenameParams) -> Result<NoteRenameResponse, GraphiteError> {
     with_core(|s| {
@@ -958,7 +958,7 @@ pub fn note_rename(params: NoteRenameParams) -> Result<NoteRenameResponse, Graph
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_delete(params: NoteDeleteParams) -> Result<NoteDeleteResponse, GraphiteError> {
     with_core(|s| {
@@ -969,7 +969,7 @@ pub fn note_delete(params: NoteDeleteParams) -> Result<NoteDeleteResponse, Graph
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_restore(params: NoteRestoreParams) -> Result<NoteRestoreResponse, GraphiteError> {
     with_core(|s| {
@@ -980,7 +980,7 @@ pub fn note_restore(params: NoteRestoreParams) -> Result<NoteRestoreResponse, Gr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn set_status(params: SetStatusParams) -> Result<SetStatusResponse, GraphiteError> {
     with_core(|s| {
@@ -991,7 +991,7 @@ pub fn set_status(params: SetStatusParams) -> Result<SetStatusResponse, Graphite
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn link_add(params: LinkAddParams) -> Result<LinkAddResponse, GraphiteError> {
     with_core(|s| {
@@ -1002,7 +1002,7 @@ pub fn link_add(params: LinkAddParams) -> Result<LinkAddResponse, GraphiteError>
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn link_remove(params: LinkRemoveParams) -> Result<LinkRemoveResponse, GraphiteError> {
     with_core(|s| {
@@ -1013,7 +1013,7 @@ pub fn link_remove(params: LinkRemoveParams) -> Result<LinkRemoveResponse, Graph
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn tasks_query(params: TasksQueryParams) -> Result<TasksQueryResponse, GraphiteError> {
     with_core(|s| {
@@ -1023,7 +1023,7 @@ pub fn tasks_query(params: TasksQueryParams) -> Result<TasksQueryResponse, Graph
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn task_check(params: TaskCheckParams) -> Result<TaskCheckResponse, GraphiteError> {
     with_core(|s| {
@@ -1034,7 +1034,7 @@ pub fn task_check(params: TaskCheckParams) -> Result<TaskCheckResponse, Graphite
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn plan_create(params: PlanCreateParams) -> Result<PlanCreateResponse, GraphiteError> {
     with_core(|s| {
@@ -1045,7 +1045,7 @@ pub fn plan_create(params: PlanCreateParams) -> Result<PlanCreateResponse, Graph
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn plan_update(params: PlanUpdateParams) -> Result<PlanUpdateResponse, GraphiteError> {
     with_core(|s| {
@@ -1056,7 +1056,7 @@ pub fn plan_update(params: PlanUpdateParams) -> Result<PlanUpdateResponse, Graph
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn plan_progress(params: PlanProgressParams) -> Result<PlanProgressResponse, GraphiteError> {
     with_core(|s| {
@@ -1066,7 +1066,7 @@ pub fn plan_progress(params: PlanProgressParams) -> Result<PlanProgressResponse,
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn distill_context(
     params: DistillContextParams,
@@ -1078,7 +1078,7 @@ pub fn distill_context(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn distill_save(params: DistillSaveParams) -> Result<DistillSaveResponse, GraphiteError> {
     with_core(|s| {
@@ -1089,7 +1089,7 @@ pub fn distill_save(params: DistillSaveParams) -> Result<DistillSaveResponse, Gr
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn buffer_save(params: BufferSaveParams) -> Result<NoteEditResponse, GraphiteError> {
     let root = current_root()?;
@@ -1126,7 +1126,7 @@ pub fn buffer_save(params: BufferSaveParams) -> Result<NoteEditResponse, Graphit
                 r#ref: NoteRef(format!("path:{rel}")),
                 rev: Rev(rev_new.0.clone()),
                 actor,
-                kind: Some(NoteChangeKind::Modified),
+                kind: Some(NoteChangeKind::BufferBody),
                 from: None,
             },
         );
@@ -1143,7 +1143,7 @@ pub fn buffer_save(params: BufferSaveParams) -> Result<NoteEditResponse, Graphit
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn index_status() -> Result<IndexStatus, GraphiteError> {
     with_core(|s| {
@@ -1152,7 +1152,7 @@ pub fn index_status() -> Result<IndexStatus, GraphiteError> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn reindex(full: bool) -> Result<(), GraphiteError> {
     let _ = full;
@@ -1160,7 +1160,7 @@ pub fn reindex(full: bool) -> Result<(), GraphiteError> {
     rebuild_off_lock(&root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn undo_op(op_id: String) -> Result<UndoResult, GraphiteError> {
     let root = current_root()?;
@@ -1175,7 +1175,7 @@ pub fn undo_op(op_id: String) -> Result<UndoResult, GraphiteError> {
     Ok(res)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn undo_session(session: String) -> Result<UndoResult, GraphiteError> {
     let root = current_root()?;
@@ -1190,7 +1190,7 @@ pub fn undo_session(session: String) -> Result<UndoResult, GraphiteError> {
     Ok(res)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn journal_list(params: ActivityGetParams) -> Result<Vec<JournalOp>, GraphiteError> {
     with_core(|s| {
@@ -1215,13 +1215,13 @@ pub fn journal_list(params: ActivityGetParams) -> Result<Vec<JournalOp>, Graphit
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn vault_open(path: String) -> Result<VaultInfoResponse, GraphiteError> {
     mount_vault(&path, false)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn vault_create(path: String) -> Result<VaultInfoResponse, GraphiteError> {
     mount_vault(&path, true)
@@ -1252,7 +1252,7 @@ fn thought_title() -> String {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn quick_capture(text: String) -> Result<NoteCreateResponse, GraphiteError> {
     let trimmed = text.trim();
@@ -1308,7 +1308,7 @@ fn escape_md_link_text(text: &str) -> String {
 /// Дроп внешних файлов → заметки-пути (Р28): на каждый путь создаётся заметка
 /// во «Входящих» (или под переданным родителем) с кликабельной `file:`-ссылкой
 /// и сырым путём — файл фиксируется «где лежит», без копирования в хранилище.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn add_path_note(params: AddPathNoteParams) -> Result<AddPathNoteResponse, GraphiteError> {
     let paths: Vec<String> = params
@@ -1456,7 +1456,7 @@ fn save_attachment_bytes(bytes: &[u8], ext: &str) -> Result<SaveAttachmentRespon
 /// Вставка картинки/файла из буфера (Р29): содержимое приходит base64
 /// (допустим data-URL), сохраняется в `_assets/ГГГГ/ММ/<ulid>.<ext>` с дедупом
 /// по blake3.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn save_attachment(params: SaveAttachmentParams) -> Result<SaveAttachmentResponse, GraphiteError> {
     let bytes = decode_base64_payload(&params.data_base64)?;
@@ -1466,7 +1466,7 @@ pub fn save_attachment(params: SaveAttachmentParams) -> Result<SaveAttachmentRes
 /// Импорт вложения с диска (Р29): файл читается по абсолютному пути и
 /// сохраняется в `_assets/` той же схемой (дедуп, ulid-имя); расширение
 /// берётся из исходного имени.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn save_attachment_from_path(
     params: SaveAttachmentFromPathParams,
@@ -1537,7 +1537,7 @@ fn ensure_folder_note(note_ref: &str) -> Result<(), GraphiteError> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn set_icon(params: SetIconParams) -> Result<SetIconResponse, GraphiteError> {
     ensure_folder_note(&params.r#ref.0)?;
@@ -1549,7 +1549,7 @@ pub fn set_icon(params: SetIconParams) -> Result<SetIconResponse, GraphiteError>
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_pin(params: NotePinParams) -> Result<NotePinResponse, GraphiteError> {
     with_core(|s| {
@@ -1560,7 +1560,7 @@ pub fn note_pin(params: NotePinParams) -> Result<NotePinResponse, GraphiteError>
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn bundle_compose(params: BundleComposeParams) -> Result<BundleComposeResponse, GraphiteError> {
     with_core(|s| {
@@ -1570,7 +1570,7 @@ pub fn bundle_compose(params: BundleComposeParams) -> Result<BundleComposeRespon
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn bundle_create(params: BundleCreateParams) -> Result<BundleCreateResponse, GraphiteError> {
     with_core(|s| {
@@ -1581,7 +1581,7 @@ pub fn bundle_create(params: BundleCreateParams) -> Result<BundleCreateResponse,
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn idea_to_tasks(params: IdeaToTasksParams) -> Result<IdeaToTasksResponse, GraphiteError> {
     with_core(|s| {
@@ -1636,7 +1636,7 @@ pub fn open_note_window(app: tauri::AppHandle, note_ref: String) -> Result<(), G
 
 /// Абсолютный путь заметки/папки на диске (для «Скопировать путь»).
 /// Для folder-note (`…/_index.md`) отдаёт путь самой папки.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn note_abs_path(note_ref: String) -> Result<String, GraphiteError> {
     let root = current_root()?;
@@ -1644,11 +1644,16 @@ pub fn note_abs_path(note_ref: String) -> Result<String, GraphiteError> {
     if let Some(stripped) = rel.strip_suffix("/_index.md") {
         rel = stripped.to_string();
     }
-    Ok(root.join(&rel).to_string_lossy().to_string())
+    let abs = root.join(&rel).to_string_lossy().to_string();
+    #[cfg(windows)]
+    let abs = abs.replace('/', "\\");
+    Ok(abs)
 }
 
 /// Показывает заметку/папку в Проводнике, выделяя её. Для folder-note
-/// раскрывает саму папку.
+/// выделяет саму папку. Идёт через плагин opener: rel-пути ядра канонизированы
+/// прямыми слэшами, которые `explorer /select,` не переваривает (уводит в
+/// «Документы»), а opener нормализует путь под ОС и проверяет существование.
 #[tauri::command]
 #[specta::specta]
 pub fn reveal_in_explorer(note_ref: String) -> Result<(), GraphiteError> {
@@ -1658,32 +1663,20 @@ pub fn reveal_in_explorer(note_ref: String) -> Result<(), GraphiteError> {
         rel = stripped.to_string();
     }
     let abs = root.join(&rel);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        std::process::Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", abs.display()))
-            .spawn()
-            .map_err(|e| {
-                gerr(
-                    GraphiteErrorCode::Unavailable,
-                    format!("не удалось открыть проводник: {e}"),
-                    None,
-                )
-            })?;
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = abs;
-    }
-    Ok(())
+    tauri_plugin_opener::reveal_item_in_dir(&abs).map_err(|e| {
+        gerr(
+            GraphiteErrorCode::Unavailable,
+            format!("не удалось открыть проводник: {e}"),
+            None,
+        )
+    })
 }
 
 /// Срез хранилища для вида «Граф связей»: все заметки индекса — узлы, их
 /// резолвленные исходящие ссылки — рёбра. Битые ссылки (без `dst_id`) и цели
 /// вне индекса отбрасываются, пары источник→цель дедуплицируются, петли на
 /// себя не включаются. Пустое хранилище отдаёт пустой граф.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn graph_data() -> Result<GraphData, GraphiteError> {
     let (root, notes, edges) = with_core(|s| {
@@ -1736,7 +1729,7 @@ pub fn graph_data() -> Result<GraphData, GraphiteError> {
 /// инлайн-`#теги` тела. Ключ агрегата — нормализация §9.3 (регистр, `ё`→`е`),
 /// отображается первое встреченное написание; внутри одной заметки тег
 /// считается один раз. Сортировка: count по убыванию, затем по алфавиту.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn tags_list() -> Result<Vec<TagInfo>, GraphiteError> {
     let (root, notes) = with_core(|s| Ok((s.root.clone(), s.index.all_notes().map_err(core_err)?)))?;
@@ -1868,7 +1861,7 @@ fn daily_body_is_empty(body: &str, date: &str, custom_template: Option<&str>) ->
 /// возвращается как есть (`created=false`), отсутствующий — создаётся с
 /// шаблоном дня (пользовательский `Шаблоны/Дневник.md`, иначе встроенный);
 /// папка (по умолчанию «Дневник») появляется вместе с ним.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn ensure_daily_note(params: DailyNoteParams) -> Result<DailyNote, GraphiteError> {
     let (date, folder, rel) = daily_target(&params.date, params.folder)?;
@@ -1907,7 +1900,7 @@ pub fn ensure_daily_note(params: DailyNoteParams) -> Result<DailyNote, GraphiteE
 
 /// Проверка записи дня без побочных эффектов: существует ли файл и его
 /// заголовок. Ничего не создаёт и не пишет — календарь листается свободно.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn peek_daily_note(params: DailyNoteParams) -> Result<DailyNotePeek, GraphiteError> {
     let (date, _, rel) = daily_target(&params.date, params.folder)?;
@@ -1933,7 +1926,7 @@ pub fn peek_daily_note(params: DailyNoteParams) -> Result<DailyNotePeek, Graphit
 /// механизмом, что и обычное удаление (журнал, обновление индекса и токены для
 /// отмены). `dry_run` — только пересчитать кандидатов. Записи с реальным
 /// контентом, закрепом или ручной иконкой не трогаются никогда.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn prune_empty_daily_notes(params: DailyPruneParams) -> Result<DailyPruneResponse, GraphiteError> {
     let folder = daily_folder(params.folder)?;
@@ -2017,7 +2010,7 @@ pub fn prune_empty_daily_notes(params: DailyPruneParams) -> Result<DailyPruneRes
 
 /// Записывает результат экспорта по выбранному пользователем абсолютному пути.
 /// Файл живёт вне хранилища: ни индекс, ни журнал не затрагиваются.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn export_write(params: ExportWriteParams) -> Result<(), GraphiteError> {
     let dest = PathBuf::from(&params.dest_path);

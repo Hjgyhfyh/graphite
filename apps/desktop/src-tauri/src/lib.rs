@@ -2,6 +2,7 @@ mod commands;
 mod dto;
 mod events;
 mod gitsync;
+mod prompts;
 mod rpc_handler;
 mod runtime;
 mod state;
@@ -94,6 +95,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sync::sync_status,
             sync::sync_now,
             sync::sync_detach,
+            prompts::prompt_log_append,
+            prompts::prompt_log_list,
+            prompts::prompt_log_get,
         ])
         .events(collect_events![
             events::NoteChangedEvent,

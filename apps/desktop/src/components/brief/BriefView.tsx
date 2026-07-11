@@ -17,6 +17,7 @@ import {
   Loader2,
   Paperclip,
   Plus,
+  ScrollText,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -38,6 +39,7 @@ import {
   openBriefView,
   useBriefStore,
 } from '../../stores/briefStore';
+import { openPromptHistory } from '../../stores/promptHistoryStore';
 import type { BriefNoteFile } from '../../stores/briefStore';
 import { useGitStore } from '../../stores/gitStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -368,6 +370,9 @@ export function BriefView() {
         pushToast({ kind: 'error', text: 'Не удалось скопировать в буфер' });
         return;
       }
+      void commands
+        .promptLogAppend({ source: 'brief', title: draft.idea.trim().slice(0, 80), text: composed.text })
+        .catch(() => undefined);
       if (composed.truncatedTitles.length > 0) {
         pushToast({ kind: 'info', text: `Обрезаны длинные заметки: ${composed.truncatedTitles.join(', ')}` });
       }
@@ -550,17 +555,27 @@ export function BriefView() {
                 Соберите бриф — Claude получит цель, контекст и ваши направления одним сообщением.
               </p>
             </div>
-            {!draftEmpty ? (
+            <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
-                disabled={busy !== undefined}
-                onClick={clearDraft}
-                className="flex h-7 shrink-0 items-center gap-1.5 rounded-s px-2 text-caption text-text-2 transition-colors duration-[120ms] hover:bg-danger/10 hover:text-danger disabled:pointer-events-none disabled:opacity-45"
+                onClick={openPromptHistory}
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-s px-2 text-caption text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
               >
-                <Eraser size={13} strokeWidth={1.75} />
-                Очистить черновик
+                <ScrollText size={13} strokeWidth={1.75} />
+                История промтов
               </button>
-            ) : null}
+              {!draftEmpty ? (
+                <button
+                  type="button"
+                  disabled={busy !== undefined}
+                  onClick={clearDraft}
+                  className="flex h-7 shrink-0 items-center gap-1.5 rounded-s px-2 text-caption text-text-2 transition-colors duration-[120ms] hover:bg-danger/10 hover:text-danger disabled:pointer-events-none disabled:opacity-45"
+                >
+                  <Eraser size={13} strokeWidth={1.75} />
+                  Очистить черновик
+                </button>
+              ) : null}
+            </div>
           </motion.header>
 
           <motion.section variants={sectionVariants} aria-label="Идея">

@@ -8,13 +8,15 @@ import type { Extension } from '@codemirror/state';
 import { EditorView, drawSelection, dropCursor, highlightSpecialChars, keymap } from '@codemirror/view';
 import type { KeyBinding } from '@codemirror/view';
 import { aiTouchField, clearAiTouched, setAiTouched } from './aiTouch';
-import { toggleInlineFormat } from './formatting';
+import { toggleCode, toggleInlineFormat } from './formatting';
+import { doneFold } from './doneFold';
 import { frontmatterHide } from './frontmatterHide';
 import { imageAttachments } from './imageInsert';
 import type { AttachmentSaveOptions } from './imageInsert';
 import { imagePreviews } from './imagePreview';
 import type { ImagePreviewOptions } from './imagePreview';
 import { livePreview } from './livePreview';
+import { tagHighlight } from './tagHighlight';
 import { taskCheckboxes } from './taskList';
 import { graphiteDark } from './theme';
 import { openWikiLinkPicker, wikiLinkCompletion } from './wikilink';
@@ -78,7 +80,7 @@ function toggleChecklist(view: EditorView): boolean {
 const markdownKeymap: readonly KeyBinding[] = [
   { key: 'Mod-b', preventDefault: true, run: (view) => toggleInlineFormat(view, '**') },
   { key: 'Mod-i', preventDefault: true, run: (view) => toggleInlineFormat(view, '*') },
-  { key: 'Mod-e', preventDefault: true, run: (view) => toggleInlineFormat(view, '`') },
+  { key: 'Mod-Shift-e', preventDefault: true, run: toggleCode },
   { key: 'Mod-Shift-x', preventDefault: true, run: (view) => toggleInlineFormat(view, '~~') },
   { key: 'Mod-l', preventDefault: true, run: openWikiLinkPicker },
   { key: 'Mod-Shift-l', preventDefault: true, run: toggleChecklist },
@@ -126,8 +128,10 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       EditorView.lineWrapping,
       markdown({ base: markdownLanguage }),
       livePreview,
+      tagHighlight,
       frontmatterCompartment.of(hideFrontmatter ? frontmatterHide() : []),
       taskCheckboxes,
+      doneFold,
       aiTouchField,
       ...(attachments !== undefined && !readOnly ? [imageAttachments(attachments)] : []),
       ...(images !== undefined ? [imagePreviews(images)] : []),

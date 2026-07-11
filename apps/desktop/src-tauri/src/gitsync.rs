@@ -363,7 +363,7 @@ fn append_gitignore(root: &Path) -> Result<(), GraphiteError> {
         .map_err(|e| git_err(GraphiteErrorCode::Unavailable, format!("не удалось записать .gitignore: {e}")))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_status() -> Result<GitStatus, GraphiteError> {
     let root = vault_root()?;
@@ -400,7 +400,7 @@ pub fn git_status() -> Result<GitStatus, GraphiteError> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_init() -> Result<GitStatus, GraphiteError> {
     let root = vault_root()?;
@@ -412,7 +412,7 @@ pub fn git_init() -> Result<GitStatus, GraphiteError> {
     git_status()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_snapshot(message: Option<String>) -> Result<GitActionResult, GraphiteError> {
     let root = vault_root()?;
@@ -434,7 +434,7 @@ pub fn git_snapshot(message: Option<String>) -> Result<GitActionResult, Graphite
     Ok(GitActionResult { ok: true, message: msg })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_log(limit: Option<u32>) -> Result<Vec<GitCommit>, GraphiteError> {
     let root = vault_root()?;
@@ -451,7 +451,7 @@ pub fn git_log(limit: Option<u32>) -> Result<Vec<GitCommit>, GraphiteError> {
     Ok(parse_log(&raw))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_commit_files(hash: String) -> Result<Vec<GitFileChange>, GraphiteError> {
     let root = vault_root()?;
@@ -460,7 +460,7 @@ pub fn git_commit_files(hash: String) -> Result<Vec<GitFileChange>, GraphiteErro
     Ok(parse_name_status(&raw))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_diff(params: GitDiffParams) -> Result<String, GraphiteError> {
     let root = vault_root()?;
@@ -476,7 +476,7 @@ pub fn git_diff(params: GitDiffParams) -> Result<String, GraphiteError> {
     Ok(truncate_bytes(raw, 200 * 1024))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_restore_commit(hash: String) -> Result<GitActionResult, GraphiteError> {
     let root = vault_root()?;
@@ -499,7 +499,7 @@ pub fn git_restore_commit(hash: String) -> Result<GitActionResult, GraphiteError
     Ok(GitActionResult { ok: true, message: msg })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_restore_file(params: GitRestoreFileParams) -> Result<GitActionResult, GraphiteError> {
     let root = vault_root()?;
@@ -524,7 +524,7 @@ pub fn git_restore_file(params: GitRestoreFileParams) -> Result<GitActionResult,
     Ok(GitActionResult { ok: true, message: msg })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_remote_set(url: String) -> Result<GitStatus, GraphiteError> {
     let root = vault_root()?;
@@ -547,7 +547,7 @@ pub fn git_remote_set(url: String) -> Result<GitStatus, GraphiteError> {
     git_status()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_push() -> Result<GitActionResult, GraphiteError> {
     let root = vault_root()?;
@@ -555,7 +555,7 @@ pub fn git_push() -> Result<GitActionResult, GraphiteError> {
     Ok(action_from_output(out, "Отправлено в удалённый репозиторий"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn git_pull() -> Result<GitActionResult, GraphiteError> {
     let root = vault_root()?;

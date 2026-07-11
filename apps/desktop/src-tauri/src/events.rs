@@ -6,6 +6,8 @@ use crate::dto::{Actor, JournalOp, NoteRef, Rev};
 
 /// Вид изменения заметки — позволяет фронту отличить внешнее удаление/
 /// переименование от обычной правки (закрыть вкладку, обновить путь).
+/// `BufferBody` — автосейв тела из редактора: структура vault не менялась,
+/// поэтому фронт обновляет дерево/счётчики ленивым дебаунсом, а не сразу.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum NoteChangeKind {
@@ -13,6 +15,7 @@ pub enum NoteChangeKind {
     Modified,
     Removed,
     Moved,
+    BufferBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

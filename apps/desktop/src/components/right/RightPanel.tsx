@@ -73,10 +73,20 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
     resizeCleanup.current?.();
     const startX = event.clientX;
     const startWidth = width;
+    let frame = 0;
+    let lastX = startX;
     const onMove = (moveEvent: PointerEvent) => {
-      onWidthChange(startWidth + (startX - moveEvent.clientX));
+      lastX = moveEvent.clientX;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        onWidthChange(startWidth + (startX - lastX));
+      });
     };
     const finish = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      onWidthChange(startWidth + (startX - lastX));
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', finish);
       window.removeEventListener('pointercancel', finish);

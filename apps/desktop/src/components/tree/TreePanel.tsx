@@ -1,9 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useMotionValue, useSpring, useTransform, useVelocity } from 'motion/react';
 import { Tree } from 'react-arborist';
 import type {
   CursorProps,
+  DragPreviewProps,
   MoveHandler,
   NodeApi,
   NodeRendererProps,
@@ -51,6 +53,7 @@ import type { NoteIconInfo } from '../../stores/vaultStore';
 import { vaultKey } from '../../stores/vaultsStore';
 import { IconPicker } from './IconPicker';
 import { NoteIcon } from './NoteIcon';
+import { consumeTreeDropClick, treeDndBackend } from './treeDndBackend';
 
 export interface TreePanelProps {
   width: number;
@@ -62,6 +65,7 @@ const INDENT = 14;
 const INDEX_SUFFIX = '/_index.md';
 const ROOT_REF: NoteRef = 'path:';
 const STAGGER_STEP = 0.018;
+const SPRING_OPEN_MS = 650;
 
 const MENU_ITEM =
   'flex h-8 cursor-default select-none items-center gap-2 rounded-s px-2 text-ui text-text-1 outline-none data-[highlighted]:bg-bg-3 data-[highlighted]:text-text-0';
@@ -96,6 +100,7 @@ interface NodeTreeContext {
   justOpened?: string;
   justMoved?: string;
   reduced: boolean;
+  getNode: (id: string) => ArNode | undefined;
   openNote: (ref: NoteRef) => void;
   openInNewPane: (ref: NoteRef) => void;
   startRename: (node: NodeApi<ArNode>) => void;
@@ -144,7 +149,7 @@ function filesPhrase(count: number): string {
   return `${count} файлов станут заметками`;
 }
 
-function buildForest(nodes: readonly TreeNode[]): ArNode[] {
+function buildForest(nodes: readonly TreeNode[], pinned: ReadonlySet<NoteRef>): ArNode[] {
   const folderByKey = new Map<string, ArNode>();
   const fileNodes: ArNode[] = [];
 
@@ -219,7 +224,12 @@ function buildForest(nodes: readonly TreeNode[]): ArNode[] {
   }
 
   const sortRec = (list: ArNode[]) => {
-    list.sort((a, b) => Number(b.isFolder) - Number(a.isFolder) || a.name.localeCompare(b.name, 'ru'));
+    list.sort(
+      (a, b) =>
+        Number(pinned.has(b.ref)) - Number(pinned.has(a.ref)) ||
+        Number(b.isFolder) - Number(a.isFolder) ||
+        a.name.localeCompare(b.name, 'ru'),
+    );
     for (const child of list) {
       if (child.children !== null) {
         sortRec(child.children);
@@ -333,6 +343,86 @@ function Cursor({ top, left, indent }: CursorProps) {
   );
 }
 
+const CHIP_SHIFT_X = 14;
+const CHIP_SHIFT_Y = 10;
+const CHIP_TILT_DEG = 1.5;
+const CHIP_DRIFT_MAX_DEG = 4;
+const CHIP_DRIFT_VELOCITY_PX = 1600;
+
+interface TreeDragChipProps {
+  node: ArNode;
+  count: number;
+  mouse: { x: number; y: number };
+}
+
+/** Призрак переноса: чип «иконка + название» летит за курсором с инерционным наклоном. */
+function TreeDragChip({ node, count, mouse }: TreeDragChipProps) {
+  const ctx = useNodeCtx();
+  const iconInfo = ctx.iconByRef[node.ref] ?? {};
+  const x = useMotionValue(mouse.x + CHIP_SHIFT_X);
+  const y = useMotionValue(mouse.y + CHIP_SHIFT_Y);
+  const velocityX = useVelocity(x);
+  const drift = useSpring(
+    useTransform(
+      velocityX,
+      [-CHIP_DRIFT_VELOCITY_PX, CHIP_DRIFT_VELOCITY_PX],
+      [-CHIP_DRIFT_MAX_DEG, CHIP_DRIFT_MAX_DEG],
+      { clamp: true },
+    ),
+    { stiffness: 320, damping: 26, mass: 0.7 },
+  );
+  const rotate = useTransform(drift, (deg) => (ctx.reduced ? 0 : deg + CHIP_TILT_DEG));
+
+  useLayoutEffect(() => {
+    x.set(mouse.x + CHIP_SHIFT_X);
+    y.set(mouse.y + CHIP_SHIFT_Y);
+  }, [mouse, x, y]);
+
+  return createPortal(
+    <motion.div className="pointer-events-none fixed left-0 top-0 z-50 will-change-transform" style={{ x, y }}>
+      <motion.div
+        className="flex max-w-64 items-center gap-1.5 rounded-m border border-stroke-1 bg-bg-2 px-2.5 py-1.5 text-ui text-text-0 shadow-3"
+        style={{ rotate }}
+        initial={ctx.reduced ? { opacity: 0 } : { opacity: 0, scale: 0.92 }}
+        animate={ctx.reduced ? { opacity: 1 } : { opacity: 1, scale: 1.04 }}
+        exit={
+          ctx.reduced
+            ? { opacity: 0, transition: { duration: 0.08 } }
+            : { opacity: 0, scale: 0.9, transition: { duration: 0.12, ease: [0.4, 0, 1, 1] } }
+        }
+        transition={ctx.reduced ? { duration: 0.08 } : springSnappy}
+      >
+        <NoteIcon
+          icon={iconInfo.icon}
+          color={iconInfo.color}
+          fallback={node.isFolder ? 'Folder' : 'FileText'}
+          size={15}
+          className={cx('shrink-0', iconInfo.color === undefined ? 'text-text-2' : undefined)}
+        />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        {count > 1 ? (
+          <span className="shrink-0 rounded-full bg-accent-dim px-1.5 text-caption tabular-nums text-accent">
+            {count}
+          </span>
+        ) : null}
+      </motion.div>
+    </motion.div>,
+    document.body,
+  );
+}
+
+function TreeDragPreview({ mouse, id, dragIds, isDragging }: DragPreviewProps) {
+  const ctx = useNodeCtx();
+  const node = id === null ? undefined : ctx.getNode(id);
+  return (
+    <AnimatePresence>
+      {isDragging && node !== undefined && mouse !== null ? (
+        <TreeDragChip key={node.id} node={node} count={dragIds.length} mouse={mouse} />
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
 interface MenuItemProps {
   icon: LucideIcon;
   label: string;
@@ -398,7 +488,18 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
   const pinned = ctx.pinnedNotes.has(data.ref);
   const active = ctx.activeRef === data.ref;
   const editing = node.isEditing;
+  const willReceiveDrop = node.willReceiveDrop;
   const menuPoint = useRef({ x: 0, y: 0 });
+
+  // Spring-loaded папки: если при переносе задержаться над свёрнутой папкой,
+  // она раскрывается — так можно дропнуть вглубь закрытой ветки.
+  useEffect(() => {
+    if (!willReceiveDrop || !data.isFolder || node.isOpen) {
+      return;
+    }
+    const timer = window.setTimeout(() => node.open(), SPRING_OPEN_MS);
+    return () => window.clearTimeout(timer);
+  }, [willReceiveDrop, data.isFolder, node]);
 
   const isReveal = !ctx.reduced && node.parent !== null && node.parent.id === ctx.justOpened;
   const isLand = !ctx.reduced && data.id === ctx.justMoved;
@@ -417,7 +518,7 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
             menuPoint.current = { x: event.clientX, y: event.clientY };
           }}
           initial={enter ? { opacity: 0, y: isLand ? 4 : -6 } : false}
-          animate={{ opacity: node.isDragging ? 0.45 : 1, y: 0 }}
+          animate={{ opacity: node.isDragging ? 0.45 : 1, y: 0, scale: willReceiveDrop ? 1.01 : 1 }}
           transition={
             isReveal
               ? { ...springSnappy, delay: Math.min(node.childIndex, STAGGER_CAP) * STAGGER_STEP }
@@ -430,9 +531,9 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
           className={cx(
             'group/node relative flex h-[26px] w-full items-center gap-1.5 rounded-s pr-2 text-ui outline-none transition-colors',
             active ? 'bg-accent-dim text-text-0' : 'text-text-1',
-            !active && !node.willReceiveDrop ? 'hover:bg-bg-3 hover:text-text-0' : undefined,
-            node.willReceiveDrop ? 'bg-accent-dim ring-1 ring-inset ring-accent' : undefined,
-            node.isFocused && !active && !node.willReceiveDrop ? 'ring-1 ring-inset ring-stroke-1' : undefined,
+            !active && !willReceiveDrop ? 'hover:bg-bg-3 hover:text-text-0' : undefined,
+            willReceiveDrop ? 'bg-accent-dim ring-1 ring-inset ring-accent' : undefined,
+            node.isFocused && !active && !willReceiveDrop ? 'ring-1 ring-inset ring-stroke-1' : undefined,
           )}
         >
           {data.isFolder ? (
@@ -444,6 +545,9 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
+                if (consumeTreeDropClick()) {
+                  return;
+                }
                 node.toggle();
               }}
               className="flex size-3.5 shrink-0 items-center justify-center rounded-xs text-text-2 hover:text-text-0"
@@ -574,7 +678,12 @@ function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
     <div
       {...attrs}
       ref={innerRef}
-      onClick={node.handleClick}
+      onClick={(event) => {
+        if (consumeTreeDropClick()) {
+          return;
+        }
+        node.handleClick(event);
+      }}
       onFocus={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (node.isEditing) {
@@ -713,7 +822,20 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const iconTimer = useRef<number | undefined>(undefined);
   const bulkToggle = useRef(false);
 
-  const forest = useMemo(() => buildForest(tree), [tree]);
+  const forest = useMemo(() => buildForest(tree, pinnedNotes), [tree, pinnedNotes]);
+  const nodeById = useMemo(() => {
+    const map = new Map<string, ArNode>();
+    const walk = (list: readonly ArNode[]) => {
+      for (const node of list) {
+        map.set(node.id, node);
+        if (node.children !== null) {
+          walk(node.children);
+        }
+      }
+    };
+    walk(forest);
+    return map;
+  }, [forest]);
   const pinned = useMemo(
     () =>
       tree
@@ -861,6 +983,8 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
     [createFolderFlow],
   );
 
+  const getNode = useCallback((id: string) => nodeById.get(id), [nodeById]);
+
   const togglePin = useCallback((ref: NoteRef) => {
     void useVaultStore.getState().togglePinNote(ref);
   }, []);
@@ -995,6 +1119,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       justOpened,
       justMoved,
       reduced,
+      getNode,
       openNote,
       openInNewPane,
       startRename,
@@ -1012,6 +1137,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       justOpened,
       justMoved,
       reduced,
+      getNode,
       openNote,
       openInNewPane,
       startRename,
@@ -1024,19 +1150,44 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
     ],
   );
 
+  const resizeCleanup = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      resizeCleanup.current?.();
+      resizeCleanup.current = null;
+    },
+    [],
+  );
+
   const onHandlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    resizeCleanup.current?.();
     const startX = event.clientX;
     const startWidth = width;
+    let frame = 0;
+    let lastX = startX;
     const onMove = (moveEvent: PointerEvent) => {
-      onWidthChange(startWidth + (moveEvent.clientX - startX));
+      lastX = moveEvent.clientX;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        onWidthChange(startWidth + (lastX - startX));
+      });
     };
-    const onUp = () => {
+    const finish = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      onWidthChange(startWidth + (lastX - startX));
       window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      resizeCleanup.current = null;
     };
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    resizeCleanup.current = finish;
   };
 
   return (
@@ -1165,6 +1316,8 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
                   paddingTop={4}
                   paddingBottom={8}
                   selection={currentRef}
+                  dndBackend={treeDndBackend}
+                  disableDrag={(data) => data.virtual === true}
                   disableDrop={disableDrop}
                   onMove={handleMove}
                   onRename={handleRename}
@@ -1172,6 +1325,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
                   onActivate={handleActivate}
                   renderRow={Row}
                   renderCursor={Cursor}
+                  renderDragPreview={TreeDragPreview}
                   aria-label="Дерево заметок"
                 >
                   {NodeRow}

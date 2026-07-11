@@ -659,7 +659,7 @@ UI-специфичные команды (нет в MCP-реестре):
 
 | Событие | Payload | Когда |
 |---|---|---|
-| `note_changed` | `{ref: NoteRef, rev: Rev, actor: Actor}` | файл изменился на диске (свой write, MCP, external) — UI решает reload/merge |
+| `note_changed` | `{ref: NoteRef, rev: Rev, actor: Actor, kind?: created\|modified\|removed\|moved\|bufferbody, from?: NoteRef}` | файл изменился на диске (свой write, MCP, external) — UI решает reload/merge; `bufferbody` = автосейв тела из редактора (структура vault не менялась, дерево/счётчики обновляются лениво) |
 | `index_progress` | `{done: u32, total: u32}` | ход индексации; `done == total` → idle |
 | `journal_op` | `{op: JournalOp}` | новая запись журнала → AI-лента |
 | `mcp_session` | `{active: bool, session: Option<String>}` | MCP-сессия открылась/закрылась → пульс ◈ в статусбаре |

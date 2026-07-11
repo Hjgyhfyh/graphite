@@ -32,6 +32,7 @@ import { TasksView } from '../components/tasks/TasksView';
 import { TemplatePicker } from '../components/templates/TemplatePicker';
 import { TreePanel } from '../components/tree/TreePanel';
 import { TimelineOverlay } from '../components/backup/TimelineOverlay';
+import { PromptHistoryOverlay } from '../components/brief/PromptHistoryOverlay';
 import { UpdateBanner } from '../components/updater/UpdateBanner';
 import { Keymap, useActionHandler } from './Keymap';
 import {
@@ -70,6 +71,10 @@ async function copyPage(ref: NoteRef): Promise<void> {
   try {
     const response = await commands.bundleCompose({ ref, includeLinked: true });
     await navigator.clipboard.writeText(response.text);
+    const title = useVaultStore.getState().tree.find((n) => n.ref === ref)?.title ?? 'Страница для ИИ';
+    void commands
+      .promptLogAppend({ source: 'copyPage', title, refs: [ref], text: response.text })
+      .catch(() => undefined);
     ui.pushToast({ kind: 'success', text: `Скопировано для ИИ · ${response.members.length} файлов` });
   } catch (error) {
     ui.pushToast({ kind: 'error', text: isGraphiteError(error) ? error.message : 'Не удалось скопировать страницу' });
@@ -374,6 +379,7 @@ export function AppShell() {
         <ToastViewport />
         <UpdateBanner />
         <TimelineOverlay />
+        <PromptHistoryOverlay />
         <Onboarding />
       </TooltipProvider>
     </AppMotionConfig>

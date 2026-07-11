@@ -35,6 +35,9 @@ function inlineToText(nodes: readonly MdInline[]): string {
       case 'code':
         out += node.value;
         break;
+      case 'tag':
+        out += `#${node.value}`;
+        break;
       case 'strong':
       case 'em':
       case 'del':
@@ -73,6 +76,8 @@ function renderInlineNode(node: MdInline, opts: HtmlRenderOptions): string {
       return `<del>${renderInlineNodes(node.children, opts)}</del>`;
     case 'code':
       return `<code>${escapeHtml(node.value)}</code>`;
+    case 'tag':
+      return `<span class="tag">#${escapeHtml(node.value)}</span>`;
     case 'wikilink':
       return `<span class="wikilink">${escapeHtml(node.label)}</span>`;
     case 'link': {

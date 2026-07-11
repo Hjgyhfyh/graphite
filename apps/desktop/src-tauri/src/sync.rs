@@ -342,7 +342,7 @@ fn run_active_cycle() -> SyncStatusDto {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_create(dest_path: String, copy_from_current: bool) -> Result<SyncCreateResult, GraphiteError> {
     let dest = PathBuf::from(dest_path.trim());
@@ -384,7 +384,7 @@ pub fn sync_create(dest_path: String, copy_from_current: bool) -> Result<SyncCre
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_join(dest_path: String, code: String) -> Result<SyncJoinResult, GraphiteError> {
     let dest = PathBuf::from(dest_path.trim());
@@ -411,14 +411,14 @@ pub fn sync_join(dest_path: String, code: String) -> Result<SyncJoinResult, Grap
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_status() -> Result<SyncStatusDto, GraphiteError> {
     let guard = lock_sync();
     Ok(status_dto(guard.as_ref()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_now() -> Result<SyncStatusDto, GraphiteError> {
     if lock_sync().is_none() {
@@ -427,7 +427,7 @@ pub fn sync_now() -> Result<SyncStatusDto, GraphiteError> {
     Ok(run_active_cycle())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_detach() -> Result<(), GraphiteError> {
     // Определить корень активной реплики (или снять любую).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBlocks, parseInline } from '../src/markdown';
+import { parseBlocks, parseInline, sweepDoneTasks } from '../src/markdown';
 import type { MdBlock, MdInline } from '../src/markdown';
 
 type Para = Extract<MdBlock, { kind: 'paragraph' }>;
@@ -121,5 +121,70 @@ describe('parseInline — зачёркивание и связи', () => {
   it('[[Note]] — метка совпадает с целью', () => {
     const nodes = parseInline('[[Note]]');
     expect(nodes[0]).toMatchObject({ kind: 'wikilink', target: 'Note', label: 'Note' });
+  });
+});
+
+describe('parseInline — теги (зеркало правил ядра)', () => {
+  it('простой, вложенный и латинский теги распознаются', () => {
+    expect(parseInline('#тег')).toEqual([{ kind: 'tag', value: 'тег' }]);
+    const nodes = parseInline('вложенный #вложенный/тег и #tag-mix_2');
+    expect(nodes).toContainEqual({ kind: 'tag', value: 'вложенный/тег' });
+    expect(nodes).toContainEqual({ kind: 'tag', value: 'tag-mix_2' });
+  });
+
+  it('число и слово вплотную — не теги', () => {
+    expect(parseInline('Число #2026 не тег').some((n) => n.kind === 'tag')).toBe(false);
+    expect(parseInline('слово#нет не тег').some((n) => n.kind === 'tag')).toBe(false);
+  });
+
+  it('внутри инлайн-кода и wiki-ссылки тегов нет', () => {
+    expect(parseInline('в коде `#нет` тоже').some((n) => n.kind === 'tag')).toBe(false);
+    expect(parseInline('в ссылке [[Тема#Палитра]] нет').some((n) => n.kind === 'tag')).toBe(false);
+  });
+
+  it('тег обрезается по недопустимому символу', () => {
+    expect(parseInline('#тег.')).toEqual([
+      { kind: 'tag', value: 'тег' },
+      { kind: 'text', value: '.' },
+    ]);
+  });
+});
+
+describe('sweepDoneTasks — уборка сделанного в «Готово»', () => {
+  it('переносит выполненный пункт с вложенными строками и создаёт секцию', () => {
+    const res = sweepDoneTasks('# План\n\n- [x] сделано ^t-a1\n  - заметка\n- [ ] в работе\n', '2026-07-12');
+    expect(res).not.toBeNull();
+    expect(res!.moved).toBe(1);
+    expect(res!.text).toBe(
+      '# План\n\n- [ ] в работе\n\n## Готово\n### 2026-07-12\n- [x] сделано ^t-a1\n  - заметка\n',
+    );
+  });
+
+  it('пункт с невыполненным дочерним чекбоксом остаётся на месте', () => {
+    expect(sweepDoneTasks('- [x] верх\n  - [ ] хвост\n')).toBeNull();
+    expect(sweepDoneTasks('- [x] верх\n  - [/] в работе\n')).toBeNull();
+  });
+
+  it('чекбоксы в код-заборе и в секции «Готово» не двигаются', () => {
+    expect(sweepDoneTasks('```\n- [x] в коде\n```\n')).toBeNull();
+    expect(sweepDoneTasks('## Готово\n- [x] уже там\n')).toBeNull();
+  });
+
+  it('дописывает в конец существующей секции без дубля дневного подзаголовка', () => {
+    const res = sweepDoneTasks(
+      '- [x] новое\n\n## Готово\n### 2026-07-12\n- [x] старое\n\n## Дальше\nтекст\n',
+      '2026-07-12',
+    );
+    expect(res!.text).toBe('## Готово\n### 2026-07-12\n- [x] старое\n- [x] новое\n\n## Дальше\nтекст\n');
+  });
+
+  it('frontmatter не сканируется, CRLF исходника сохраняется', () => {
+    const res = sweepDoneTasks('---\r\ntype: plan\r\n---\r\n\r\n- [x] дело\r\n');
+    expect(res).not.toBeNull();
+    expect(res!.text).toBe('---\r\ntype: plan\r\n---\r\n\r\n## Готово\r\n- [x] дело\r\n');
+  });
+
+  it('без выполненных пунктов возвращает null', () => {
+    expect(sweepDoneTasks('- [ ] дело\nпросто текст\n')).toBeNull();
   });
 });

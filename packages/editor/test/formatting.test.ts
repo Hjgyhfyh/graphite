@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasInlineFormat, inlineFormatState, toggleInlineFormat } from '../src/formatting';
+import { hasInlineFormat, inlineFormatState, toggleCode, toggleInlineFormat } from '../src/formatting';
 import { makeState, TestView } from './_view';
 
 describe('inlineFormatState / hasInlineFormat', () => {
@@ -107,5 +107,49 @@ describe('toggleInlineFormat — readOnly', () => {
     const v = new TestView('hello', { anchor: 0, head: 5 }, true);
     expect(toggleInlineFormat(v.view, '~~')).toBe(false);
     expect(v.doc).toBe('hello');
+  });
+});
+
+describe('toggleCode', () => {
+  it('однострочное выделение оборачивается в инлайн-бэктики', () => {
+    const v = new TestView('hello world', { anchor: 6, head: 11 });
+    expect(toggleCode(v.view)).toBe(true);
+    expect(v.doc).toBe('hello `world`');
+    expect(v.range).toEqual({ from: 7, to: 12 });
+  });
+
+  it('многострочное выделение оборачивается в fenced-блок', () => {
+    const v = new TestView('one\ntwo\nthree', { anchor: 0, head: 13 });
+    expect(toggleCode(v.view)).toBe(true);
+    expect(v.doc).toBe('```\none\ntwo\nthree\n```');
+    expect(v.range).toEqual({ from: 4, to: 17 });
+  });
+
+  it('ограды встают на свои строки посреди документа', () => {
+    const v = new TestView('intro\nalpha\nbeta\noutro', { anchor: 6, head: 16 });
+    toggleCode(v.view);
+    expect(v.doc).toBe('intro\n```\nalpha\nbeta\n```\noutro');
+    expect(v.range).toEqual({ from: 10, to: 20 });
+  });
+
+  it('повторный вызов снимает ограды (круговой обход)', () => {
+    const v = new TestView('one\ntwo\nthree', { anchor: 0, head: 13 });
+    toggleCode(v.view);
+    toggleCode(v.view);
+    expect(v.doc).toBe('one\ntwo\nthree');
+    expect(v.range).toEqual({ from: 0, to: 13 });
+  });
+
+  it('снимает и ограду с языком (```js)', () => {
+    const v = new TestView('```js\nconst x = 1\nx + 1\n```', { anchor: 6, head: 23 });
+    toggleCode(v.view);
+    expect(v.doc).toBe('const x = 1\nx + 1');
+    expect(v.range).toEqual({ from: 0, to: 17 });
+  });
+
+  it('в readOnly ничего не меняет и возвращает false', () => {
+    const v = new TestView('a\nb', { anchor: 0, head: 3 }, true);
+    expect(toggleCode(v.view)).toBe(false);
+    expect(v.doc).toBe('a\nb');
   });
 });

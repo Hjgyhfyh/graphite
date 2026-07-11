@@ -22,6 +22,8 @@ export interface EditorViewsStore {
  * буфер напрямую из view, не дожидаясь дебаунс-автосейва на диск. Эфемерный,
  * без persist — view живут ровно столько, сколько их вкладки.
  */
+let docVersionFrame = 0;
+
 export const useEditorViewsStore = create<EditorViewsStore>()((set) => ({
   views: {},
   docVersion: 0,
@@ -39,6 +41,10 @@ export const useEditorViewsStore = create<EditorViewsStore>()((set) => ({
     });
   },
   bumpDocVersion: () => {
-    set((s) => ({ docVersion: s.docVersion + 1 }));
+    if (docVersionFrame) return;
+    docVersionFrame = requestAnimationFrame(() => {
+      docVersionFrame = 0;
+      set((s) => ({ docVersion: s.docVersion + 1 }));
+    });
   },
 }));

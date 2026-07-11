@@ -159,9 +159,14 @@ function mergeIconField(next: string | undefined, prev: string | undefined): str
 }
 
 const NOTE_CHANGED_DEBOUNCE_MS = 180;
+/** Автосейв тела (`bufferbody`) не меняет структуру vault, поэтому дерево и
+ *  счётчики догоняют ленивым дебаунсом — иначе каждые ~600 мс печати запускали
+ *  бы два полных скана хранилища. */
+const BUFFER_BODY_DEBOUNCE_MS = 2000;
 
 let treeLoadSeq = 0;
 let noteChangedTimer: ReturnType<typeof setTimeout> | undefined;
+let bufferBodyTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const useVaultStore = create<VaultStore>()((set, get) => ({
   info: undefined,
@@ -198,8 +203,8 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
           }
         }
         // Полная перезагрузка от вотчера/автосейва часто приносит идентичный набор
-        // узлов. Сохраняем прежнюю ссылку tree, если ничего рендеримого не
-        // изменилось, — иначе каждый no-op пересобирает forest и все useMemo([tree]).
+        // узлов. Сохраняем прежние ссылки tree и pinnedNotes, если ничего рендеримого
+        // не изменилось, — иначе каждый no-op пересобирает forest и все useMemo([tree]).
         const same =
           full &&
           s.tree.length === response.nodes.length &&
@@ -219,7 +224,14 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
               p.pinned === n.pinned
             );
           });
-        return { tree: same ? s.tree : response.nodes, iconByRef, pinnedNotes };
+        const pinnedSame =
+          pinnedNotes.size === s.pinnedNotes.size &&
+          [...pinnedNotes].every((ref) => s.pinnedNotes.has(ref));
+        return {
+          tree: same ? s.tree : response.nodes,
+          iconByRef,
+          pinnedNotes: pinnedSame ? s.pinnedNotes : pinnedNotes,
+        };
       });
     } catch {
       if (seq === treeLoadSeq) {
@@ -255,7 +267,25 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   flashNote: (ref) => {
     set({ currentRef: ref });
   },
-  applyNoteChanged: () => {
+  applyNoteChanged: (e) => {
+    if (e.kind === 'bufferbody') {
+      if (noteChangedTimer !== undefined) {
+        return;
+      }
+      if (bufferBodyTimer !== undefined) {
+        clearTimeout(bufferBodyTimer);
+      }
+      bufferBodyTimer = setTimeout(() => {
+        bufferBodyTimer = undefined;
+        void get().loadTree();
+        void get().loadInfo();
+      }, BUFFER_BODY_DEBOUNCE_MS);
+      return;
+    }
+    if (bufferBodyTimer !== undefined) {
+      clearTimeout(bufferBodyTimer);
+      bufferBodyTimer = undefined;
+    }
     if (noteChangedTimer !== undefined) {
       clearTimeout(noteChangedTimer);
     }

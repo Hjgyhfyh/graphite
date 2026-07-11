@@ -1,4 +1,5 @@
 import '@fontsource-variable/inter/index.css';
+import '@fontsource-variable/source-serif-4/index.css';
 import '@fontsource/jetbrains-mono/index.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@graphite/ui/src/tokens.css';

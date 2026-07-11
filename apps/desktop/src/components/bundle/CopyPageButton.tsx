@@ -113,6 +113,9 @@ export function CopyPageButton({ noteRef, className, label = 'Copy Page' }: Copy
     try {
       const { text, count } = await build(mode);
       await navigator.clipboard.writeText(text);
+      void commands
+        .promptLogAppend({ source: mode, title: titleFromRef(noteRef), refs: [noteRef], text })
+        .catch(() => undefined);
       pushToast({ kind: 'success', text: `Скопировано: ${count} ${pluralFiles(count)}` });
     } catch (error) {
       pushToast({

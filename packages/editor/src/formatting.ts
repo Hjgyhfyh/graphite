@@ -101,6 +101,52 @@ export function toggleInlineFormat(view: EditorView, marker: InlineMarker): bool
   return true;
 }
 
+const FENCE_OPEN_RE = /^\s{0,3}```+[^`]*$/;
+const FENCE_CLOSE_RE = /^\s{0,3}```+\s*$/;
+
+/**
+ * Code formatting that follows the selection shape: single-line selections
+ * toggle inline backticks, multi-line selections are wrapped into a fenced
+ * ``` block on their own fence lines. When the selection is already framed by
+ * fence lines, the toggle removes them instead.
+ */
+export function toggleCode(view: EditorView): boolean {
+  if (view.state.readOnly) {
+    return false;
+  }
+  const { state } = view;
+  const range = state.selection.main;
+  const doc = state.doc;
+  const first = doc.lineAt(range.from);
+  const last = doc.lineAt(range.to);
+  if (first.number === last.number) {
+    return toggleInlineFormat(view, '`');
+  }
+  const above = first.number > 1 ? doc.line(first.number - 1) : null;
+  const below = last.number < doc.lines ? doc.line(last.number + 1) : null;
+  if (above !== null && below !== null && FENCE_OPEN_RE.test(above.text) && FENCE_CLOSE_RE.test(below.text)) {
+    view.dispatch({
+      changes: [
+        { from: above.from, to: first.from },
+        { from: last.to, to: below.to },
+      ],
+      scrollIntoView: true,
+      userEvent: 'input',
+    });
+    return true;
+  }
+  view.dispatch({
+    changes: [
+      { from: first.from, insert: `\`\`\`${state.lineBreak}` },
+      { from: last.to, insert: `${state.lineBreak}\`\`\`` },
+    ],
+    selection: EditorSelection.range(range.from + 4, range.to + 4),
+    scrollIntoView: true,
+    userEvent: 'input',
+  });
+  return true;
+}
+
 const HEADING_PREFIX_RE = /^(\s{0,3})(#{1,6})\s+/;
 
 export type HeadingLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;

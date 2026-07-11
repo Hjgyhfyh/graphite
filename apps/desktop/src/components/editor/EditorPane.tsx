@@ -15,6 +15,7 @@ import {
   ImagePlus,
   Italic,
   Link2,
+  ListChecks,
   PencilLine,
   Pilcrow,
   Scissors,
@@ -33,6 +34,8 @@ import {
   parseBlocks,
   setHeadingLevel,
   splitFrontmatter,
+  sweepDoneTasks,
+  toggleCode,
   toggleInlineFormat,
   toggleTaskOnLine,
 } from '@graphite/editor';
@@ -85,7 +88,8 @@ markdown-файлами в вашей папке — без облака и по
 `;
 
 const SAVE_DEBOUNCE_MS = 600;
-const READING_FONT = '"Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif';
+const READING_FONT =
+  '"Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif';
 
 const pendingSaves = new Map<NoteRef, Promise<void>>();
 const liveEditorFlushes = new Set<() => void>();
@@ -321,6 +325,12 @@ function renderInline(nodes: readonly MdInline[], keyPrefix: string, ctx: Inline
             {node.value}
           </code>
         );
+      case 'tag':
+        return (
+          <span key={key} className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[0.92em] text-accent">
+            #{node.value}
+          </span>
+        );
       case 'wikilink':
         return (
           <button
@@ -367,6 +377,9 @@ function inlineText(nodes: readonly MdInline[]): string {
       case 'text':
       case 'code':
         out += node.value;
+        break;
+      case 'tag':
+        out += `#${node.value}`;
         break;
       case 'strong':
       case 'em':
@@ -731,7 +744,7 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: Readin
       exit={{ opacity: 0 }}
       transition={{ duration: reduced ? 0.08 : 0.16, ease: easePoints.out }}
     >
-      <div className="mx-auto max-w-[calc(72ch+48px)] px-6 py-12" style={{ fontFamily: READING_FONT }}>
+      <div className="mx-auto max-w-[calc(72ch+48px)] px-6 py-12 text-[17px] leading-[28px]" style={{ fontFamily: READING_FONT }}>
         {entries !== undefined ? (
           <ReadingHeader
             entries={entries}
@@ -814,7 +827,7 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
     { icon: Bold, label: 'Жирный', kbd: 'Ctrl+B', marker: '**', active: formats.strong },
     { icon: Italic, label: 'Курсив', kbd: 'Ctrl+I', marker: '*', active: formats.em },
     { icon: Strikethrough, label: 'Зачёркнутый', kbd: 'Ctrl+Shift+X', marker: '~~', active: formats.strike },
-    { icon: Code, label: 'Код', kbd: 'Ctrl+E', marker: '`', active: formats.code },
+    { icon: Code, label: 'Код', kbd: 'Ctrl+Shift+E', marker: '`', active: formats.code },
   ];
 
   useLayoutEffect(() => {
@@ -847,7 +860,11 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
   }, [onClose, view]);
 
   const runInline = (marker: InlineMarker) => {
-    toggleInlineFormat(view, marker);
+    if (marker === '`') {
+      toggleCode(view);
+    } else {
+      toggleInlineFormat(view, marker);
+    }
     close();
   };
 
@@ -1195,6 +1212,35 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     handle.focus();
     openWikiLinkPicker(handle.view);
   });
+
+  // «Убрать сделанное в „Готово“»: выполненные пункты переезжают в конец
+  // заметки под ## Готово (история сохраняется), рабочий план остаётся чистым.
+  const handleSweepDone = useCallback(() => {
+    const handle = editorRef.current;
+    if (isWelcome || handle === null || handle.view.state.readOnly || useUiStore.getState().readingMode) {
+      return;
+    }
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const result = sweepDoneTasks(docRef.current, today);
+    if (result === null) {
+      useUiStore.getState().pushToast({ kind: 'info', text: 'Выполненных пунктов нет' });
+      return;
+    }
+    docRef.current = result.text;
+    setDocText(result.text);
+    handle.setDoc(result.text);
+    useEditorViewsStore.getState().bumpDocVersion();
+    dirtyRef.current = true;
+    setDirty(tabId, true);
+    scheduleSave();
+    useUiStore.getState().pushToast({
+      kind: 'success',
+      text: result.moved === 1 ? 'Пункт убран в «Готово»' : `В «Готово»: ${result.moved}`,
+    });
+  }, [isWelcome, tabId, setDirty, scheduleSave]);
+
+  useActionHandler('task.sweepDone', handleSweepDone);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1605,6 +1651,18 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       </Presence>
 
       <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-1.5">
+        {!readingMode && !isWelcome ? (
+          <Tooltip content="Убрать сделанное в «Готово»">
+            <button
+              type="button"
+              onClick={handleSweepDone}
+              aria-label="Убрать сделанное в «Готово»"
+              className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-s border border-stroke-1 bg-bg-2 text-text-1 shadow-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0 active:bg-bg-4"
+            >
+              <ListChecks size={15} strokeWidth={1.75} />
+            </button>
+          </Tooltip>
+        ) : null}
         <Tooltip content={readingMode ? 'Режим правки' : 'Режим чтения'}>
           <button
             type="button"

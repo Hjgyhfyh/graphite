@@ -69,6 +69,9 @@ function inlineText(nodes: readonly MdInline[]): string {
       case 'code':
         out += node.value;
         break;
+      case 'tag':
+        out += `#${node.value}`;
+        break;
       case 'strong':
       case 'em':
       case 'del':
@@ -160,6 +163,7 @@ main > :first-child { margin-top: 0; }
 p { margin: 0 0 16px; }
 a { color: #4f46e5; text-decoration: underline; text-decoration-color: rgba(79, 70, 229, 0.4); text-underline-offset: 2px; }
 .wikilink { color: #4f46e5; border-bottom: 1px dashed rgba(79, 70, 229, 0.5); }
+.tag { color: #4f46e5; background: rgba(79, 70, 229, 0.08); border-radius: 999px; padding: 1px 7px; }
 blockquote { margin: 0 0 16px; padding-left: 16px; border-left: 2px solid #e5e7eb; color: #565d6b; font-style: italic; }
 blockquote > :last-child { margin-bottom: 0; }
 code { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: 0.88em; background: #f4f4f6; border-radius: 4px; padding: 1px 5px; }

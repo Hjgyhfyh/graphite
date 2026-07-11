@@ -17,3 +17,16 @@ html[data-theme-switching="true"]:not([data-reduced-motion="true"]) *::after {
   transition-timing-function: var(--ease-out);
   transition-delay: 0ms;
 }
+
+/*
+ * Перенос в дереве заметок идёт на pointer-событиях (treeDndBackend), браузер
+ * не переводит документ в нативный drag-режим — на время переноса глушим
+ * выделение текста по пути курсора и держим курсор «переноса».
+ */
+body.tree-dragging {
+  user-select: none;
+}
+
+body.tree-dragging * {
+  cursor: grabbing !important;
+}

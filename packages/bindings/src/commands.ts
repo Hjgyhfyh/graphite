@@ -60,6 +60,9 @@ import type {
   PlanProgressResponse,
   PlanUpdateParams,
   PlanUpdateResponse,
+  PromptLogAppendParams,
+  PromptLogEntry,
+  PromptLogMeta,
   SaveAttachmentFromPathParams,
   SaveAttachmentParams,
   SaveAttachmentResponse,
@@ -281,5 +284,14 @@ export const commands = {
   },
   syncDetach(): Promise<void> {
     return invoke('sync_detach');
+  },
+  promptLogAppend(params: PromptLogAppendParams): Promise<PromptLogMeta> {
+    return invoke('prompt_log_append', { params });
+  },
+  promptLogList(limit?: number): Promise<PromptLogMeta[]> {
+    return invoke('prompt_log_list', { limit: limit ?? null });
+  },
+  promptLogGet(id: string): Promise<PromptLogEntry> {
+    return invoke('prompt_log_get', { id });
   },
 } as const;
