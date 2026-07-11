@@ -189,22 +189,37 @@ describe('sweepDoneTasks — уборка сделанного в «Готово
   });
 });
 
-describe('sweepLinesDone — уборка произвольного выделения в «Готово»', () => {
-  it('переносит выделенные строки обычного текста как есть', () => {
+describe('sweepLinesDone — сжатие выделения в блок «Готово» на месте', () => {
+  it('оборачивает выделенные строки маркерами, не трогая текст', () => {
     const src = '# План\n\n1 - первое дело\n2 - второе дело\n3 - ещё в работе\n';
-    const res = sweepLinesDone(src, 2, 3, '2026-07-12');
+    const res = sweepLinesDone(src, 2, 3, '12.07.2026, 14:32');
     expect(res).not.toBeNull();
     expect(res!.moved).toBe(2);
     expect(res!.text).toBe(
-      '# План\n\n3 - ещё в работе\n\n## Готово\n### 2026-07-12\n1 - первое дело\n2 - второе дело\n',
+      '# План\n\n<!-- готово: 12.07.2026, 14:32 -->\n1 - первое дело\n2 - второе дело\n<!-- /готово -->\n\n3 - ещё в работе\n',
     );
   });
 
-  it('строки внутри секции «Готово» не двигаются', () => {
-    expect(sweepLinesDone('## Готово\nуже там\n', 0, 1)).toBeNull();
+  it('добавляет пустую строку после блока в конце файла — есть куда писать дальше', () => {
+    const res = sweepLinesDone('план готов\n', 0, 0, 'x');
+    expect(res!.text).toBe('<!-- готово: x -->\nплан готов\n<!-- /готово -->\n');
+  });
+
+  it('не оборачивает маркеры и содержимое существующих блоков', () => {
+    const src = '<!-- готово: x -->\nстарое\n<!-- /готово -->\n';
+    expect(sweepLinesDone(src, 1, 1)).toBeNull();
+    expect(sweepLinesDone(src, 0, 2)).toBeNull();
   });
 
   it('пустое выделение возвращает null', () => {
     expect(sweepLinesDone('текст\n\n\n', 1, 2)).toBeNull();
+  });
+});
+
+describe('parseBlocks — маркеры «Готово» невидимы для чтения', () => {
+  it('строки маркеров пропускаются и рвут параграф', () => {
+    const blocks = parseBlocks('до\n<!-- готово: x -->\nвнутри\n<!-- /готово -->\nпосле');
+    expect(blocks).toHaveLength(3);
+    expect(blocks.every((b) => b.kind === 'paragraph')).toBe(true);
   });
 });

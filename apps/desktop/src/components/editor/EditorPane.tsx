@@ -1269,10 +1269,10 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     const fromLine = doc.lineAt(selection.main.from).number - 1;
     const toLine = doc.lineAt(selection.main.to).number - 1;
     const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const result = sweepLinesDone(docRef.current, fromLine, toLine, today);
+    const label = `${now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}, ${now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+    const result = sweepLinesDone(docRef.current, fromLine, toLine, label);
     if (result === null) {
-      useUiStore.getState().pushToast({ kind: 'info', text: 'В выделении нечего убирать' });
+      useUiStore.getState().pushToast({ kind: 'info', text: 'В выделении нечего убирать (пусто или уже в «Готово»)' });
       return;
     }
     docRef.current = result.text;
@@ -1284,7 +1284,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     scheduleSave();
     useUiStore.getState().pushToast({
       kind: 'success',
-      text: result.moved === 1 ? 'Строка убрана в «Готово»' : `Убрано в «Готово»: ${result.moved}`,
+      text: 'План сжат в блок «Готово» — клик по капсуле развернёт его',
     });
   }, [isWelcome, tabId, setDirty, scheduleSave]);
 

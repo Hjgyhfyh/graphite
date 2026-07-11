@@ -1,7 +1,8 @@
-import { EditorSelection, StateField } from '@codemirror/state';
+import { StateEffect, StateField } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
+import { DONE_BLOCK_END_RE, DONE_BLOCK_START_RE } from './markdown';
 
 const CHECK_ICON =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg>';
@@ -13,121 +14,194 @@ const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const FENCE_RE = /^\s{0,3}(```+|~~~+)\s*([^`]*)$/;
 const BOX_RE = /^\s*(?:[-*+]|\d{1,9}[.)])\s+\[[ xX/]\]/;
 
+/** Свёрнутый регион «Готово»: маркер-блок от свипа выделения или легаси-секция `## Готово`. */
 interface DoneRegion {
+  /** Стабильный ключ: вид + подпись + порядковый номер одинаковых подписей. */
+  readonly key: string;
+  readonly kind: 'block' | 'section';
+  readonly label: string;
+  /** Границы всего региона (включая маркеры/заголовок). */
   readonly from: number;
   readonly to: number;
+  /** Строка стартового маркера/заголовка — шапка развёрнутого блока. */
+  readonly headFrom: number;
+  readonly headTo: number;
+  /** Строка закрывающего маркера (только kind='block'). */
+  readonly endFrom: number;
+  readonly endTo: number;
+  /** Непустые строки содержимого — счётчик в капсуле. */
   readonly count: number;
-  readonly innerPos: number;
 }
 
-/** Секция «## Готово»: от заголовка до следующего заголовка уровня ≤2 или конца документа. */
-function findDoneRegion(state: EditorState): DoneRegion | null {
+/** Разворачивает/сворачивает блок по ключу региона. */
+const toggleDone = StateEffect.define<string>();
+
+function findDoneRegions(state: EditorState): DoneRegion[] {
   const doc = state.doc;
+  const regions: DoneRegion[] = [];
+  const seen = new Map<string, number>();
+
+  const push = (
+    kind: 'block' | 'section',
+    label: string,
+    startLine: number,
+    lastLine: number,
+    endLine: number,
+    count: number,
+  ) => {
+    const base = `${kind}:${label}`;
+    const nth = seen.get(base) ?? 0;
+    seen.set(base, nth + 1);
+    const head = doc.line(startLine);
+    const end = endLine > 0 ? doc.line(endLine) : head;
+    regions.push({
+      key: `${base}#${nth}`,
+      kind,
+      label,
+      from: head.from,
+      to: doc.line(lastLine).to,
+      headFrom: head.from,
+      headTo: head.to,
+      endFrom: end.from,
+      endTo: end.to,
+      count,
+    });
+  };
+
   let inFence = false;
-  let startLine = -1;
-  let count = 0;
-  for (let n = 1; n <= doc.lines; n++) {
+  let n = 1;
+  while (n <= doc.lines) {
     const text = doc.line(n).text;
     if (FENCE_RE.test(text)) {
       inFence = !inFence;
+      n += 1;
       continue;
     }
     if (inFence) {
+      n += 1;
       continue;
     }
-    const heading = HEADING_RE.exec(text);
-    if (heading !== null) {
-      const level = heading[1].length;
-      if (startLine === -1) {
-        if (level === 2 && heading[2].trim().toLowerCase().replace(/ё/g, 'е') === 'готово') {
-          startLine = n;
+
+    const start = DONE_BLOCK_START_RE.exec(text);
+    if (start !== null) {
+      let count = 0;
+      let endLine = -1;
+      for (let m = n + 1; m <= doc.lines; m++) {
+        const inner = doc.line(m).text;
+        if (DONE_BLOCK_END_RE.test(inner)) {
+          endLine = m;
+          break;
         }
-      } else if (level <= 2) {
-        return makeRegion(state, startLine, n - 1, count);
+        if (inner.trim().length > 0) {
+          count += 1;
+        }
       }
+      if (endLine === -1) {
+        n += 1;
+        continue;
+      }
+      push('block', start[1], n, endLine, endLine, count);
+      n = endLine + 1;
       continue;
     }
-    if (startLine !== -1 && BOX_RE.test(text)) {
-      count += 1;
+
+    const heading = HEADING_RE.exec(text);
+    if (heading !== null && heading[1].length === 2) {
+      const title = heading[2].trim();
+      if (title.toLowerCase().replace(/ё/g, 'е').startsWith('готово')) {
+        let lastLine = doc.lines;
+        let count = 0;
+        for (let m = n + 1; m <= doc.lines; m++) {
+          const inner = doc.line(m).text;
+          const h = HEADING_RE.exec(inner);
+          if (h !== null && h[1].length <= 2) {
+            lastLine = m - 1;
+            break;
+          }
+          if (BOX_RE.test(inner)) {
+            count += 1;
+          }
+        }
+        push('section', title, n, lastLine, -1, count);
+        n = lastLine + 1;
+        continue;
+      }
     }
+    n += 1;
   }
-  return startLine === -1 ? null : makeRegion(state, startLine, doc.lines, count);
+  return regions;
 }
 
-function makeRegion(state: EditorState, startLine: number, lastLine: number, count: number): DoneRegion {
-  const doc = state.doc;
-  const from = doc.line(startLine).from;
-  const to = doc.line(lastLine).to;
-  const innerPos = startLine < doc.lines ? doc.line(startLine + 1).from : from;
-  return { from, to, count, innerPos };
+function labelParts(label: string): { title: string; date: string } {
+  if (label.length === 0) {
+    return { title: 'Готово', date: '' };
+  }
+  return { title: 'Готово', date: label };
 }
 
-/** Compact capsule shown instead of the raw "Готово" section. */
+/** Свёрнутый блок: одна капсула вместо всего региона. */
 class DoneCapsuleWidget extends WidgetType {
   constructor(
+    readonly key: string,
+    readonly label: string,
     readonly count: number,
-    readonly innerPos: number,
   ) {
     super();
   }
 
   eq(other: DoneCapsuleWidget): boolean {
-    return other.count === this.count && other.innerPos === this.innerPos;
+    return other.key === this.key && other.label === this.label && other.count === this.count;
   }
 
   get estimatedHeight(): number {
-    return 52;
+    return 46;
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const { title, date } = labelParts(this.label);
     const wrap = document.createElement('div');
-    wrap.className = 'cm-gr-fm-wrap';
+    wrap.className = 'cm-gr-done-wrap';
 
     const capsule = document.createElement('button');
     capsule.type = 'button';
-    capsule.className = 'cm-gr-fm-capsule';
-    capsule.title = 'Показать сделанное';
-    capsule.setAttribute('aria-label', 'Секция «Готово» — развернуть');
+    capsule.className = 'cm-gr-done-capsule';
+    capsule.title = 'Развернуть блок «Готово»';
+    capsule.setAttribute('aria-label', `Блок «Готово»${date.length > 0 ? ` от ${date}` : ''} — развернуть`);
 
     const icon = document.createElement('span');
-    icon.className = 'cm-gr-fm-icon';
+    icon.className = 'cm-gr-done-icon';
     icon.innerHTML = CHECK_ICON;
     capsule.appendChild(icon);
 
     const label = document.createElement('span');
-    label.className = 'cm-gr-fm-label';
-    label.textContent = 'Готово';
+    label.className = 'cm-gr-done-label';
+    label.textContent = title;
     capsule.appendChild(label);
 
-    if (this.count > 0) {
-      const count = document.createElement('span');
-      count.className = 'cm-gr-fm-count';
-      count.textContent = String(this.count);
-      capsule.appendChild(count);
+    if (date.length > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'cm-gr-done-date';
+      chip.textContent = date;
+      capsule.appendChild(chip);
     }
 
-    const chips = document.createElement('span');
-    chips.className = 'cm-gr-fm-chips';
-    capsule.appendChild(chips);
+    const count = document.createElement('span');
+    count.className = 'cm-gr-done-count';
+    count.textContent = `${this.count} стр.`;
+    capsule.appendChild(count);
 
     const chevron = document.createElement('span');
-    chevron.className = 'cm-gr-fm-chevron';
+    chevron.className = 'cm-gr-done-chevron';
     chevron.innerHTML = CHEVRON_ICON;
     capsule.appendChild(chevron);
 
-    const expand = (event: Event): void => {
+    const key = this.key;
+    capsule.addEventListener('mousedown', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const anchor = Math.min(this.innerPos, view.state.doc.length);
-      view.dispatch({
-        selection: EditorSelection.cursor(anchor),
-        scrollIntoView: true,
-      });
-      view.focus();
-    };
-    capsule.addEventListener('mousedown', expand);
+      view.dispatch({ effects: toggleDone.of(key) });
+    });
     wrap.appendChild(capsule);
-
     return wrap;
   }
 
@@ -136,42 +210,170 @@ class DoneCapsuleWidget extends WidgetType {
   }
 }
 
-function selectionInside(state: EditorState, from: number, to: number): boolean {
-  for (const range of state.selection.ranges) {
-    if (range.to >= from && range.from <= to) {
-      return true;
-    }
+/** Шапка развёрнутого блока — заменяет строку маркера/заголовка, клик сворачивает. */
+class DoneHeadWidget extends WidgetType {
+  constructor(
+    readonly key: string,
+    readonly label: string,
+  ) {
+    super();
   }
-  return false;
+
+  eq(other: DoneHeadWidget): boolean {
+    return other.key === this.key && other.label === this.label;
+  }
+
+  get estimatedHeight(): number {
+    return 34;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const { title, date } = labelParts(this.label);
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-gr-done-wrap';
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'cm-gr-done-capsule cm-gr-done-open';
+    head.title = 'Свернуть блок «Готово»';
+    head.setAttribute('aria-label', 'Свернуть блок «Готово»');
+
+    const icon = document.createElement('span');
+    icon.className = 'cm-gr-done-icon';
+    icon.innerHTML = CHECK_ICON;
+    head.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'cm-gr-done-label';
+    label.textContent = title;
+    head.appendChild(label);
+
+    if (date.length > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'cm-gr-done-date';
+      chip.textContent = date;
+      head.appendChild(chip);
+    }
+
+    const chevron = document.createElement('span');
+    chevron.className = 'cm-gr-done-chevron cm-gr-done-chevron-up';
+    chevron.innerHTML = CHEVRON_ICON;
+    head.appendChild(chevron);
+
+    const key = this.key;
+    head.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ effects: toggleDone.of(key) });
+    });
+    wrap.appendChild(head);
+    return wrap;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
 }
 
-function buildFold(state: EditorState): DecorationSet {
-  const region = findDoneRegion(state);
-  if (region === null || selectionInside(state, region.from, region.to)) {
+/** Нижняя кромка развёрнутого блока — прячет закрывающий маркер. */
+class DoneEndWidget extends WidgetType {
+  constructor(readonly key: string) {
+    super();
+  }
+
+  eq(other: DoneEndWidget): boolean {
+    return other.key === this.key;
+  }
+
+  get estimatedHeight(): number {
+    return 14;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-gr-done-endline';
+    wrap.title = 'Свернуть блок «Готово»';
+    const key = this.key;
+    wrap.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ effects: toggleDone.of(key) });
+    });
+    return wrap;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+interface DoneFoldState {
+  readonly expanded: ReadonlySet<string>;
+  readonly deco: DecorationSet;
+}
+
+function buildDeco(state: EditorState, expanded: ReadonlySet<string>): DecorationSet {
+  const regions = findDoneRegions(state);
+  if (regions.length === 0) {
     return Decoration.none;
   }
-  const widget = new DoneCapsuleWidget(region.count, region.innerPos);
-  return Decoration.set([Decoration.replace({ widget, block: true }).range(region.from, region.to)]);
+  const decos = [];
+  for (const region of regions) {
+    if (!expanded.has(region.key)) {
+      decos.push(
+        Decoration.replace({ widget: new DoneCapsuleWidget(region.key, region.label, region.count), block: true }).range(
+          region.from,
+          region.to,
+        ),
+      );
+      continue;
+    }
+    decos.push(
+      Decoration.replace({ widget: new DoneHeadWidget(region.key, region.label), block: true }).range(
+        region.headFrom,
+        region.headTo,
+      ),
+    );
+    if (region.kind === 'block') {
+      decos.push(
+        Decoration.replace({ widget: new DoneEndWidget(region.key), block: true }).range(region.endFrom, region.endTo),
+      );
+    }
+  }
+  return Decoration.set(decos, true);
 }
 
 /**
- * Folds the "## Готово" section into a compact capsule while the selection is
- * outside it: done items stay in the note (history is preserved) but no longer
- * crowd the next plan. Clicking the capsule (or moving the caret inside)
- * reveals the raw section; the fold snaps back once the caret leaves.
+ * Блоки «Готово»: каждый убранный план сжимается на месте в отдельную капсулу
+ * (без свалки в одну секцию) и раскрывается/сворачивается ТОЛЬКО кликом —
+ * курсор и печать рядом блок не трогают. Виджеты стабильны между вводами
+ * (eq по ключу), поэтому ничего не мигает при наборе текста.
  */
-export const doneFold = StateField.define<DecorationSet>({
+export const doneFold = StateField.define<DoneFoldState>({
   create(state) {
-    return buildFold(state);
+    const expanded = new Set<string>();
+    return { expanded, deco: buildDeco(state, expanded) };
   },
-  update(deco, tr) {
-    if (tr.docChanged || tr.selection !== undefined) {
-      return buildFold(tr.state);
+  update(value, tr) {
+    let expanded: Set<string> | null = null;
+    for (const effect of tr.effects) {
+      if (effect.is(toggleDone)) {
+        expanded = expanded ?? new Set(value.expanded);
+        if (expanded.has(effect.value)) {
+          expanded.delete(effect.value);
+        } else {
+          expanded.add(effect.value);
+        }
+      }
     }
-    return deco;
+    if (expanded === null && !tr.docChanged) {
+      return value;
+    }
+    const next = expanded ?? (value.expanded as Set<string>);
+    return { expanded: next, deco: buildDeco(tr.state, next) };
   },
   provide: (field) => [
-    EditorView.decorations.from(field),
-    EditorView.atomicRanges.of((view) => view.state.field(field)),
+    EditorView.decorations.from(field, (value) => value.deco),
+    EditorView.atomicRanges.of((view) => view.state.field(field).deco),
   ],
 });

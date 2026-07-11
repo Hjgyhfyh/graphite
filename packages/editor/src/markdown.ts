@@ -201,6 +201,11 @@ const QUOTE_RE = /^\s{0,3}>\s?(.*)$/;
 const LIST_RE = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 const TASK_RE = /^\[([ xX])\]\s*(.*)$/;
 
+/** Маркеры блока «Готово»: скрытая служебная разметка убранных планов. */
+export const DONE_BLOCK_START_RE = /^<!--\s*готово:\s*(.*?)\s*-->\s*$/;
+export const DONE_BLOCK_END_RE = /^<!--\s*\/готово\s*-->\s*$/;
+const DONE_MARKER_RE = /^<!--\s*(?:готово:|\/готово)/;
+
 function isBlank(line: string): boolean {
   return line.trim().length === 0;
 }
@@ -212,6 +217,7 @@ function isBlockStart(line: string): boolean {
     FENCE_RE.test(line) ||
     QUOTE_RE.test(line) ||
     LIST_RE.test(line) ||
+    DONE_MARKER_RE.test(line) ||
     isBlank(line)
   );
 }
@@ -230,7 +236,7 @@ export function parseBlocks(source: string, baseOffset = 0): MdBlock[] {
   while (i < n) {
     const line = lines[i];
 
-    if (isBlank(line)) {
+    if (isBlank(line) || DONE_MARKER_RE.test(line)) {
       i += 1;
       continue;
     }
@@ -521,21 +527,21 @@ export function sweepDoneTasks(source: string, dateLabel?: string): SweepDoneRes
 }
 
 /**
- * Убирает произвольно выделенные строки в конец секции «## Готово» — для
- * планов, записанных обычным текстом, а не чекбоксами. Текст переносится
- * байт-в-байт, история не теряется; строки внутри самой секции «Готово» и её
- * заголовок не двигаются. `moved` — число непустых перенесённых строк.
+ * Сжимает произвольно выделенные строки в блок «Готово» прямо на месте: текст
+ * оборачивается скрытыми маркерами `<!-- готово: … --> … <!-- /готово -->` и
+ * сохраняется байт-в-байт. Каждая уборка — отдельный самостоятельный блок
+ * (редактор сворачивает его в капсулу), так что в одном файле копится стопка
+ * закрытых планов, а ниже пишется следующий. `moved` — число непустых строк.
  */
 export function sweepLinesDone(
   source: string,
   fromLine: number,
   toLine: number,
-  dateLabel?: string,
+  label?: string,
 ): SweepDoneResult | null {
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
   const lines = source.split(/\r?\n/);
   const bodyStart = splitFrontmatter(source)?.bodyLine ?? 0;
-  const { start: doneStart, end: doneEnd } = findDoneSection(lines, bodyStart);
 
   let from = Math.max(fromLine, bodyStart);
   let to = Math.min(toLine, lines.length - 1);
@@ -545,24 +551,47 @@ export function sweepLinesDone(
   while (to >= from && lines[to].trim().length === 0) {
     to -= 1;
   }
-
-  const movedSet = new Set<number>();
-  const movedLines: string[] = [];
-  for (let k = from; k <= to; k++) {
-    if (doneStart !== -1 && k >= doneStart && k < doneEnd) {
-      continue;
-    }
-    movedSet.add(k);
-    movedLines.push(lines[k]);
+  if (from > to) {
+    return null;
   }
-  const moved = movedLines.filter((line) => line.trim().length > 0).length;
+
+  // Блоки не вкладываются: выделение не должно захватывать чужие маркеры
+  // и не должно начинаться внутри уже убранного блока.
+  for (let k = from; k <= to; k++) {
+    if (DONE_BLOCK_START_RE.test(lines[k]) || DONE_BLOCK_END_RE.test(lines[k])) {
+      return null;
+    }
+  }
+  let insideBlock = false;
+  for (let k = bodyStart; k < from; k++) {
+    if (DONE_BLOCK_START_RE.test(lines[k])) {
+      insideBlock = true;
+    } else if (DONE_BLOCK_END_RE.test(lines[k])) {
+      insideBlock = false;
+    }
+  }
+  if (insideBlock) {
+    return null;
+  }
+
+  const content = lines.slice(from, to + 1);
+  const moved = content.filter((line) => line.trim().length > 0).length;
   if (moved === 0) {
     return null;
   }
-  return {
-    text: relocateToDone(lines, eol, movedSet, movedLines, doneStart, doneEnd, dateLabel),
-    moved,
-  };
+
+  const startMarker = label !== undefined && label.length > 0 ? `<!-- готово: ${label} -->` : '<!-- готово: -->';
+  const block: string[] = [];
+  if (from > 0 && lines[from - 1].trim().length !== 0) {
+    block.push('');
+  }
+  block.push(startMarker, ...content, '<!-- /готово -->');
+  if (to + 1 >= lines.length || lines[to + 1].trim().length !== 0) {
+    block.push('');
+  }
+
+  const out = [...lines.slice(0, from), ...block, ...lines.slice(to + 1)];
+  return { text: out.join(eol), moved };
 }
 
 /** Flip the checkbox state on a single source line, preserving the rest byte-for-byte. */

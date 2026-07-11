@@ -430,6 +430,98 @@ export const graphiteDark = EditorView.theme(
       flexShrink: '0',
       transition: 'color 120ms var(--ease-out), transform 160ms var(--ease-out)',
     },
+    // Блоки «Готово»: капсула свёрнутого блока и шапка развёрнутого. Отбивка —
+    // padding обёртки (margin блочного виджета не попадает в карту высот CM).
+    '.cm-gr-done-wrap': {
+      padding: '2px 24px 8px',
+    },
+    '.cm-gr-done-capsule': {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      width: '100%',
+      margin: '0',
+      padding: '7px 12px',
+      backgroundColor: 'var(--bg-1)',
+      border: '1px solid var(--stroke-0)',
+      borderRadius: 'var(--r-m, 14px)',
+      color: 'var(--text-1)',
+      fontFamily: 'var(--font-ui, system-ui, sans-serif)',
+      cursor: 'pointer',
+      userSelect: 'none',
+      textAlign: 'left',
+      transition:
+        'background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), transform 120ms var(--ease-out)',
+    },
+    '.cm-gr-done-capsule:hover': {
+      backgroundColor: 'var(--bg-2)',
+      borderColor: 'var(--stroke-1)',
+    },
+    '.cm-gr-done-capsule:active': {
+      transform: 'scale(0.995)',
+    },
+    '.cm-gr-done-open': {
+      backgroundColor: 'var(--bg-2)',
+      borderBottomLeftRadius: 'var(--r-s, 8px)',
+      borderBottomRightRadius: 'var(--r-s, 8px)',
+    },
+    '.cm-gr-done-icon': {
+      display: 'inline-flex',
+      color: 'var(--ok, var(--text-2))',
+      flexShrink: '0',
+    },
+    '.cm-gr-done-label': {
+      fontSize: '12px',
+      fontWeight: '500',
+      letterSpacing: '0.02em',
+      color: 'var(--text-1)',
+      flexShrink: '0',
+    },
+    '.cm-gr-done-date': {
+      fontSize: '11px',
+      lineHeight: '17px',
+      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      color: 'var(--text-2)',
+      backgroundColor: 'var(--bg-2)',
+      border: '1px solid var(--stroke-0)',
+      borderRadius: 'var(--r-full, 999px)',
+      padding: '0 8px',
+      whiteSpace: 'nowrap',
+      flexShrink: '0',
+    },
+    '.cm-gr-done-count': {
+      fontSize: '10.5px',
+      lineHeight: '15px',
+      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      color: 'var(--text-2)',
+      backgroundColor: 'var(--bg-3)',
+      borderRadius: 'var(--r-full, 999px)',
+      padding: '0 6px',
+      flexShrink: '0',
+    },
+    '.cm-gr-done-chevron': {
+      display: 'inline-flex',
+      marginLeft: 'auto',
+      color: 'var(--text-3)',
+      flexShrink: '0',
+      transition: 'color 120ms var(--ease-out), transform 160ms var(--ease-out)',
+    },
+    '.cm-gr-done-capsule:hover .cm-gr-done-chevron': {
+      color: 'var(--text-1)',
+    },
+    '.cm-gr-done-chevron-up': {
+      transform: 'rotate(180deg)',
+    },
+    '.cm-gr-done-endline': {
+      height: '6px',
+      margin: '0 24px 8px',
+      borderBottom: '2px solid var(--stroke-0)',
+      cursor: 'pointer',
+      transition: 'border-color 120ms var(--ease-out)',
+    },
+    '.cm-gr-done-endline:hover': {
+      borderBottomColor: 'var(--stroke-1)',
+    },
     '.cm-gr-upload': {
       display: 'inline-flex',
       alignItems: 'center',
