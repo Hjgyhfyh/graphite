@@ -35,6 +35,7 @@ import {
   setHeadingLevel,
   splitFrontmatter,
   sweepDoneTasks,
+  sweepLinesDone,
   toggleCode,
   toggleInlineFormat,
   toggleTaskOnLine,
@@ -790,6 +791,7 @@ interface SelectionMenuProps {
   view: EditorView;
   reduced: boolean;
   onClose: () => void;
+  onSweepDone: () => void;
 }
 
 interface InlineAction {
@@ -816,7 +818,7 @@ const HEADING_ACTIONS: readonly HeadingAction[] = [
 const MENU_ROW =
   'flex w-full select-none items-center gap-2.5 rounded-s px-2.5 py-1.5 text-ui transition-colors duration-[120ms]';
 
-function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
+function SelectionMenu({ at, view, reduced, onClose, onSweepDone }: SelectionMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState(at);
 
@@ -871,6 +873,11 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
   const runLink = () => {
     close();
     openWikiLinkPicker(view);
+  };
+
+  const runSweepDone = () => {
+    onSweepDone();
+    close();
   };
 
   const runHeading = (level: HeadingLevel) => {
@@ -931,6 +938,15 @@ function SelectionMenu({ at, view, reduced, onClose }: SelectionMenuProps) {
           </button>
         ))}
         <div aria-hidden className="mx-1.5 my-1 h-px bg-stroke-0" />
+        <button
+          type="button"
+          role="menuitem"
+          onClick={runSweepDone}
+          className={cx(MENU_ROW, 'text-text-1 hover:bg-bg-3 hover:text-text-0')}
+        >
+          <ListChecks size={15} strokeWidth={1.75} className="shrink-0" />
+          <span className="flex-1 text-left">Убрать в «Готово»</span>
+        </button>
         <button
           type="button"
           role="menuitem"
@@ -1241,6 +1257,36 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   }, [isWelcome, tabId, setDirty, scheduleSave]);
 
   useActionHandler('task.sweepDone', handleSweepDone);
+
+  // «Убрать в „Готово“» для произвольного выделения: план, записанный обычным
+  // текстом, уезжает под капсулу целиком — без превращения в чекбоксы.
+  const handleSweepSelection = useCallback(() => {
+    const handle = editorRef.current;
+    if (isWelcome || handle === null || handle.view.state.readOnly || useUiStore.getState().readingMode) {
+      return;
+    }
+    const { doc, selection } = handle.view.state;
+    const fromLine = doc.lineAt(selection.main.from).number - 1;
+    const toLine = doc.lineAt(selection.main.to).number - 1;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const result = sweepLinesDone(docRef.current, fromLine, toLine, today);
+    if (result === null) {
+      useUiStore.getState().pushToast({ kind: 'info', text: 'В выделении нечего убирать' });
+      return;
+    }
+    docRef.current = result.text;
+    setDocText(result.text);
+    handle.setDoc(result.text);
+    useEditorViewsStore.getState().bumpDocVersion();
+    dirtyRef.current = true;
+    setDirty(tabId, true);
+    scheduleSave();
+    useUiStore.getState().pushToast({
+      kind: 'success',
+      text: result.moved === 1 ? 'Строка убрана в «Готово»' : `Убрано в «Готово»: ${result.moved}`,
+    });
+  }, [isWelcome, tabId, setDirty, scheduleSave]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1621,6 +1667,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
             view={editorRef.current.view}
             reduced={reduced}
             onClose={closeMenu}
+            onSweepDone={handleSweepSelection}
           />
         ) : null}
       </Presence>

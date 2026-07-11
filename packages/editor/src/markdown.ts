@@ -354,13 +354,10 @@ function normalizeHeading(text: string): string {
  * не меняется. `dateLabel` группирует перенесённое под `### <дата>`, не
  * дублируя подзаголовок при повторной уборке в тот же день.
  */
-export function sweepDoneTasks(source: string, dateLabel?: string): SweepDoneResult | null {
-  const eol = source.includes('\r\n') ? '\r\n' : '\n';
-  const lines = source.split(/\r?\n/);
-  const bodyStart = splitFrontmatter(source)?.bodyLine ?? 0;
-
-  let doneStart = -1;
-  let doneEnd = lines.length;
+/** Границы секции «## Готово»: заголовок → следующий заголовок уровня ≤2 или конец. */
+function findDoneSection(lines: readonly string[], bodyStart: number): { start: number; end: number } {
+  let start = -1;
+  let end = lines.length;
   let inFence = false;
   for (let i = bodyStart; i < lines.length; i++) {
     if (FENCE_RE.test(lines[i])) {
@@ -374,68 +371,33 @@ export function sweepDoneTasks(source: string, dateLabel?: string): SweepDoneRes
     if (heading === null) {
       continue;
     }
-    if (doneStart === -1) {
+    if (start === -1) {
       if (heading[1].length === 2 && normalizeHeading(heading[2]) === 'готово') {
-        doneStart = i;
+        start = i;
       }
     } else if (heading[1].length <= 2) {
-      doneEnd = i;
+      end = i;
       break;
     }
   }
+  return { start, end };
+}
 
-  const units: { from: number; to: number }[] = [];
-  inFence = false;
-  let i = bodyStart;
-  while (i < lines.length) {
-    if (doneStart !== -1 && i >= doneStart && i < doneEnd) {
-      i = doneEnd;
-      inFence = false;
-      continue;
-    }
-    const line = lines[i];
-    if (FENCE_RE.test(line)) {
-      inFence = !inFence;
-      i += 1;
-      continue;
-    }
-    if (inFence) {
-      i += 1;
-      continue;
-    }
-    const top = TOP_TASK_RE.exec(line);
-    if (top === null) {
-      i += 1;
-      continue;
-    }
-    const from = i;
-    let open = top[1] !== 'x' && top[1] !== 'X';
-    i += 1;
-    while (i < lines.length && /^\s/.test(lines[i]) && lines[i].trim().length > 0) {
-      const child = NESTED_TASK_RE.exec(lines[i]);
-      if (child !== null && child[1] !== 'x' && child[1] !== 'X') {
-        open = true;
-      }
-      i += 1;
-    }
-    if (!open) {
-      units.push({ from, to: i });
-    }
-  }
-  if (units.length === 0) {
-    return null;
-  }
-
-  const movedSet = new Set<number>();
-  for (const unit of units) {
-    for (let k = unit.from; k < unit.to; k++) {
-      movedSet.add(k);
-    }
-  }
-  const movedLines = units.flatMap((unit) => lines.slice(unit.from, unit.to));
-
-  // Сборка без перенесённых строк; пустая строка после вырезанного пункта
-  // схлопывается, чтобы на его месте не оставалось двойного пробела.
+/**
+ * Пересобирает документ: строки из `movedSet` уходят, `movedLines` дописываются
+ * в конец секции «Готово» (секция и дневной подзаголовок создаются при
+ * необходимости). Пустая строка после вырезанного куска схлопывается, чтобы
+ * на его месте не оставалось двойного пробела.
+ */
+function relocateToDone(
+  lines: readonly string[],
+  eol: string,
+  movedSet: ReadonlySet<number>,
+  movedLines: readonly string[],
+  doneStart: number,
+  doneEnd: number,
+  dateLabel?: string,
+): string {
   const kept: string[] = [];
   let insertAt = -1;
   for (let k = 0; k < lines.length; k++) {
@@ -493,8 +455,114 @@ export function sweepDoneTasks(source: string, dateLabel?: string): SweepDoneRes
   }
   block.push(...movedLines);
 
-  const out = [...kept.slice(0, insertAt), ...block, ...kept.slice(insertAt)];
-  return { text: out.join(eol), moved: units.length };
+  return [...kept.slice(0, insertAt), ...block, ...kept.slice(insertAt)].join(eol);
+}
+
+export function sweepDoneTasks(source: string, dateLabel?: string): SweepDoneResult | null {
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = source.split(/\r?\n/);
+  const bodyStart = splitFrontmatter(source)?.bodyLine ?? 0;
+  const { start: doneStart, end: doneEnd } = findDoneSection(lines, bodyStart);
+
+  const units: { from: number; to: number }[] = [];
+  let inFence = false;
+  let i = bodyStart;
+  while (i < lines.length) {
+    if (doneStart !== -1 && i >= doneStart && i < doneEnd) {
+      i = doneEnd;
+      inFence = false;
+      continue;
+    }
+    const line = lines[i];
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      i += 1;
+      continue;
+    }
+    if (inFence) {
+      i += 1;
+      continue;
+    }
+    const top = TOP_TASK_RE.exec(line);
+    if (top === null) {
+      i += 1;
+      continue;
+    }
+    const from = i;
+    let open = top[1] !== 'x' && top[1] !== 'X';
+    i += 1;
+    while (i < lines.length && /^\s/.test(lines[i]) && lines[i].trim().length > 0) {
+      const child = NESTED_TASK_RE.exec(lines[i]);
+      if (child !== null && child[1] !== 'x' && child[1] !== 'X') {
+        open = true;
+      }
+      i += 1;
+    }
+    if (!open) {
+      units.push({ from, to: i });
+    }
+  }
+  if (units.length === 0) {
+    return null;
+  }
+
+  const movedSet = new Set<number>();
+  for (const unit of units) {
+    for (let k = unit.from; k < unit.to; k++) {
+      movedSet.add(k);
+    }
+  }
+  const movedLines = units.flatMap((unit) => lines.slice(unit.from, unit.to));
+
+  return {
+    text: relocateToDone(lines, eol, movedSet, movedLines, doneStart, doneEnd, dateLabel),
+    moved: units.length,
+  };
+}
+
+/**
+ * Убирает произвольно выделенные строки в конец секции «## Готово» — для
+ * планов, записанных обычным текстом, а не чекбоксами. Текст переносится
+ * байт-в-байт, история не теряется; строки внутри самой секции «Готово» и её
+ * заголовок не двигаются. `moved` — число непустых перенесённых строк.
+ */
+export function sweepLinesDone(
+  source: string,
+  fromLine: number,
+  toLine: number,
+  dateLabel?: string,
+): SweepDoneResult | null {
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = source.split(/\r?\n/);
+  const bodyStart = splitFrontmatter(source)?.bodyLine ?? 0;
+  const { start: doneStart, end: doneEnd } = findDoneSection(lines, bodyStart);
+
+  let from = Math.max(fromLine, bodyStart);
+  let to = Math.min(toLine, lines.length - 1);
+  while (from <= to && lines[from].trim().length === 0) {
+    from += 1;
+  }
+  while (to >= from && lines[to].trim().length === 0) {
+    to -= 1;
+  }
+
+  const movedSet = new Set<number>();
+  const movedLines: string[] = [];
+  for (let k = from; k <= to; k++) {
+    if (doneStart !== -1 && k >= doneStart && k < doneEnd) {
+      continue;
+    }
+    movedSet.add(k);
+    movedLines.push(lines[k]);
+  }
+  const moved = movedLines.filter((line) => line.trim().length > 0).length;
+  if (moved === 0) {
+    return null;
+  }
+  return {
+    text: relocateToDone(lines, eol, movedSet, movedLines, doneStart, doneEnd, dateLabel),
+    moved,
+  };
 }
 
 /** Flip the checkbox state on a single source line, preserving the rest byte-for-byte. */

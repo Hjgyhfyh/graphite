@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBlocks, parseInline, sweepDoneTasks } from '../src/markdown';
+import { parseBlocks, parseInline, sweepDoneTasks, sweepLinesDone } from '../src/markdown';
 import type { MdBlock, MdInline } from '../src/markdown';
 
 type Para = Extract<MdBlock, { kind: 'paragraph' }>;
@@ -186,5 +186,25 @@ describe('sweepDoneTasks — уборка сделанного в «Готово
 
   it('без выполненных пунктов возвращает null', () => {
     expect(sweepDoneTasks('- [ ] дело\nпросто текст\n')).toBeNull();
+  });
+});
+
+describe('sweepLinesDone — уборка произвольного выделения в «Готово»', () => {
+  it('переносит выделенные строки обычного текста как есть', () => {
+    const src = '# План\n\n1 - первое дело\n2 - второе дело\n3 - ещё в работе\n';
+    const res = sweepLinesDone(src, 2, 3, '2026-07-12');
+    expect(res).not.toBeNull();
+    expect(res!.moved).toBe(2);
+    expect(res!.text).toBe(
+      '# План\n\n3 - ещё в работе\n\n## Готово\n### 2026-07-12\n1 - первое дело\n2 - второе дело\n',
+    );
+  });
+
+  it('строки внутри секции «Готово» не двигаются', () => {
+    expect(sweepLinesDone('## Готово\nуже там\n', 0, 1)).toBeNull();
+  });
+
+  it('пустое выделение возвращает null', () => {
+    expect(sweepLinesDone('текст\n\n\n', 1, 2)).toBeNull();
   });
 });
