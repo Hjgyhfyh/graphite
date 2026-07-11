@@ -2195,21 +2195,13 @@ pub fn fs_read_base64(path: String, max_bytes: u64) -> Result<FsBinaryFile, Grap
 #[specta::specta]
 pub fn fs_reveal_path(path: String) -> Result<(), GraphiteError> {
     let abs = PathBuf::from(&path);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        std::process::Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", abs.display()))
-            .spawn()
-            .map_err(|e| {
-                gerr(GraphiteErrorCode::Unavailable, format!("не удалось открыть проводник: {e}"), None)
-            })?;
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = abs;
-    }
-    Ok(())
+    tauri_plugin_opener::reveal_item_in_dir(&abs).map_err(|e| {
+        gerr(
+            GraphiteErrorCode::Unavailable,
+            format!("не удалось открыть проводник: {e}"),
+            None,
+        )
+    })
 }
 
 /// Открыть файл/папку системным приложением по умолчанию (запасной путь для
