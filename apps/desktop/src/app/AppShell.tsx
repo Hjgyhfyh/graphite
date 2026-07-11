@@ -13,6 +13,7 @@ import type {
   UiOpenNoteEvent,
 } from '@graphite/bindings';
 import { BriefView } from '../components/brief/BriefView';
+import { ExplorerView } from '../components/explorer/ExplorerView';
 import { CommandPalette } from '../components/palette/CommandPalette';
 import { QuickSwitcher } from '../components/palette/QuickSwitcher';
 import { FloatingCapture } from '../components/capture/FloatingCapture';
@@ -224,7 +225,11 @@ function CenterView() {
 
   let viewKey: string;
   let view: ReactNode;
-  if (!vaultReady) {
+  if (railView === 'explorer') {
+    // Файловый менеджер работает и без открытого хранилища — ветка до гейта vault.
+    viewKey = 'explorer';
+    view = <ExplorerView />;
+  } else if (!vaultReady) {
     viewKey = 'gate';
     view = <VaultGate />;
   } else if (railView === 'settings') {
@@ -281,6 +286,11 @@ export function AppShell() {
 
   useEffect(() => {
     void bootstrapVault();
+  }, []);
+
+  // Старт всегда в разделе «Проводник» — осознанный оверрайд сохранённого railView.
+  useEffect(() => {
+    useUiStore.getState().setRailView('explorer');
   }, []);
 
   useEffect(() => initSyncStore(), []);
@@ -345,7 +355,11 @@ export function AppShell() {
               <CenterView />
             </PanelItem>
             <PanelItem className="flex min-h-0 shrink-0">
-              <CollapsibleColumn open={rightPanelOpen} width={rightWidth} className="relative h-full shrink-0">
+              <CollapsibleColumn
+                open={rightPanelOpen && railView !== 'explorer'}
+                width={rightWidth}
+                className="relative h-full shrink-0"
+              >
                 <RightPanel tab={rightPanelTab} width={rightWidth} onWidthChange={setRightWidth} />
               </CollapsibleColumn>
             </PanelItem>

@@ -1,6 +1,7 @@
 import {
   CalendarDays,
   FileText,
+  FolderTree,
   ListChecks,
   Network,
   Search,
@@ -17,6 +18,7 @@ export interface RailItemMeta {
 }
 
 export const RAIL_META: Record<RailItemView, RailItemMeta> = {
+  explorer: { label: 'Проводник', icon: FolderTree },
   tree: { label: 'Заметки', icon: FileText },
   search: { label: 'Поиск', icon: Search },
   tasks: { label: 'Задачи', icon: ListChecks },

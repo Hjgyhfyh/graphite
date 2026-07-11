@@ -2031,3 +2031,277 @@ pub fn export_write(params: ExportWriteParams) -> Result<(), GraphiteError> {
     fs::write(&dest, params.contents.as_bytes())
         .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("не удалось записать файл: {e}"), None))
 }
+
+// --- Файловый менеджер «Проводник» -------------------------------------------
+// Навигация и просмотр произвольных папок/файлов на диске, вне хранилища. Всё
+// read-only: ни индекс, ни журнал, ни ядро не затрагиваются. Команды свои
+// (`#[tauri::command]`), поэтому не требуют правок capabilities.
+
+/// Жёсткий потолок чтения текста (даже если фронт запросит больше).
+const FS_TEXT_HARD_CAP: u64 = 4 * 1024 * 1024;
+/// Жёсткий потолок для base64-картинок.
+const FS_BINARY_HARD_CAP: u64 = 25 * 1024 * 1024;
+
+fn systime_to_ms(t: SystemTime) -> Option<i64> {
+    t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
+}
+
+/// Скрытый элемент: имя с точки либо (на Windows) атрибут hidden/system.
+fn fs_is_hidden(name: &str, md: &fs::Metadata) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+        return md.file_attributes() & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = md;
+        false
+    }
+}
+
+fn ext_lower(p: &Path) -> Option<String> {
+    p.extension().map(|e| e.to_string_lossy().to_lowercase())
+}
+
+fn mime_from_ext(p: &Path) -> String {
+    match ext_lower(p).as_deref().unwrap_or("") {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "avif" => "image/avif",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+/// Содержимое папки по абсолютному пути: все файлы и подпапки. Битые записи
+/// (недоступная метадата) пропускаем; недоступную саму папку возвращаем ошибкой.
+#[tauri::command]
+#[specta::specta]
+pub fn fs_list_dir(path: String, show_hidden: bool) -> Result<FsDirListing, GraphiteError> {
+    let dir = PathBuf::from(&path);
+    let meta = fs::metadata(&dir)
+        .map_err(|e| gerr(GraphiteErrorCode::NotFound, format!("папка недоступна: {e}"), None))?;
+    if !meta.is_dir() {
+        return Err(gerr(GraphiteErrorCode::Validation, "путь не является папкой", None));
+    }
+    let read = fs::read_dir(&dir)
+        .map_err(|e| gerr(GraphiteErrorCode::Forbidden, format!("нет доступа к папке: {e}"), None))?;
+    let mut entries: Vec<FsEntry> = Vec::new();
+    for entry in read.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Ok(md) = entry.metadata() else { continue };
+        let is_dir = md.is_dir();
+        let hidden = fs_is_hidden(&name, &md);
+        if hidden && !show_hidden {
+            continue;
+        }
+        let entry_path = entry.path();
+        entries.push(FsEntry {
+            name,
+            path: entry_path.to_string_lossy().to_string(),
+            is_dir,
+            size: if is_dir { None } else { Some(md.len()) },
+            modified_ms: md.modified().ok().and_then(systime_to_ms),
+            ext: if is_dir { None } else { ext_lower(&entry_path) },
+            hidden,
+        });
+    }
+    let parent = dir
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .filter(|p| !p.is_empty());
+    Ok(FsDirListing {
+        path: dir.to_string_lossy().to_string(),
+        parent,
+        entries,
+    })
+}
+
+/// Текст файла до `max_bytes` (кап `FS_TEXT_HARD_CAP`). Бинарь определяем по
+/// нулевому байту либо невалидному UTF-8; хвост-обрезок многобайтного символа на
+/// границе среза бинарём не считаем.
+#[tauri::command]
+#[specta::specta]
+pub fn fs_read_text(path: String, max_bytes: u64) -> Result<FsTextFile, GraphiteError> {
+    use std::io::Read;
+    let p = PathBuf::from(&path);
+    let md = fs::metadata(&p)
+        .map_err(|e| gerr(GraphiteErrorCode::NotFound, format!("файл недоступен: {e}"), None))?;
+    if md.is_dir() {
+        return Err(gerr(GraphiteErrorCode::Validation, "это папка, а не файл", None));
+    }
+    let cap = max_bytes.min(FS_TEXT_HARD_CAP);
+    let mut file = fs::File::open(&p)
+        .map_err(|e| gerr(GraphiteErrorCode::Forbidden, format!("нет доступа: {e}"), None))?;
+    let mut buf: Vec<u8> = Vec::new();
+    file.take(cap)
+        .read_to_end(&mut buf)
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("ошибка чтения: {e}"), None))?;
+    let truncated = md.len() > buf.len() as u64;
+    if buf.iter().take(8192).any(|&b| b == 0) {
+        return Ok(FsTextFile { content: String::new(), truncated, is_binary: true });
+    }
+    match std::str::from_utf8(&buf) {
+        Ok(s) => Ok(FsTextFile { content: s.to_string(), truncated, is_binary: false }),
+        Err(err) => {
+            let valid = err.valid_up_to();
+            // Обрыв на границе среза (≤3 хвостовых байта неполного символа) —
+            // это просто усечение, а не бинарь: показываем валидный префикс.
+            if valid > 0 && valid + 3 >= buf.len() {
+                let content = std::str::from_utf8(&buf[..valid]).unwrap_or("").to_string();
+                Ok(FsTextFile { content, truncated: true, is_binary: false })
+            } else {
+                Ok(FsTextFile { content: String::new(), truncated, is_binary: true })
+            }
+        }
+    }
+}
+
+/// Файл в base64 для показа картинки через data-URL. Крупнее лимита — ошибка
+/// `LIMIT` (фронт предложит открыть в системе), частичную картинку не отдаём.
+#[tauri::command]
+#[specta::specta]
+pub fn fs_read_base64(path: String, max_bytes: u64) -> Result<FsBinaryFile, GraphiteError> {
+    let p = PathBuf::from(&path);
+    let md = fs::metadata(&p)
+        .map_err(|e| gerr(GraphiteErrorCode::NotFound, format!("файл недоступен: {e}"), None))?;
+    if md.is_dir() {
+        return Err(gerr(GraphiteErrorCode::Validation, "это папка, а не файл", None));
+    }
+    let cap = max_bytes.min(FS_BINARY_HARD_CAP);
+    if md.len() > cap {
+        return Err(gerr(
+            GraphiteErrorCode::Limit,
+            format!("файл слишком большой для предпросмотра ({} КБ)", md.len() / 1024),
+            Some("открой в системном приложении"),
+        ));
+    }
+    let bytes = fs::read(&p)
+        .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("ошибка чтения: {e}"), None))?;
+    Ok(FsBinaryFile {
+        base64: BASE64.encode(&bytes),
+        mime: mime_from_ext(&p),
+        truncated: false,
+    })
+}
+
+/// «Показать в Проводнике» для произвольного абсолютного пути (обобщение
+/// `reveal_in_explorer`): открывает системный проводник с выделением элемента.
+#[tauri::command]
+#[specta::specta]
+pub fn fs_reveal_path(path: String) -> Result<(), GraphiteError> {
+    let abs = PathBuf::from(&path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", abs.display()))
+            .spawn()
+            .map_err(|e| {
+                gerr(GraphiteErrorCode::Unavailable, format!("не удалось открыть проводник: {e}"), None)
+            })?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = abs;
+    }
+    Ok(())
+}
+
+/// Открыть файл/папку системным приложением по умолчанию (запасной путь для
+/// непревьюабельных файлов: PDF, exe и т.п.).
+#[tauri::command]
+#[specta::specta]
+pub fn fs_open_path(path: String) -> Result<(), GraphiteError> {
+    let abs = PathBuf::from(&path);
+    if !abs.exists() {
+        return Err(gerr(GraphiteErrorCode::NotFound, "путь не найден", None));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new("cmd")
+            .creation_flags(CREATE_NO_WINDOW)
+            .raw_arg(format!("/C start \"\" \"{}\"", abs.display()))
+            .spawn()
+            .map_err(|e| gerr(GraphiteErrorCode::Unavailable, format!("не удалось открыть: {e}"), None))?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = abs;
+    }
+    Ok(())
+}
+
+/// Корни для меню «новая панель»: доступные диски + домашняя/рабочий стол/
+/// загрузки/документы (учитывая перенаправление в OneDrive).
+#[tauri::command]
+#[specta::specta]
+pub fn fs_roots() -> Result<Vec<FsRoot>, GraphiteError> {
+    let mut roots: Vec<FsRoot> = Vec::new();
+    #[cfg(windows)]
+    {
+        // C..=Z: буквы A/B исторически за флоппи — их проба может дёргать привод.
+        for letter in b'C'..=b'Z' {
+            let drive = format!("{}:\\", letter as char);
+            if Path::new(&drive).exists() {
+                roots.push(FsRoot {
+                    name: format!("Локальный диск ({}:)", letter as char),
+                    path: drive,
+                    kind: "drive".into(),
+                });
+            }
+        }
+        if let Ok(home) = std::env::var("USERPROFILE") {
+            let home_path = PathBuf::from(&home);
+            if home_path.is_dir() {
+                roots.push(FsRoot {
+                    name: "Домашняя папка".into(),
+                    path: home_path.to_string_lossy().to_string(),
+                    kind: "home".into(),
+                });
+            }
+            // Рабочий стол — обычный или перенаправленный в OneDrive.
+            for sub in ["Desktop", "OneDrive/Desktop", "OneDrive/Рабочий стол"] {
+                let p = home_path.join(sub);
+                if p.is_dir() {
+                    roots.push(FsRoot {
+                        name: "Рабочий стол".into(),
+                        path: p.to_string_lossy().to_string(),
+                        kind: "folder".into(),
+                    });
+                    break;
+                }
+            }
+            for (label, sub) in [("Загрузки", "Downloads"), ("Документы", "Documents")] {
+                let p = home_path.join(sub);
+                if p.is_dir() {
+                    roots.push(FsRoot {
+                        name: label.into(),
+                        path: p.to_string_lossy().to_string(),
+                        kind: "folder".into(),
+                    });
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            roots.push(FsRoot { name: "Домашняя папка".into(), path: home, kind: "home".into() });
+        }
+    }
+    Ok(roots)
+}

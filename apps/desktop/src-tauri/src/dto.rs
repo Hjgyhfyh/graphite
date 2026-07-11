@@ -1353,3 +1353,65 @@ pub struct ExportWriteParams {
     pub dest_path: String,
     pub contents: String,
 }
+
+// --- Файловый менеджер «Проводник» (навигация + просмотр вне хранилища) -------
+
+/// Одна запись содержимого папки: файл любого расширения или подпапка.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsEntry {
+    pub name: String,
+    /// Абсолютный путь на диске.
+    pub path: String,
+    pub is_dir: bool,
+    /// Размер файла в байтах; у папок отсутствует.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// Время изменения, epoch-миллисекунды UTC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<i64>,
+    /// Расширение в нижнем регистре без точки (у папок отсутствует).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ext: Option<String>,
+    pub hidden: bool,
+}
+
+/// Листинг одной папки: её путь, родитель (для «вверх») и записи внутри.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsDirListing {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub entries: Vec<FsEntry>,
+}
+
+/// Текстовый файл для внутреннего read-only просмотра.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsTextFile {
+    pub content: String,
+    /// Файл длиннее лимита чтения — показан не целиком.
+    pub truncated: bool,
+    /// Похоже на бинарь (нули/невалидный UTF-8) — текст не отдаём.
+    pub is_binary: bool,
+}
+
+/// Бинарный файл (картинка) в base64 для показа через data-URL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsBinaryFile {
+    pub base64: String,
+    pub mime: String,
+    pub truncated: bool,
+}
+
+/// Корень для меню «новая панель»: диск, домашняя или частая системная папка.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsRoot {
+    pub name: String,
+    pub path: String,
+    /// `drive` | `home` | `folder` — для иконки на фронте.
+    pub kind: String,
+}
