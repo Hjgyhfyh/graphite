@@ -2230,6 +2230,55 @@ pub fn fs_open_path(path: String) -> Result<(), GraphiteError> {
     Ok(())
 }
 
+/// Открыть терминал в указанной папке (для файла — в его родительской папке).
+/// Порядок: Windows Terminal (вкладка сразу в папке) → PowerShell → cmd, каждый
+/// следующий как фолбэк, если предыдущий не запустился.
+#[tauri::command]
+#[specta::specta]
+pub fn fs_open_terminal(path: String) -> Result<(), GraphiteError> {
+    let raw = PathBuf::from(&path);
+    let md = fs::metadata(&raw)
+        .map_err(|e| gerr(GraphiteErrorCode::NotFound, format!("путь недоступен: {e}"), None))?;
+    let dir = if md.is_dir() {
+        raw.clone()
+    } else {
+        raw.parent().map(|p| p.to_path_buf()).unwrap_or(raw)
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        // 1) Windows Terminal — открывает вкладку прямо в нужной папке.
+        if std::process::Command::new("wt").arg("-d").arg(&dir).spawn().is_ok() {
+            return Ok(());
+        }
+        // 2) PowerShell в новом окне консоли (уважает выбранный терминал по умолчанию).
+        if std::process::Command::new("powershell")
+            .arg("-NoExit")
+            .current_dir(&dir)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        // 3) cmd — крайний фолбэк.
+        std::process::Command::new("cmd")
+            .arg("/K")
+            .current_dir(&dir)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| {
+                gerr(GraphiteErrorCode::Unavailable, format!("не удалось открыть терминал: {e}"), None)
+            })?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+    }
+    Ok(())
+}
+
 /// Корни для меню «новая панель»: доступные диски + домашняя/рабочий стол/
 /// загрузки/документы (учитывая перенаправление в OneDrive).
 #[tauri::command]

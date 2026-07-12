@@ -90,6 +90,10 @@ export function openPath(path: string): Promise<void> {
   return invoke<void>('fs_open_path', { path });
 }
 
+export function openTerminal(path: string): Promise<void> {
+  return invoke<void>('fs_open_terminal', { path });
+}
+
 export function fsRoots(): Promise<FsRoot[]> {
   return invoke<FsRoot[]>('fs_roots');
 }

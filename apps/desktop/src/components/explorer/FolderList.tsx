@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Copy, Eye, ExternalLink, Folder, FolderOpen } from 'lucide-react';
+import { Copy, Eye, ExternalLink, Folder, FolderOpen, Terminal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cx } from '@graphite/ui';
 import type { FsEntry } from './fsApi';
@@ -20,6 +20,7 @@ export interface FolderListProps {
   onReveal(path: string): void;
   onCopyPath(path: string): void;
   onOpenExternal(path: string): void;
+  onOpenTerminal(path: string): void;
 }
 
 function MenuItem({ icon: Icon, label, onSelect }: { icon: LucideIcon; label: string; onSelect: () => void }) {
@@ -31,7 +32,15 @@ function MenuItem({ icon: Icon, label, onSelect }: { icon: LucideIcon; label: st
   );
 }
 
-export function FolderList({ entries, onOpenFolder, onOpenFile, onReveal, onCopyPath, onOpenExternal }: FolderListProps) {
+export function FolderList({
+  entries,
+  onOpenFolder,
+  onOpenFile,
+  onReveal,
+  onCopyPath,
+  onOpenExternal,
+  onOpenTerminal,
+}: FolderListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -110,7 +119,14 @@ export function FolderList({ entries, onOpenFolder, onOpenFile, onReveal, onCopy
                 <ContextMenu.Portal>
                   <ContextMenu.Content className={MENU_CONTENT}>
                     {entry.isDir ? (
-                      <MenuItem icon={FolderOpen} label="Открыть" onSelect={() => onOpenFolder(entry.path)} />
+                      <>
+                        <MenuItem icon={FolderOpen} label="Открыть" onSelect={() => onOpenFolder(entry.path)} />
+                        <MenuItem
+                          icon={Terminal}
+                          label="Открыть в терминале"
+                          onSelect={() => onOpenTerminal(entry.path)}
+                        />
+                      </>
                     ) : (
                       <>
                         <MenuItem icon={Eye} label="Открыть предпросмотр" onSelect={() => onOpenFile(entry.path)} />

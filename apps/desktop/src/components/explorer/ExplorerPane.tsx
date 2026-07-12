@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   RotateCw,
   Star,
+  Terminal,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -20,7 +21,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { FilePreview } from './FilePreview';
 import { FolderList } from './FolderList';
 import { breadcrumbs } from './explorerFormat';
-import { fsAvailable, fsErrorMessage, listDir, openPath, revealPath } from './fsApi';
+import { fsAvailable, fsErrorMessage, listDir, openPath, openTerminal, revealPath } from './fsApi';
 import type { FsEntry } from './fsApi';
 
 type ListingState =
@@ -77,8 +78,8 @@ export function ExplorerPane({ pane }: { pane: ExplorerPaneModel }) {
 
   const crumbs = useMemo(() => breadcrumbs(pane.path), [pane.path]);
   const parentPath = crumbs.length >= 2 ? crumbs[crumbs.length - 2].path : null;
-  const bookmarkPath = pane.kind === 'folder' ? pane.path : (parentPath ?? pane.path);
-  const savedEntry = saved.find((entry) => entry.path.toLowerCase() === bookmarkPath.toLowerCase());
+  const folderPath = pane.kind === 'folder' ? pane.path : (parentPath ?? pane.path);
+  const savedEntry = saved.find((entry) => entry.path.toLowerCase() === folderPath.toLowerCase());
 
   useEffect(() => {
     if (pane.kind !== 'folder') {
@@ -121,12 +122,17 @@ export function ExplorerPane({ pane }: { pane: ExplorerPaneModel }) {
   const openExternal = (path: string) => {
     openPath(path).catch((error) => pushToast({ kind: 'error', text: fsErrorMessage(error, 'Не удалось открыть') }));
   };
+  const openTerminalHere = (path: string) => {
+    openTerminal(path).catch((error) =>
+      pushToast({ kind: 'error', text: fsErrorMessage(error, 'Не удалось открыть терминал') }),
+    );
+  };
   const toggleSaved = () => {
     if (savedEntry !== undefined) {
       removeSaved(savedEntry.id);
       pushToast({ kind: 'info', text: 'Убрано из закладок' });
     } else {
-      addSaved(bookmarkPath);
+      addSaved(folderPath);
       pushToast({ kind: 'success', text: 'Папка в закладках' });
     }
   };
@@ -165,6 +171,7 @@ export function ExplorerPane({ pane }: { pane: ExplorerPaneModel }) {
             active={savedEntry !== undefined}
             onClick={toggleSaved}
           />
+          <IconBtn icon={Terminal} label="Открыть терминал здесь" onClick={() => openTerminalHere(folderPath)} />
           <IconBtn icon={FolderOpen} label="Показать в Проводнике" onClick={() => reveal(pane.path)} />
           <IconBtn icon={Copy} label="Копировать путь" onClick={() => copyPath(pane.path)} />
           <IconBtn icon={X} label="Закрыть панель" onClick={() => closePane(pane.id)} />
@@ -221,6 +228,7 @@ export function ExplorerPane({ pane }: { pane: ExplorerPaneModel }) {
             onReveal={reveal}
             onCopyPath={copyPath}
             onOpenExternal={openExternal}
+            onOpenTerminal={openTerminalHere}
           />
         )}
       </div>

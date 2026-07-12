@@ -78,6 +78,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::fs_read_base64,
             commands::fs_reveal_path,
             commands::fs_open_path,
+            commands::fs_open_terminal,
             commands::fs_roots,
             gitsync::git_status,
             gitsync::git_init,
