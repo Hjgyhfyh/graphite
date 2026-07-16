@@ -240,7 +240,7 @@ const DELIM_CELL_RE = /^:?-+:?$/;
  * от обрамляющих труб (`| a | b |` → `['a','b']`). Экранированная `\|` остаётся
  * внутри ячейки — её развернёт `parseInline`.
  */
-function splitTableRow(line: string): string[] {
+export function splitTableRow(line: string): string[] {
   const trimmed = line.trim();
   const cells: string[] = [];
   let cur = '';
@@ -273,7 +273,7 @@ function splitTableRow(line: string): string[] {
  * хотя бы одна «|», иначе `текст\n---` (Setext-заголовок / тем. разрыв) ложно
  * распознавался бы как таблица. `null` — строка не является разделителем.
  */
-function parseTableDelimiter(line: string): MdAlign[] | null {
+export function parseTableDelimiter(line: string): MdAlign[] | null {
   if (!line.includes('|')) {
     return null;
   }

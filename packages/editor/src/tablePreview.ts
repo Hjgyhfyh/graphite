@@ -1,10 +1,18 @@
-import { syntaxTree } from '@codemirror/language';
-import type { Range } from '@codemirror/state';
-import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
-import type { DecorationSet, ViewUpdate } from '@codemirror/view';
+import { StateField } from '@codemirror/state';
+import type { EditorState, Range } from '@codemirror/state';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import type { DecorationSet } from '@codemirror/view';
 import { frontmatterEnd } from './frontmatter';
-import { parseTableBlock } from './markdown';
+import { parseTableBlock, parseTableDelimiter, splitTableRow } from './markdown';
 import type { MdAlign, MdInline, MdTable } from './markdown';
+
+// Блочные виджеты обязаны приходить из StateField, а не из ViewPlugin (CodeMirror
+// иначе бросает «Block decorations may not be specified via plugins»): карта высот
+// считается до обновления плагинов. Поэтому обнаружение таблиц синхронное и по
+// всему документу — как в doneFold/frontmatterHide.
+
+const FENCE_RE = /^\s{0,3}(?:```+|~~~+)/;
+const HEADING_RE = /^\s{0,3}#{1,6}\s/;
 
 const ALIGN_CLASS: Record<Exclude<MdAlign, null>, string> = {
   left: 'cm-gr-td-left',
@@ -163,12 +171,16 @@ class TableWidget extends WidgetType {
   }
 }
 
-function buildTables(view: EditorView): DecorationSet {
+/** Строка обрывает тело таблицы: пусто, нет «|», ограда кода или заголовок. */
+function endsTable(text: string): boolean {
+  return text.trim().length === 0 || !text.includes('|') || FENCE_RE.test(text) || HEADING_RE.test(text);
+}
+
+function buildTables(state: EditorState): DecorationSet {
+  const doc = state.doc;
   const items: Range<Decoration>[] = [];
-  const doc = view.state.doc;
   const fmEnd = frontmatterEnd(doc);
-  const selection = view.state.selection;
-  const tree = syntaxTree(view.state);
+  const selection = state.selection;
 
   const touchesSelection = (from: number, to: number): boolean => {
     for (const range of selection.ranges) {
@@ -179,55 +191,64 @@ function buildTables(view: EditorView): DecorationSet {
     return false;
   };
 
-  for (const { from, to } of view.visibleRanges) {
-    tree.iterate({
-      from,
-      to,
-      enter: (node) => {
-        if (node.name !== 'Table') {
-          return undefined;
+  const total = doc.lines;
+  let inFence = false;
+  let n = 1;
+  while (n <= total) {
+    const line = doc.line(n);
+    // Внутри frontmatter таблиц нет.
+    if (fmEnd > 0 && line.to <= fmEnd) {
+      n += 1;
+      continue;
+    }
+    const text = line.text;
+    if (FENCE_RE.test(text)) {
+      inFence = !inFence;
+      n += 1;
+      continue;
+    }
+    if (inFence) {
+      n += 1;
+      continue;
+    }
+    // Таблица: строка-шапка + строка-разделитель с тем же числом колонок.
+    if (n < total) {
+      const aligns = parseTableDelimiter(doc.line(n + 1).text);
+      if (aligns !== null && splitTableRow(text).length === aligns.length) {
+        let last = n + 1;
+        let j = n + 2;
+        while (j <= total && !endsTable(doc.line(j).text)) {
+          last = j;
+          j += 1;
         }
-        // Внутрь таблицы (строки/ячейки) спускаться не нужно.
-        if (fmEnd > 0 && node.from < fmEnd) {
-          return false;
-        }
-        const firstLine = doc.lineAt(node.from);
-        // node.to может указывать на начало строки за таблицей (если в границу
-        // узла попал перевод строки) — берём на символ левее, чтобы блок не
-        // проглотил следующую строку.
-        const lastLine = doc.lineAt(Math.max(node.from, node.to - 1));
-        const blockFrom = firstLine.from;
-        const blockTo = lastLine.to;
-        if (touchesSelection(blockFrom, blockTo)) {
-          return false;
-        }
-        const source = doc.sliceString(blockFrom, blockTo);
-        const table = parseTableBlock(source.split('\n'));
-        if (table === null) {
-          return false;
-        }
-        // Смещения строк документа (шапка, разделитель, тело…) от верха таблицы;
-        // разделитель невидим, поэтому в rowOffsets попадают шапка + строки тела.
-        const lineOffsets: number[] = [];
-        let line = firstLine;
-        for (;;) {
-          lineOffsets.push(line.from - blockFrom);
-          if (line.to >= blockTo) {
-            break;
+        const blockFrom = line.from;
+        const blockTo = doc.line(last).to;
+        if (!touchesSelection(blockFrom, blockTo)) {
+          const sourceLines: string[] = [];
+          const rowOffsets: number[] = [];
+          for (let k = n; k <= last; k += 1) {
+            const row = doc.line(k);
+            sourceLines.push(row.text);
+            // Разделитель (вторая строка) в отрендеренной таблице не показывается.
+            if (k !== n + 1) {
+              rowOffsets.push(row.from - blockFrom);
+            }
           }
-          line = doc.lineAt(line.to + 1);
+          const table = parseTableBlock(sourceLines);
+          if (table !== null) {
+            items.push(
+              Decoration.replace({
+                widget: new TableWidget(table, sourceLines.join('\n'), rowOffsets),
+                block: true,
+              }).range(blockFrom, blockTo),
+            );
+          }
         }
-        const rowOffsets =
-          lineOffsets.length > 2 ? [lineOffsets[0], ...lineOffsets.slice(2)] : [lineOffsets[0] ?? 0];
-        items.push(
-          Decoration.replace({
-            widget: new TableWidget(table, source, rowOffsets),
-            block: true,
-          }).range(blockFrom, blockTo),
-        );
-        return false;
-      },
-    });
+        n = last + 1;
+        continue;
+      }
+    }
+    n += 1;
   }
 
   return Decoration.set(items, true);
@@ -236,31 +257,21 @@ function buildTables(view: EditorView): DecorationSet {
 /**
  * Живой предпросмотр GFM-таблиц в редакторе: каждая таблица заменяется
  * отрендеренным `<table>` блочным виджетом, а сырой markdown возвращается, как
- * только выделение касается её строк, — так правка остаётся прямой. Обнаружение
- * идёт по дереву разбора (учитывает код-заборы и frontmatter), рендер ячеек — по
- * тем же правилам инлайна, что режим чтения.
+ * только выделение касается её строк, — так правка остаётся прямой. Рендер ячеек
+ * идёт по тем же правилам инлайна, что и режим чтения.
  */
-export const tablePreview = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = buildTables(view);
-    }
-
-    update(update: ViewUpdate): void {
-      // Разбор markdown асинхронный: сравнение деревьев ловит дозревание границ
-      // таблицы, иначе только что дописанная строка-разделитель не превратила бы
-      // абзац в таблицу до следующего ввода.
-      if (
-        update.docChanged ||
-        update.viewportChanged ||
-        update.selectionSet ||
-        syntaxTree(update.startState) !== syntaxTree(update.state)
-      ) {
-        this.decorations = buildTables(update.view);
-      }
-    }
+export const tablePreview = StateField.define<DecorationSet>({
+  create(state) {
+    return buildTables(state);
   },
-  { decorations: (plugin) => plugin.decorations },
-);
+  update(value, tr) {
+    // Пересобираем при правках и при движении курсора/выделения (сырой markdown
+    // возвращается, когда выделение заходит на строки таблицы). Прочие транзакции
+    // границ не двигают — отдаём прежний набор.
+    if (tr.docChanged || tr.selection !== undefined) {
+      return buildTables(tr.state);
+    }
+    return value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
