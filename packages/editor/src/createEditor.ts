@@ -16,6 +16,7 @@ import type { AttachmentSaveOptions } from './imageInsert';
 import { imagePreviews } from './imagePreview';
 import type { ImagePreviewOptions } from './imagePreview';
 import { livePreview } from './livePreview';
+import { tablePreview } from './tablePreview';
 import { tagHighlight } from './tagHighlight';
 import { taskCheckboxes } from './taskList';
 import { graphiteDark } from './theme';
@@ -128,6 +129,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       EditorView.lineWrapping,
       markdown({ base: markdownLanguage }),
       livePreview,
+      tablePreview,
       tagHighlight,
       frontmatterCompartment.of(hideFrontmatter ? frontmatterHide() : []),
       taskCheckboxes,

@@ -23,12 +23,23 @@ export interface MdListItem {
   readonly task?: MdTask;
 }
 
+/** Выравнивание колонки GFM-таблицы; `null` — по умолчанию (влево). */
+export type MdAlign = 'left' | 'center' | 'right' | null;
+
+/** Разобранная GFM-таблица: выравнивания колонок, ячейки шапки и строк тела. */
+export interface MdTable {
+  readonly aligns: readonly MdAlign[];
+  readonly header: readonly (readonly MdInline[])[];
+  readonly rows: readonly (readonly (readonly MdInline[])[])[];
+}
+
 export type MdBlock =
   | { readonly kind: 'heading'; readonly level: 1 | 2 | 3 | 4 | 5 | 6; readonly content: readonly MdInline[] }
   | { readonly kind: 'paragraph'; readonly content: readonly MdInline[] }
   | { readonly kind: 'blockquote'; readonly children: readonly MdBlock[] }
   | { readonly kind: 'code'; readonly lang?: string; readonly value: string }
   | { readonly kind: 'list'; readonly items: readonly MdListItem[] }
+  | ({ readonly kind: 'table' } & MdTable)
   | { readonly kind: 'hr' };
 
 const INLINE_MAX_DEPTH = 6;
@@ -222,6 +233,99 @@ function isBlockStart(line: string): boolean {
   );
 }
 
+const DELIM_CELL_RE = /^:?-+:?$/;
+
+/**
+ * Ячейки строки таблицы: делит по неэкранированным «|» и снимает пустые ячейки
+ * от обрамляющих труб (`| a | b |` → `['a','b']`). Экранированная `\|` остаётся
+ * внутри ячейки — её развернёт `parseInline`.
+ */
+function splitTableRow(line: string): string[] {
+  const trimmed = line.trim();
+  const cells: string[] = [];
+  let cur = '';
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (ch === '\\' && i + 1 < trimmed.length) {
+      cur += ch + trimmed[i + 1];
+      i += 1;
+      continue;
+    }
+    if (ch === '|') {
+      cells.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  cells.push(cur);
+  if (cells.length > 1 && cells[0].trim() === '') {
+    cells.shift();
+  }
+  if (cells.length > 1 && cells[cells.length - 1].trim() === '') {
+    cells.pop();
+  }
+  return cells.map((cell) => cell.trim());
+}
+
+/**
+ * Строка-разделитель GFM-таблицы (`|---|:--:|`) → выравнивания колонок. Требуется
+ * хотя бы одна «|», иначе `текст\n---` (Setext-заголовок / тем. разрыв) ложно
+ * распознавался бы как таблица. `null` — строка не является разделителем.
+ */
+function parseTableDelimiter(line: string): MdAlign[] | null {
+  if (!line.includes('|')) {
+    return null;
+  }
+  const cells = splitTableRow(line);
+  if (cells.length === 0) {
+    return null;
+  }
+  const aligns: MdAlign[] = [];
+  for (const cell of cells) {
+    if (!DELIM_CELL_RE.test(cell)) {
+      return null;
+    }
+    const left = cell.startsWith(':');
+    const right = cell.endsWith(':');
+    aligns.push(left && right ? 'center' : right ? 'right' : left ? 'left' : null);
+  }
+  return aligns;
+}
+
+/**
+ * Собирает структуру таблицы из её строк (шапка, разделитель, тело). Число колонок
+ * задаёт разделитель: недостающие ячейки строк дополняются пустыми, лишние —
+ * отбрасываются. `null`, если вторая строка не является валидным разделителем.
+ */
+export function parseTableBlock(lines: readonly string[]): MdTable | null {
+  if (lines.length < 2) {
+    return null;
+  }
+  const aligns = parseTableDelimiter(lines[1]);
+  if (aligns === null) {
+    return null;
+  }
+  const cols = aligns.length;
+  const toCells = (line: string): MdInline[][] => {
+    const raw = splitTableRow(line);
+    const cells: MdInline[][] = [];
+    for (let c = 0; c < cols; c += 1) {
+      cells.push(parseInline(raw[c] ?? ''));
+    }
+    return cells;
+  };
+  const header = toCells(lines[0]);
+  const rows: MdInline[][][] = [];
+  for (let i = 2; i < lines.length; i += 1) {
+    if (lines[i].trim().length === 0) {
+      continue;
+    }
+    rows.push(toCells(lines[i]));
+  }
+  return { aligns, header, rows };
+}
+
 /**
  * Block-level markdown parser scoped to what the reading view renders. Absolute line indices
  * are tracked (via `baseOffset` through nested recursion) so interactive checkboxes toggle the
@@ -323,6 +427,24 @@ export function parseBlocks(source: string, baseOffset = 0): MdBlock[] {
       }
       blocks.push({ kind: 'list', items });
       continue;
+    }
+
+    // GFM-таблица: строка-шапка + строка-разделитель, число колонок совпадает.
+    // Тело идёт до пустой строки, начала другого блока или строки без «|».
+    if (i + 1 < n) {
+      const aligns = parseTableDelimiter(lines[i + 1]);
+      if (aligns !== null && splitTableRow(line).length === aligns.length) {
+        let j = i + 2;
+        while (j < n && lines[j].includes('|') && !isBlockStart(lines[j])) {
+          j += 1;
+        }
+        const table = parseTableBlock(lines.slice(i, j));
+        if (table !== null) {
+          blocks.push({ kind: 'table', ...table });
+          i = j;
+          continue;
+        }
+      }
     }
 
     const para: string[] = [line];

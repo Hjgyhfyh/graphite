@@ -1,8 +1,8 @@
 export { createEditor } from './createEditor';
 export type { CreateEditorOptions, EditorHandle } from './createEditor';
 export { graphiteDark } from './theme';
-export { parseBlocks, parseInline, sweepDoneTasks, sweepLinesDone, toggleTaskOnLine } from './markdown';
-export type { MdBlock, MdInline, MdListItem, MdTask, SweepDoneResult } from './markdown';
+export { parseBlocks, parseInline, parseTableBlock, sweepDoneTasks, sweepLinesDone, toggleTaskOnLine } from './markdown';
+export type { MdAlign, MdBlock, MdInline, MdListItem, MdTable, MdTask, SweepDoneResult } from './markdown';
 export { doneFold } from './doneFold';
 export { parseHeadings } from './headings';
 export type { MdHeading } from './headings';

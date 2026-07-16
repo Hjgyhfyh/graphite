@@ -45,6 +45,7 @@ import type {
   FrontmatterEntry,
   HeadingLevel,
   InlineMarker,
+  MdAlign,
   MdBlock,
   MdInline,
   WikiLinkItem,
@@ -545,6 +546,48 @@ function renderBlock(block: MdBlock, key: string, ctx: InlineContext, onToggleTa
           ))}
         </div>
       );
+    case 'table': {
+      const alignClass = (align: MdAlign): string =>
+        align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left';
+      return (
+        <div className="mb-4 overflow-x-auto">
+          <table className="border-collapse text-[15px] leading-[24px]">
+            <thead>
+              <tr>
+                {block.header.map((cell, col) => (
+                  <th
+                    key={col}
+                    className={cx(
+                      'border border-stroke-1 bg-bg-2 px-3.5 py-1.5 font-[600] text-text-0',
+                      alignClass(block.aligns[col] ?? null),
+                    )}
+                  >
+                    {renderInline(cell, `${key}.h.${col}`, ctx)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, r) => (
+                <tr key={r} className="even:bg-bg-2/40">
+                  {row.map((cell, col) => (
+                    <td
+                      key={col}
+                      className={cx(
+                        'border border-stroke-1 px-3.5 py-1.5 align-top text-text-1',
+                        alignClass(block.aligns[col] ?? null),
+                      )}
+                    >
+                      {renderInline(cell, `${key}.r${r}.${col}`, ctx)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
     case 'hr':
       return <hr className="my-7 border-t border-stroke-1" />;
     default:

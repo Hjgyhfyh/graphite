@@ -614,6 +614,61 @@ export const graphiteDark = EditorView.theme(
       fontFamily: 'var(--font-ui, system-ui, sans-serif)',
       color: 'var(--text-3)',
     },
+    // Живой предпросмотр таблиц: обёртка даёт отбивку и горизонтальный скролл
+    // (padding, не margin — иначе высота блочного виджета уедет из карты CM).
+    '.cm-gr-table-wrap': {
+      padding: '2px 24px 12px',
+      overflowX: 'auto',
+    },
+    '.cm-gr-table': {
+      borderCollapse: 'collapse',
+      fontFamily: 'var(--font-ui, system-ui, sans-serif)',
+      fontSize: '14px',
+      lineHeight: '20px',
+      color: 'var(--text-1)',
+      cursor: 'pointer',
+      animation: 'cm-gr-rise-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both',
+    },
+    '.cm-gr-table th, .cm-gr-table td': {
+      padding: '6px 14px',
+      border: '1px solid var(--stroke-1)',
+      textAlign: 'left',
+      verticalAlign: 'top',
+    },
+    '.cm-gr-table th': {
+      backgroundColor: 'var(--bg-2)',
+      color: 'var(--text-0)',
+      fontWeight: '600',
+    },
+    '.cm-gr-table tbody tr': {
+      transition: 'background-color 100ms var(--ease-out)',
+    },
+    '.cm-gr-table tbody tr:nth-child(even)': {
+      backgroundColor: 'color-mix(in srgb, var(--bg-2) 40%, transparent)',
+    },
+    '.cm-gr-table tbody tr:hover': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 7%, transparent)',
+    },
+    '.cm-gr-td-left': { textAlign: 'left' },
+    '.cm-gr-td-center': { textAlign: 'center' },
+    '.cm-gr-td-right': { textAlign: 'right' },
+    '.cm-gr-td-code': {
+      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      fontSize: '0.9em',
+      backgroundColor: 'var(--bg-3)',
+      borderRadius: 'var(--r-xs, 6px)',
+      padding: '0.06em 0.3em',
+      color: 'var(--text-0)',
+    },
+    '.cm-gr-td-link': {
+      color: 'var(--accent)',
+    },
+    '.cm-gr-td-tag': {
+      color: 'var(--accent)',
+      backgroundColor: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+      borderRadius: 'var(--r-full, 999px)',
+      padding: '0.02em 0.4em',
+    },
     '.cm-gr-checkbox': {
       display: 'inline-flex',
       width: '15px',
@@ -650,7 +705,7 @@ export const graphiteDark = EditorView.theme(
       from: { backgroundColor: 'var(--ai-dim)' },
       to: { backgroundColor: 'transparent' },
     },
-    '[data-reduced-motion="true"] & .cm-gr-fm-capsule, [data-reduced-motion="true"] & .cm-gr-upload, [data-reduced-motion="true"] & .cm-gr-img-el, [data-reduced-motion="true"] & .cm-gr-img-shimmer, [data-reduced-motion="true"] & .cm-tooltip-autocomplete, [data-reduced-motion="true"] & .cm-gr-copy svg':
+    '[data-reduced-motion="true"] & .cm-gr-fm-capsule, [data-reduced-motion="true"] & .cm-gr-upload, [data-reduced-motion="true"] & .cm-gr-img-el, [data-reduced-motion="true"] & .cm-gr-img-shimmer, [data-reduced-motion="true"] & .cm-tooltip-autocomplete, [data-reduced-motion="true"] & .cm-gr-copy svg, [data-reduced-motion="true"] & .cm-gr-table':
       {
         animation: 'none',
       },

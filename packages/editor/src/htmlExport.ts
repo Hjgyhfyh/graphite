@@ -1,4 +1,4 @@
-import type { MdBlock, MdInline, MdListItem } from './markdown';
+import type { MdAlign, MdBlock, MdInline, MdListItem } from './markdown';
 
 export interface HtmlRenderOptions {
   /** Резолвер картинок: относительный путь вложения → src (например, data-URI). */
@@ -136,6 +136,22 @@ function renderBlock(block: MdBlock, opts: HtmlRenderOptions): string {
     }
     case 'list':
       return `<ul class="list">\n${block.items.map((item) => renderListItem(item, opts)).join('\n')}\n</ul>`;
+    case 'table': {
+      const alignAttr = (col: number): string => {
+        const align: MdAlign = block.aligns[col] ?? null;
+        return align !== null ? ` style="text-align:${align}"` : '';
+      };
+      const head = block.header
+        .map((cell, col) => `<th${alignAttr(col)}>${renderInlineNodes(cell, opts)}</th>`)
+        .join('');
+      const body = block.rows
+        .map(
+          (row) =>
+            `<tr>${row.map((cell, col) => `<td${alignAttr(col)}>${renderInlineNodes(cell, opts)}</td>`).join('')}</tr>`,
+        )
+        .join('\n');
+      return `<table>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody>\n</table>`;
+    }
     case 'hr':
       return '<hr>';
     default:

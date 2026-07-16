@@ -216,6 +216,62 @@ describe('sweepLinesDone — сжатие выделения в блок «Го�
   });
 });
 
+describe('parseBlocks — GFM-таблицы', () => {
+  it('шапка + разделитель + строки → блок table с выравниванием колонок', () => {
+    const blocks = parseBlocks(lines('| A | B |', '|:--|--:|', '| 1 | 2 |', '| 3 | 4 |'));
+    expect(blocks).toHaveLength(1);
+    const t = blocks[0];
+    expect(t.kind).toBe('table');
+    if (t.kind !== 'table') {
+      return;
+    }
+    expect(t.aligns).toEqual(['left', 'right']);
+    expect(text(t.header[0])).toBe('A');
+    expect(text(t.header[1])).toBe('B');
+    expect(t.rows).toHaveLength(2);
+    expect(text(t.rows[0][0])).toBe('1');
+    expect(text(t.rows[1][1])).toBe('4');
+  });
+
+  it('таблица без обрамляющих труб тоже распознаётся', () => {
+    const blocks = parseBlocks(lines('A | B', '---|---', 'x | y'));
+    expect(blocks[0].kind).toBe('table');
+  });
+
+  it('«текст + ---» без труб остаётся абзацем, а не таблицей', () => {
+    const blocks = parseBlocks(lines('заголовок', '---', 'тело'));
+    expect(blocks.every((b) => b.kind !== 'table')).toBe(true);
+  });
+
+  it('несовпадение числа колонок шапки и разделителя — не таблица', () => {
+    const blocks = parseBlocks(lines('| a | b | c |', '| --- | --- |', 'после'));
+    expect(blocks.every((b) => b.kind !== 'table')).toBe(true);
+  });
+
+  it('таблица обрывается пустой строкой; инлайн в ячейках разбирается', () => {
+    const blocks = parseBlocks(lines('| H |', '| - |', '| **жир** |', '', 'абзац'));
+    expect(blocks[0].kind).toBe('table');
+    expect(blocks[1].kind).toBe('paragraph');
+    const t = blocks[0];
+    if (t.kind !== 'table') {
+      return;
+    }
+    expect(t.rows[0][0][0].kind).toBe('strong');
+    expect(text(t.rows[0][0])).toBe('жир');
+  });
+
+  it('экранированная «\\|» не делит ячейку', () => {
+    const blocks = parseBlocks(lines('| A | B |', '| - | - |', '| x \\| y | z |'));
+    const t = blocks[0];
+    expect(t.kind).toBe('table');
+    if (t.kind !== 'table') {
+      return;
+    }
+    expect(text(t.rows[0][0])).toBe('x | y');
+    expect(text(t.rows[0][1])).toBe('z');
+  });
+});
+
 describe('parseBlocks — маркеры «Готово» невидимы для чтения', () => {
   it('строки маркеров пропускаются и рвут параграф', () => {
     const blocks = parseBlocks('до\n<!-- готово: x -->\nвнутри\n<!-- /готово -->\nпосле');
