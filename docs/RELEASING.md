@@ -1,5 +1,17 @@
 # Релизы и авто-обновление Graphite
 
+Версии — **MAJOR.MINOR.PATCH** ([semver](https://semver.org/lang/ru/)):
+
+| Часть | Когда поднимать | Пример |
+|---|---|---|
+| MAJOR | несовместимый слом или новое поколение продукта | `1.0.0` → `2.0.0` |
+| MINOR | новая возможность, старые данные живы | `1.0.0` → `1.1.0` |
+| PATCH | правка без новой фичи | `1.0.0` → `1.0.1` |
+
+Тег и GitHub Release всегда `vMAJOR.MINOR.PATCH` (`v1.0.0`, `v1.2.3`). Сравнивает апдейтер: `1.0.0` новее любого `0.1.x`.
+
+История всех деплоев — [`CHANGELOG.md`](../CHANGELOG.md). Тело очередного GitHub Release — [`RELEASE_NOTES.md`](../RELEASE_NOTES.md) в корне.
+
 Приложение обновляется само через **GitHub Releases** (плагин `tauri-plugin-updater`).
 Пользователь видит карточку «Доступно обновление», жмёт «Обновить» — новая версия
 скачивается и ставится прямо из приложения, затем перезапуск.
@@ -27,12 +39,12 @@
 
 ## Выпустить новую версию
 
-1. Поднимите версию в `apps/desktop/src-tauri/tauri.conf.json` (`"version"`).
+1. Поднимите версию **везде одинаково**: `Cargo.toml` (`[workspace.package] version`), `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/package.json`. Workspace-крейты берут её сами. Обновите `RELEASE_NOTES.md` (тело релиза) и `CHANGELOG.md`.
 2. Закоммитьте и запушьте в `Hjgyhfyh/graphite`.
 3. Поставьте тег и запушьте его:
    ```
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v1.0.1
+   git push origin v1.0.1
    ```
 4. GitHub Actions (`.github/workflows/release.yml`) соберёт Windows-установщик,
    подпишет его, создаст Release и приложит `latest.json` + `*-setup.exe` + `*.sig`.
