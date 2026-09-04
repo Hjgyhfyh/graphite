@@ -2,6 +2,8 @@ import { StateField } from '@codemirror/state';
 import type { EditorState, Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
+import { closesFence, parseFenceOpen } from './fence';
+import type { OpenFence } from './fence';
 import { frontmatterEnd } from './frontmatter';
 import { parseTableBlock, parseTableDelimiter, splitTableRow } from './markdown';
 import type { MdAlign, MdInline, MdTable } from './markdown';
@@ -11,7 +13,6 @@ import type { MdAlign, MdInline, MdTable } from './markdown';
 // считается до обновления плагинов. Поэтому обнаружение таблиц синхронное и по
 // всему документу — как в doneFold/frontmatterHide.
 
-const FENCE_RE = /^\s{0,3}(?:```+|~~~+)/;
 const HEADING_RE = /^\s{0,3}#{1,6}\s/;
 
 const ALIGN_CLASS: Record<Exclude<MdAlign, null>, string> = {
@@ -173,7 +174,7 @@ class TableWidget extends WidgetType {
 
 /** Строка обрывает тело таблицы: пусто, нет «|», ограда кода или заголовок. */
 function endsTable(text: string): boolean {
-  return text.trim().length === 0 || !text.includes('|') || FENCE_RE.test(text) || HEADING_RE.test(text);
+  return text.trim().length === 0 || !text.includes('|') || parseFenceOpen(text) !== null || HEADING_RE.test(text);
 }
 
 function buildTables(state: EditorState): DecorationSet {
@@ -192,7 +193,7 @@ function buildTables(state: EditorState): DecorationSet {
   };
 
   const total = doc.lines;
-  let inFence = false;
+  let openFence: OpenFence | undefined;
   let n = 1;
   while (n <= total) {
     const line = doc.line(n);
@@ -202,12 +203,16 @@ function buildTables(state: EditorState): DecorationSet {
       continue;
     }
     const text = line.text;
-    if (FENCE_RE.test(text)) {
-      inFence = !inFence;
+    if (openFence !== undefined) {
+      if (closesFence(text, openFence)) {
+        openFence = undefined;
+      }
       n += 1;
       continue;
     }
-    if (inFence) {
+    const fence = parseFenceOpen(text);
+    if (fence !== null) {
+      openFence = fence;
       n += 1;
       continue;
     }

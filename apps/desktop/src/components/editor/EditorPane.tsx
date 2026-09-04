@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type { CSSProperties, ElementType, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
+  AlertTriangle,
   Bold,
   BookOpen,
   CalendarDays,
@@ -36,6 +37,7 @@ import {
   splitFrontmatter,
   sweepDoneTasks,
   sweepLinesDone,
+  trySectionMerge,
   toggleCode,
   toggleInlineFormat,
   toggleTaskOnLine,
@@ -66,8 +68,19 @@ import { useActionHandler } from '../../app/Keymap';
 import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
 import { CopyPageButton } from '../bundle/CopyPageButton';
 import { ExportMenu } from './ExportMenu';
+import {
+  WELCOME_NOTE_REF,
+  pendingSaveFor,
+  registerEditorFlush,
+  trackPendingSave,
+  vaultRootPath,
+} from './editorSession';
 
-export const WELCOME_NOTE_REF: NoteRef = 'path:Добро пожаловать.md';
+export {
+  WELCOME_NOTE_REF,
+  flushPendingSaves,
+  invalidateVaultRootCache,
+} from './editorSession';
 
 const WELCOME_DOC = `# Добро пожаловать в Graphite
 
@@ -92,22 +105,6 @@ markdown-файлами в вашей папке — без облака и по
 const SAVE_DEBOUNCE_MS = 600;
 const READING_FONT =
   '"Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif';
-
-const pendingSaves = new Map<NoteRef, Promise<void>>();
-const liveEditorFlushes = new Set<() => void>();
-
-/**
- * Форсирует автосейв всех открытых «грязных» редакторов и дожидается уже
- * начатых записей. Нужен перед сменой хранилища: отложенный bufferSave
- * резолвит ref через текущий корень и после переключения записал бы заметку
- * уже в новый vault.
- */
-export async function flushPendingSaves(): Promise<void> {
-  for (const flush of [...liveEditorFlushes]) {
-    flush();
-  }
-  await Promise.allSettled([...pendingSaves.values()]);
-}
 
 function describeError(error: unknown, fallback: string): string {
   if (isGraphiteError(error)) {
@@ -164,25 +161,6 @@ const EXTERNAL_SRC_RE = /^(?:https?:|data:|blob:|asset:|file:)/i;
 
 /** Живые blob-URL вложений, вставленных в этой сессии: превью без чтения диска. */
 const assetObjectUrls = new Map<string, string>();
-
-let vaultRootPromise: Promise<string | undefined> | null = null;
-
-function vaultRootPath(): Promise<string | undefined> {
-  vaultRootPromise ??= commands
-    .vaultInfo()
-    .then((info) => info.root)
-    .catch(() => {
-      vaultRootPromise = null;
-      return undefined;
-    });
-  return vaultRootPromise;
-}
-
-/** Сбрасывает кэш корня vault — вызывается при смене хранилища, иначе
- * относительные пути картинок продолжат резолвиться от прежнего корня. */
-export function invalidateVaultRootCache(): void {
-  vaultRootPromise = null;
-}
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1061,10 +1039,39 @@ export interface EditorPaneProps {
   initialDoc?: string;
 }
 
+function ConflictBanner({ onKeep, onTakeDisk }: { onKeep: () => void; onTakeDisk: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex shrink-0 items-center gap-3 border-b border-warn/35 bg-warn/10 px-4 py-2"
+    >
+      <AlertTriangle size={15} strokeWidth={1.75} className="shrink-0 text-warn" aria-hidden />
+      <p className="min-w-0 flex-1 text-caption text-text-0">
+        Заметка изменилась на диске, и правки пересекаются. Выберите, какую версию оставить.
+      </p>
+      <button
+        type="button"
+        onClick={onKeep}
+        className="shrink-0 rounded-s border border-stroke-1 bg-bg-2 px-2.5 py-1 text-caption text-text-0 transition-colors duration-[120ms] hover:bg-bg-3"
+      >
+        Оставить моё
+      </button>
+      <button
+        type="button"
+        onClick={onTakeDisk}
+        className="shrink-0 rounded-s bg-warn/20 px-2.5 py-1 text-caption text-text-0 transition-colors duration-[120ms] hover:bg-warn/30"
+      >
+        Взять с диска
+      </button>
+    </div>
+  );
+}
+
 export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<EditorHandle | null>(null);
   const baseRevRef = useRef('');
+  const baseContentRef = useRef('');
   const docRef = useRef('');
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<number | undefined>(undefined);
@@ -1098,6 +1105,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const [loaded, setLoaded] = useState(false);
   const [menu, setMenu] = useState<SelectionMenuState | null>(null);
   const [dropActive, setDropActive] = useState(false);
+  const [conflict, setConflict] = useState<{ disk: string; rev: string } | null>(null);
 
   const isWelcome = noteRef === WELCOME_NOTE_REF;
 
@@ -1106,9 +1114,11 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       const handle = editorRef.current;
       const previous = docRef.current;
       baseRevRef.current = rev;
+      baseContentRef.current = content;
       docRef.current = content;
       dirtyRef.current = false;
       pendingSaveRef.current = false;
+      setConflict(null);
       setDocText(content);
       setDirty(tabId, false);
       if (handle !== null) {
@@ -1125,29 +1135,73 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     [noteRef, tabId, setDirty],
   );
 
-  const reconcileConflict = useCallback(async () => {
+  const takeMerged = useCallback(
+    (merged: string, disk: string, rev: string) => {
+      const handle = editorRef.current;
+      const previous = docRef.current;
+      baseRevRef.current = rev;
+      baseContentRef.current = disk;
+      docRef.current = merged;
+      dirtyRef.current = true;
+      setConflict(null);
+      setDocText(merged);
+      setDirty(tabId, true);
+      if (handle !== null) {
+        handle.setDoc(merged);
+        const range = changedRange(previous, merged);
+        if (range !== null) {
+          handle.markAi(range.from, range.to);
+        }
+        useEditorViewsStore.getState().bumpDocVersion();
+      }
+    },
+    [tabId, setDirty],
+  );
+
+  const rebaseWithDisk = useCallback(
+    (disk: string, rev: string): 'clean' | 'merged' | 'conflict' => {
+      const merged = trySectionMerge(baseContentRef.current, docRef.current, disk);
+      if (merged === null) {
+        return 'conflict';
+      }
+      if (merged === disk) {
+        applyDisk(disk, rev, true);
+        return 'clean';
+      }
+      takeMerged(merged, disk, rev);
+      return 'merged';
+    },
+    [applyDisk, takeMerged],
+  );
+
+  const reconcileConflict = useCallback(async (): Promise<boolean> => {
     try {
       const res = await commands.noteRead({ ref: noteRef });
-      baseRevRef.current = res.rev;
       if (res.content === docRef.current) {
+        baseRevRef.current = res.rev;
+        baseContentRef.current = res.content;
         dirtyRef.current = false;
         setDirty(tabId, false);
-        return;
+        setConflict(null);
+        return false;
       }
-      useUiStore.getState().pushToast({
-        kind: 'error',
-        text: `«${titleFromRef(noteRef)}» изменена извне — ваши правки пока не сохранены`,
-        action: {
-          label: 'Загрузить с диска',
-          run: () => {
-            applyDisk(res.content, res.rev, true);
-          },
-        },
-      });
+      const outcome = rebaseWithDisk(res.content, res.rev);
+      if (outcome === 'clean') {
+        return false;
+      }
+      if (outcome === 'merged') {
+        useUiStore.getState().pushToast({
+          kind: 'success',
+          text: `«${titleFromRef(noteRef)}»: совместили вашу правку и изменение с диска`,
+        });
+        return true;
+      }
+      setConflict({ disk: res.content, rev: res.rev });
     } catch {
       /* leave the buffer dirty; the next edit or flush retries with the rebased rev */
     }
-  }, [noteRef, tabId, setDirty, applyDisk]);
+    return false;
+  }, [noteRef, tabId, setDirty, rebaseWithDisk]);
 
   const persist = useCallback(async (): Promise<void> => {
     if (isWelcome) {
@@ -1159,6 +1213,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     }
     savingRef.current = true;
     const run = (async () => {
+      let rebaseAttempts = 0;
       try {
         do {
           pendingSaveRef.current = false;
@@ -1166,15 +1221,21 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
           try {
             const res = await commands.bufferSave({ ref: noteRef, baseRev: baseRevRef.current, content });
             baseRevRef.current = res.revNew;
+            baseContentRef.current = content;
             if (docRef.current === content) {
               dirtyRef.current = false;
               setDirty(tabId, false);
             }
           } catch (error) {
             pendingSaveRef.current = false;
-            if (isGraphiteError(error) && error.code === 'CONFLICT') {
-              await reconcileConflict();
-            } else {
+            if (isGraphiteError(error) && error.code === 'CONFLICT' && rebaseAttempts < 3) {
+              rebaseAttempts += 1;
+              const retry = await reconcileConflict();
+              if (retry) {
+                pendingSaveRef.current = true;
+                continue;
+              }
+            } else if (!isGraphiteError(error) || error.code !== 'CONFLICT') {
               useUiStore.getState().pushToast({
                 kind: 'error',
                 text: describeError(error, 'Не удалось сохранить заметку'),
@@ -1187,12 +1248,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
         savingRef.current = false;
       }
     })();
-    pendingSaves.set(noteRef, run);
-    void run.finally(() => {
-      if (pendingSaves.get(noteRef) === run) {
-        pendingSaves.delete(noteRef);
-      }
-    });
+    trackPendingSave(noteRef, run);
     await run;
   }, [isWelcome, noteRef, tabId, setDirty, reconcileConflict]);
 
@@ -1211,10 +1267,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   }, [isWelcome, persist]);
 
   useEffect(() => {
-    liveEditorFlushes.add(flushSave);
-    return () => {
-      liveEditorFlushes.delete(flushSave);
-    };
+    return registerEditorFlush(flushSave);
   }, [flushSave]);
 
   const linkSource = useCallback((query: string): WikiLinkItem[] => {
@@ -1344,6 +1397,8 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       }
       docRef.current = content;
       dirtyRef.current = false;
+      baseContentRef.current = content;
+      setConflict(null);
       setDocText(content);
       const handle = createEditor(host, {
         initialDoc: content,
@@ -1393,7 +1448,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       setLoaded(true);
       mount(initialDoc);
     } else {
-      const prior = pendingSaves.get(noteRef);
+      const prior = pendingSaveFor(noteRef);
       Promise.resolve(prior)
         .catch(() => undefined)
         .then(() => commands.noteRead({ ref: noteRef }))
@@ -1468,26 +1523,31 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
           }
           if (res.content === docRef.current) {
             baseRevRef.current = res.rev;
+            baseContentRef.current = res.content;
             if (dirtyRef.current) {
               dirtyRef.current = false;
               setDirty(tabId, false);
             }
+            setConflict(null);
             return;
           }
           if (!dirtyRef.current) {
             applyDisk(res.content, res.rev, highlight);
             return;
           }
-          useUiStore.getState().pushToast({
-            kind: 'info',
-            text: `«${titleFromRef(noteRef)}» изменена извне`,
-            action: {
-              label: 'Загрузить с диска',
-              run: () => {
-                applyDisk(res.content, res.rev, true);
-              },
-            },
-          });
+          const outcome = rebaseWithDisk(res.content, res.rev);
+          if (outcome === 'merged') {
+            useUiStore.getState().pushToast({
+              kind: 'success',
+              text: `«${titleFromRef(noteRef)}»: совместили вашу правку и изменение с диска`,
+            });
+            scheduleSave();
+            return;
+          }
+          if (outcome === 'clean') {
+            return;
+          }
+          setConflict({ disk: res.content, rev: res.rev });
         })
         .catch(() => undefined)
         .finally(() => {
@@ -1521,7 +1581,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       active = false;
       void subscription.then((unlisten) => unlisten());
     };
-  }, [noteRef, isWelcome, tabId, setDirty, applyDisk]);
+  }, [noteRef, isWelcome, tabId, setDirty, applyDisk, rebaseWithDisk, scheduleSave]);
 
   // Drag-drop картинок из проводника (#29): Tauri перехватывает нативный дроп,
   // поэтому слушаем его событие и вставляем вложение по координатам броска.
@@ -1654,6 +1714,25 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     [isWelcome, tabId, setDirty, scheduleSave],
   );
 
+  const keepMine = useCallback(() => {
+    if (conflict === null) {
+      return;
+    }
+    baseRevRef.current = conflict.rev;
+    baseContentRef.current = conflict.disk;
+    setConflict(null);
+    dirtyRef.current = true;
+    setDirty(tabId, true);
+    void persist();
+  }, [conflict, persist, tabId, setDirty]);
+
+  const takeDisk = useCallback(() => {
+    if (conflict === null) {
+      return;
+    }
+    applyDisk(conflict.disk, conflict.rev, true);
+  }, [conflict, applyDisk]);
+
   const handleContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (useUiStore.getState().readingMode) {
       return;
@@ -1683,6 +1762,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       style={selectionStyle}
       onContextMenu={handleContextMenu}
     >
+      {conflict !== null ? <ConflictBanner onKeep={keepMine} onTakeDisk={takeDisk} /> : null}
       <div
         ref={hostRef}
         className="min-h-0 flex-1 overflow-hidden"

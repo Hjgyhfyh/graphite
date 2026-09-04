@@ -114,6 +114,10 @@ function isRailItemView(value: unknown): value is RailItemView {
   return typeof value === 'string' && (RAIL_DEFAULT_ORDER as readonly string[]).includes(value);
 }
 
+function isRailView(value: unknown): value is RailView {
+  return isRailItemView(value) || value === 'settings';
+}
+
 // Чинит сохранённую раскладку рейки под текущий набор разделов: неизвестные id
 // отбрасываются, дубли схлопываются, недостающие разделы дописываются в конец
 // в дефолтном порядке (новые view будущих версий появляются видимыми).
@@ -148,7 +152,7 @@ export function normalizeRailOrder(
 export const useUiStore = create<UiStore>()(
   persist(
     (set, get) => ({
-      railView: 'tree',
+      railView: 'explorer',
       railOrder: [...RAIL_DEFAULT_ORDER],
       railHidden: [],
       sidebarHidden: false,
@@ -260,6 +264,7 @@ export const useUiStore = create<UiStore>()(
     {
       name: 'graphite.ui',
       partialize: (s) => ({
+        railView: s.railView,
         railOrder: s.railOrder,
         railHidden: s.railHidden,
         sidebarHidden: s.sidebarHidden,
@@ -288,6 +293,7 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_DEFAULT,
           ),
           theme: isTheme(saved.theme) ? saved.theme : 'default',
+          railView: isRailView(saved.railView) ? saved.railView : current.railView,
           ...normalizeRailOrder(saved.railOrder, saved.railHidden),
         };
       },

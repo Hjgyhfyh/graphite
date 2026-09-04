@@ -1,3 +1,5 @@
+import { closesFence, isFenceLine, parseFenceOpen } from './fence';
+import type { OpenFence } from './fence';
 import { splitFrontmatter } from './frontmatter';
 
 export type MdInline =
@@ -225,7 +227,7 @@ function isBlockStart(line: string): boolean {
   return (
     HEADING_RE.test(line) ||
     HR_RE.test(line) ||
-    FENCE_RE.test(line) ||
+    isFenceLine(line) ||
     QUOTE_RE.test(line) ||
     LIST_RE.test(line) ||
     DONE_MARKER_RE.test(line) ||
@@ -486,16 +488,21 @@ function normalizeHeading(text: string): string {
 function findDoneSection(lines: readonly string[], bodyStart: number): { start: number; end: number } {
   let start = -1;
   let end = lines.length;
-  let inFence = false;
+  let openFence: OpenFence | undefined;
   for (let i = bodyStart; i < lines.length; i++) {
-    if (FENCE_RE.test(lines[i])) {
-      inFence = !inFence;
+    const line = lines[i];
+    if (openFence !== undefined) {
+      if (closesFence(line, openFence)) {
+        openFence = undefined;
+      }
       continue;
     }
-    if (inFence) {
+    const fence = parseFenceOpen(line);
+    if (fence !== null) {
+      openFence = fence;
       continue;
     }
-    const heading = HEADING_RE.exec(lines[i]);
+    const heading = HEADING_RE.exec(line);
     if (heading === null) {
       continue;
     }
@@ -593,21 +600,25 @@ export function sweepDoneTasks(source: string, dateLabel?: string): SweepDoneRes
   const { start: doneStart, end: doneEnd } = findDoneSection(lines, bodyStart);
 
   const units: { from: number; to: number }[] = [];
-  let inFence = false;
+  let openFence: OpenFence | undefined;
   let i = bodyStart;
   while (i < lines.length) {
     if (doneStart !== -1 && i >= doneStart && i < doneEnd) {
       i = doneEnd;
-      inFence = false;
+      openFence = undefined;
       continue;
     }
     const line = lines[i];
-    if (FENCE_RE.test(line)) {
-      inFence = !inFence;
+    if (openFence !== undefined) {
+      if (closesFence(line, openFence)) {
+        openFence = undefined;
+      }
       i += 1;
       continue;
     }
-    if (inFence) {
+    const fence = parseFenceOpen(line);
+    if (fence !== null) {
+      openFence = fence;
       i += 1;
       continue;
     }

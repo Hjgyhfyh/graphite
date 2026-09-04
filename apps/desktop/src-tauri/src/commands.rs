@@ -2135,7 +2135,7 @@ pub fn fs_read_text(path: String, max_bytes: u64) -> Result<FsTextFile, Graphite
         return Err(gerr(GraphiteErrorCode::Validation, "это папка, а не файл", None));
     }
     let cap = max_bytes.min(FS_TEXT_HARD_CAP);
-    let mut file = fs::File::open(&p)
+    let file = fs::File::open(&p)
         .map_err(|e| gerr(GraphiteErrorCode::Forbidden, format!("нет доступа: {e}"), None))?;
     let mut buf: Vec<u8> = Vec::new();
     file.take(cap)

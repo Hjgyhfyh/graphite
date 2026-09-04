@@ -1,3 +1,4 @@
+import { closesFence, parseFenceOpen } from './fence';
 import { splitFrontmatter } from './frontmatter';
 import { parseInline } from './markdown';
 import type { MdInline } from './markdown';
@@ -11,7 +12,6 @@ export interface MdHeading {
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
-const FENCE_RE = /^\s{0,3}(```+|~~~+)\s*([^`]*)$/;
 
 /** Сплющивает инлайн-дерево до видимого текста: разметка отбрасывается, подписи остаются. */
 function flattenInline(nodes: readonly MdInline[]): string {
@@ -56,14 +56,10 @@ export function parseHeadings(source: string): MdHeading[] {
   let i = 0;
   const n = lines.length;
   while (i < n) {
-    const fence = FENCE_RE.exec(lines[i]);
+    const fence = parseFenceOpen(lines[i]);
     if (fence !== null) {
-      // Закрывающая ограда — тот же символ и длина не короче открывающей
-      // (CommonMark); иначе `# строка` внутри код-блока попала бы в список.
-      const marker = fence[1][0];
-      const closeRe = new RegExp(`^\\s{0,3}${marker === '`' ? '`' : '~'}{${fence[1].length},}\\s*$`);
       i += 1;
-      while (i < n && !closeRe.test(lines[i])) {
+      while (i < n && !closesFence(lines[i], fence)) {
         i += 1;
       }
       if (i < n) {

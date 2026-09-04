@@ -167,6 +167,9 @@ describe('sweepDoneTasks — уборка сделанного в «Готово
 
   it('чекбоксы в код-заборе и в секции «Готово» не двигаются', () => {
     expect(sweepDoneTasks('```\n- [x] в коде\n```\n')).toBeNull();
+    expect(sweepDoneTasks('```md\n~~~\n- [x] внутри\n~~~\n```\n- [x] снаружи\n')).toEqual(
+      expect.objectContaining({ moved: 1 }),
+    );
     expect(sweepDoneTasks('## Готово\n- [x] уже там\n')).toBeNull();
   });
 

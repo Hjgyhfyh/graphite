@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronRight, HardDrive, X } from 'lucide-react';
+import { ChevronRight, HardDrive, LoaderCircle, X } from 'lucide-react';
 import { Button, MOTION, TooltipProvider, cx } from '@graphite/ui';
 import { commands, GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type {
@@ -12,23 +12,15 @@ import type {
   UiFlashNoteEvent,
   UiOpenNoteEvent,
 } from '@graphite/bindings';
-import { BriefView } from '../components/brief/BriefView';
 import { ExplorerView } from '../components/explorer/ExplorerView';
 import { CommandPalette } from '../components/palette/CommandPalette';
 import { QuickSwitcher } from '../components/palette/QuickSwitcher';
 import { FloatingCapture } from '../components/capture/FloatingCapture';
-import { GraphView } from '../components/graph/GraphView';
-import { JournalView } from '../components/journal/JournalView';
-import { KanbanView } from '../components/kanban/KanbanView';
 import { Onboarding } from '../components/onboarding/Onboarding';
 import { Rail } from '../components/rail/Rail';
 import { RightPanel } from '../components/right/RightPanel';
 import { SearchPanel } from '../components/search/SearchPanel';
-import { SettingsView } from '../components/settings/SettingsView';
-import { SplitView } from '../components/panes/SplitView';
 import { StatusBar } from '../components/statusbar/StatusBar';
-import { TagsView } from '../components/tags/TagsView';
-import { TasksView } from '../components/tasks/TasksView';
 import { TemplatePicker } from '../components/templates/TemplatePicker';
 import { TreePanel } from '../components/tree/TreePanel';
 import { TimelineOverlay } from '../components/backup/TimelineOverlay';
@@ -57,6 +49,24 @@ import { useUpdaterStore } from '../stores/updaterStore';
 import { bootstrapVault, pickVaultFolder, switchVault } from '../stores/vaultActions';
 import { useVaultStore } from '../stores/vaultStore';
 import { useVaultsStore } from '../stores/vaultsStore';
+
+// Проводник — стартовый экран, поэтому он остаётся в основном бандле. Остальные
+// полноэкранные разделы грузятся только при первом открытии: CodeMirror, граф и
+// большие рабочие пространства больше не задерживают первый кадр приложения.
+const BriefView = lazy(() => import('../components/brief/BriefView').then((module) => ({ default: module.BriefView })));
+const GraphView = lazy(() => import('../components/graph/GraphView').then((module) => ({ default: module.GraphView })));
+const JournalView = lazy(() =>
+  import('../components/journal/JournalView').then((module) => ({ default: module.JournalView })),
+);
+const KanbanView = lazy(() =>
+  import('../components/kanban/KanbanView').then((module) => ({ default: module.KanbanView })),
+);
+const SettingsView = lazy(() =>
+  import('../components/settings/SettingsView').then((module) => ({ default: module.SettingsView })),
+);
+const SplitView = lazy(() => import('../components/panes/SplitView').then((module) => ({ default: module.SplitView })));
+const TagsView = lazy(() => import('../components/tags/TagsView').then((module) => ({ default: module.TagsView })));
+const TasksView = lazy(() => import('../components/tasks/TasksView').then((module) => ({ default: module.TasksView })));
 
 const TOAST_DOT: Record<Toast['kind'], string> = {
   info: 'bg-accent',
@@ -263,7 +273,20 @@ function CenterView() {
     view = <SplitView />;
   }
 
-  return <ViewSwap viewKey={viewKey}>{view}</ViewSwap>;
+  return (
+    <ViewSwap viewKey={viewKey}>
+      <Suspense
+        fallback={
+          <div role="status" className="flex flex-1 items-center justify-center gap-2 text-ui text-text-2">
+            <LoaderCircle size={16} strokeWidth={1.75} className="animate-spin" aria-hidden />
+            Открываем раздел…
+          </div>
+        }
+      >
+        {view}
+      </Suspense>
+    </ViewSwap>
+  );
 }
 
 export function AppShell() {
@@ -291,11 +314,6 @@ export function AppShell() {
 
   useEffect(() => {
     void bootstrapVault();
-  }, []);
-
-  // Старт всегда в разделе «Проводник» — осознанный оверрайд сохранённого railView.
-  useEffect(() => {
-    useUiStore.getState().setRailView('explorer');
   }, []);
 
   useEffect(() => initSyncStore(), []);

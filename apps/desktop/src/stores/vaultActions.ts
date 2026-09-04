@@ -1,7 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteRef, VaultInfoResponse } from '@graphite/bindings';
-import { WELCOME_NOTE_REF, flushPendingSaves, invalidateVaultRootCache } from '../components/editor/EditorPane';
+import {
+  WELCOME_NOTE_REF,
+  flushPendingSaves,
+  invalidateVaultRootCache,
+} from '../components/editor/editorSession';
 import { usePanesStore } from './panesStore';
 import { useTabsStore } from './tabsStore';
 import { useUiStore } from './uiStore';

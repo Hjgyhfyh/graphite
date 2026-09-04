@@ -29,7 +29,8 @@ import {
 } from '../../motion';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import { EditorPane, flushPendingSaves } from '../editor/EditorPane';
+import { EditorPane } from '../editor/EditorPane';
+import { flushPendingSaves } from '../editor/editorSession';
 import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
 
 /** Записи дневника — файлы `Дневник/ГГГГ-ММ-ДД.md`; так же их кладёт `ensure_daily_note`. */

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,11 +18,12 @@ import { Button, Tooltip, cx } from '@graphite/ui';
 import { useExplorerStore } from '../../stores/explorerStore';
 import type { ExplorerPane as ExplorerPaneModel } from '../../stores/explorerStore';
 import { useUiStore } from '../../stores/uiStore';
-import { FilePreview } from './FilePreview';
 import { FolderList } from './FolderList';
 import { breadcrumbs } from './explorerFormat';
 import { fsAvailable, fsErrorMessage, listDir, openPath, openTerminal, revealPath } from './fsApi';
 import type { FsEntry } from './fsApi';
+
+const FilePreview = lazy(() => import('./FilePreview').then((module) => ({ default: module.FilePreview })));
 
 type ListingState =
   | { status: 'loading' }
@@ -204,7 +205,15 @@ export function ExplorerPane({ pane }: { pane: ExplorerPaneModel }) {
 
       <div className="flex min-h-0 flex-1 flex-col">
         {pane.kind === 'file' ? (
-          <FilePreview key={`${pane.path}:${reload}`} path={pane.path} />
+          <Suspense
+            fallback={
+              <div role="status" className="flex flex-1 items-center justify-center text-text-3">
+                <LoaderCircle size={18} strokeWidth={1.75} className="animate-spin" aria-hidden />
+              </div>
+            }
+          >
+            <FilePreview key={`${pane.path}:${reload}`} path={pane.path} />
+          </Suspense>
         ) : listing.status === 'loading' ? (
           <div className="flex flex-1 items-center justify-center text-text-3">
             <LoaderCircle size={18} strokeWidth={1.75} className="animate-spin" />

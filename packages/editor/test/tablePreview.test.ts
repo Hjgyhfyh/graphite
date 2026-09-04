@@ -52,6 +52,21 @@ describe('tablePreview: обнаружение и границы', () => {
     expect(tableRanges(makeState(doc, doc.length))).toHaveLength(0);
   });
 
+  it('чужой маркер не закрывает код-забор', () => {
+    const doc = '```md\nкод\n~~~\n| A | B |\n|---|---|\n| 1 | 2 |\n```\n';
+    expect(tableRanges(makeState(doc, doc.length))).toHaveLength(0);
+  });
+
+  it('короткий маркер не закрывает более длинный код-забор', () => {
+    const doc = '````md\nкод\n```\n| A | B |\n|---|---|\n| 1 | 2 |\n````\n';
+    expect(tableRanges(makeState(doc, doc.length))).toHaveLength(0);
+  });
+
+  it('закрывающий маркер с хвостом остаётся содержимым код-забора', () => {
+    const doc = '```md\n``` не закрытие\n| A | B |\n|---|---|\n| 1 | 2 |\n```\n';
+    expect(tableRanges(makeState(doc, doc.length))).toHaveLength(0);
+  });
+
   it('строки-свойства frontmatter не превращаются в таблицу', () => {
     const doc = '---\ntitle: x\ntags: a\n---\n\n| A | B |\n|---|---|\n| 1 | 2 |\n';
     const ranges = tableRanges(makeState(doc, 0));

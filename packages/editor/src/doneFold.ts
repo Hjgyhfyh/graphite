@@ -2,6 +2,8 @@ import { StateEffect, StateField } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
+import { closesFence, parseFenceOpen } from './fence';
+import type { OpenFence } from './fence';
 import { DONE_BLOCK_END_RE, DONE_BLOCK_START_RE } from './markdown';
 
 const CHECK_ICON =
@@ -11,7 +13,6 @@ const CHEVRON_ICON =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 
 const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
-const FENCE_RE = /^\s{0,3}(```+|~~~+)\s*([^`]*)$/;
 const BOX_RE = /^\s*(?:[-*+]|\d{1,9}[.)])\s+\[[ xX/]\]/;
 
 /** Свёрнутый регион «Готово»: маркер-блок от свипа выделения или легаси-секция `## Готово`. */
@@ -68,16 +69,20 @@ function findDoneRegions(state: EditorState): DoneRegion[] {
     });
   };
 
-  let inFence = false;
+  let openFence: OpenFence | undefined;
   let n = 1;
   while (n <= doc.lines) {
     const text = doc.line(n).text;
-    if (FENCE_RE.test(text)) {
-      inFence = !inFence;
+    if (openFence !== undefined) {
+      if (closesFence(text, openFence)) {
+        openFence = undefined;
+      }
       n += 1;
       continue;
     }
-    if (inFence) {
+    const fence = parseFenceOpen(text);
+    if (fence !== null) {
+      openFence = fence;
       n += 1;
       continue;
     }
@@ -111,8 +116,20 @@ function findDoneRegions(state: EditorState): DoneRegion[] {
       if (title.toLowerCase().replace(/ё/g, 'е').startsWith('готово')) {
         let lastLine = doc.lines;
         let count = 0;
+        let innerFence: OpenFence | undefined;
         for (let m = n + 1; m <= doc.lines; m++) {
           const inner = doc.line(m).text;
+          if (innerFence !== undefined) {
+            if (closesFence(inner, innerFence)) {
+              innerFence = undefined;
+            }
+            continue;
+          }
+          const nested = parseFenceOpen(inner);
+          if (nested !== null) {
+            innerFence = nested;
+            continue;
+          }
           const h = HEADING_RE.exec(inner);
           if (h !== null && h[1].length <= 2) {
             lastLine = m - 1;

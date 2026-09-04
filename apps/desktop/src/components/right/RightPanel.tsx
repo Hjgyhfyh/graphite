@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { PanelRightClose } from 'lucide-react';
@@ -10,12 +10,15 @@ import type { RightPanelTab } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { usePanesStore } from '../../stores/panesStore';
 import { useTabsStore } from '../../stores/tabsStore';
-import { BundlePanel } from '../bundle/BundlePanel';
-import { AiFeedTab } from './AiFeedTab';
-import { BacklinksTab } from './BacklinksTab';
-import { LinksTab } from './LinksTab';
-import { OutlineTab } from './OutlineTab';
 import { PropertiesTab } from './PropertiesTab';
+
+const AiFeedTab = lazy(() => import('./AiFeedTab').then((module) => ({ default: module.AiFeedTab })));
+const BacklinksTab = lazy(() => import('./BacklinksTab').then((module) => ({ default: module.BacklinksTab })));
+const BundlePanel = lazy(() =>
+  import('../bundle/BundlePanel').then((module) => ({ default: module.BundlePanel })),
+);
+const LinksTab = lazy(() => import('./LinksTab').then((module) => ({ default: module.LinksTab })));
+const OutlineTab = lazy(() => import('./OutlineTab').then((module) => ({ default: module.OutlineTab })));
 
 export interface RightPanelProps {
   tab: RightPanelTab;
@@ -181,7 +184,15 @@ export function RightPanel({ tab, width, onWidthChange }: RightPanelProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Presence mode="wait">
           <Fade key={tab} className="min-h-full">
-            {renderTab()}
+            <Suspense
+              fallback={
+                <div role="status" className="flex min-h-32 items-center justify-center text-caption text-text-2">
+                  Загружаем панель…
+                </div>
+              }
+            >
+              {renderTab()}
+            </Suspense>
           </Fade>
         </Presence>
       </div>

@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useRef, useState } from 'react';
+import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { CornerDownLeft, PenLine, X } from 'lucide-react';
@@ -6,10 +6,13 @@ import { Kbd, TooltipProvider, cx } from '@graphite/ui';
 import { commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
 import { AppShell } from './app/AppShell';
-import { EditorPane } from './components/editor/EditorPane';
 import { AppMotionConfig } from './motion';
 import { titleFromRef } from './stores/tabsStore';
 import { useVaultStore } from './stores/vaultStore';
+
+const EditorPane = lazy(() =>
+  import('./components/editor/EditorPane').then((module) => ({ default: module.EditorPane })),
+);
 
 export function App() {
   return <AppShell />;
@@ -285,7 +288,15 @@ export function NoteApp({ initialRef }: { initialRef: string }) {
           </header>
           {noteRef.length > 0 ? (
             <EditorBoundary key={noteRef}>
-              <EditorPane tabId="detached" noteRef={noteRef as NoteRef} />
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-ui text-text-2">
+                    Открываем заметку…
+                  </div>
+                }
+              >
+                <EditorPane tabId="detached" noteRef={noteRef as NoteRef} />
+              </Suspense>
             </EditorBoundary>
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-ui text-text-2">

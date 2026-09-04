@@ -110,7 +110,7 @@ export function activeTabTitle(page) {
 
 /** Переводит боковой раздел в «Заметки» и раскрывает панель дерева. */
 export async function ensureNotesView(page) {
-  await page.getByRole('button', { name: 'Заметки' }).first().click({ timeout: 4000 }).catch(() => {});
+  await page.getByRole('button', { name: 'Заметки', exact: true }).click({ timeout: 4000 }).catch(() => {});
   await page.waitForTimeout(250);
 }
 
