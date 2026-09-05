@@ -740,7 +740,7 @@ pub fn vault_tree(params: VaultTreeParams) -> Result<VaultTreeResponse, Graphite
     }
     let total = nodes.len() as u32;
     let offset = params.offset.unwrap_or(0) as usize;
-    let limit = params.limit.unwrap_or(500).min(500) as usize;
+    let limit = params.limit.unwrap_or(500).min(10_000) as usize;
     let page = if offset >= nodes.len() {
         Vec::new()
     } else {

@@ -17,6 +17,7 @@ import { useTabsStore } from './tabsStore';
 import { useUiStore } from './uiStore';
 import { useVaultsStore, vaultKey } from './vaultsStore';
 import { WELCOME_NOTE_REF, flushPendingSaves, pendingSaveFor } from '../components/editor/editorSession';
+import { fetchVaultTreeAll } from '../lib/vaultTreePages';
 
 function recentsVault(root: string | undefined): string | undefined {
   return root === undefined ? undefined : vaultKey(root);
@@ -242,14 +243,14 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     const seq = (treeLoadSeq += 1);
     const full = root === undefined;
     try {
-      const response = await commands.vaultTree({ root });
+      const nodes = await fetchVaultTreeAll({ root });
       if (seq !== treeLoadSeq) {
         return;
       }
       set((s) => {
         const iconByRef: Record<NoteRef, NoteIconInfo> = full ? {} : { ...s.iconByRef };
         const pinnedNotes = full ? new Set<NoteRef>() : new Set(s.pinnedNotes);
-        for (const node of response.nodes) {
+        for (const node of nodes) {
           if (node.icon !== undefined || node.iconColor !== undefined) {
             iconByRef[node.ref] = { icon: node.icon, color: node.iconColor };
           }
@@ -262,8 +263,8 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         // не изменилось, — иначе каждый no-op пересобирает forest и все useMemo([tree]).
         const same =
           full &&
-          s.tree.length === response.nodes.length &&
-          response.nodes.every((n, i) => {
+          s.tree.length === nodes.length &&
+          nodes.every((n, i) => {
             const p = s.tree[i];
             return (
               p !== undefined &&
@@ -283,7 +284,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
           pinnedNotes.size === s.pinnedNotes.size &&
           [...pinnedNotes].every((ref) => s.pinnedNotes.has(ref));
         return {
-          tree: same ? s.tree : response.nodes,
+          tree: same ? s.tree : nodes,
           iconByRef,
           pinnedNotes: pinnedSame ? s.pinnedNotes : pinnedNotes,
         };
@@ -296,8 +297,8 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   },
   loadChildren: async (ref) => {
     try {
-      const response = await commands.vaultTree({ root: ref, depth: 1 });
-      set((s) => ({ childrenByRef: { ...s.childrenByRef, [ref]: response.nodes } }));
+      const nodes = await fetchVaultTreeAll({ root: ref, depth: 1 });
+      set((s) => ({ childrenByRef: { ...s.childrenByRef, [ref]: nodes } }));
     } catch {
       set((s) => ({ childrenByRef: { ...s.childrenByRef, [ref]: [] } }));
     }
