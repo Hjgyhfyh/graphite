@@ -33,6 +33,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { EditorPane } from '../editor/EditorPane';
 import { flushPendingSaves } from '../editor/editorSession';
+import { copyWikiLink } from '../../lib/wikiLink';
 import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
 
 /** Записи дневника — файлы `Дневник/ГГГГ-ММ-ДД.md`; так же их кладёт `ensure_daily_note`. */
@@ -181,11 +182,19 @@ function DayCell({
   return (
     <motion.button
       type="button"
-      onClick={() => onSelect(dateStr)}
+      onClick={(event) => {
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          void copyWikiLink(dailyRef(dateStr));
+          return;
+        }
+        onSelect(dateStr);
+      }}
       whileTap={reduced ? undefined : { scale: 0.9 }}
       aria-pressed={isSelected}
       aria-current={isToday ? 'date' : undefined}
-      aria-label={`${dayAria(date)}${hasEntry ? ', есть запись' : ''}${inStreak ? ', в текущей серии' : ''}`}
+      aria-label={`${dayAria(date)}${hasEntry ? ', есть запись' : ''}${inStreak ? ', в текущей серии' : ''}. Ctrl — скопировать ссылку`}
+      title="Клик — открыть · Ctrl — скопировать ссылку"
       className={cx(
         'relative flex size-9 items-center justify-center rounded-full text-ui tabular-nums transition-colors duration-[120ms]',
         isSelected
@@ -837,7 +846,15 @@ export function JournalView() {
                         key={node.ref}
                         type="button"
                         variants={reduced ? reducedFadeVariants : listItemVariants}
-                        onClick={() => openDay(date)}
+                        onClick={(event) => {
+                          if (event.ctrlKey || event.metaKey) {
+                            event.preventDefault();
+                            void copyWikiLink(node.ref);
+                            return;
+                          }
+                          openDay(date);
+                        }}
+                        title="Клик — открыть · Ctrl — скопировать ссылку"
                         className={cx(
                           'group flex w-full items-center gap-2.5 rounded-s px-2 py-1.5 text-left transition-colors duration-[120ms]',
                           active ? 'bg-bg-2' : 'hover:bg-bg-2/60',
