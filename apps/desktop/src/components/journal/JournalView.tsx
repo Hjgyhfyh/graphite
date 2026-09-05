@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eraser,
+  Flame,
   NotebookPen,
   RotateCw,
   Sparkles,
@@ -18,6 +19,7 @@ import { commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings'
 import type { NoteRef, TreeNode } from '@graphite/bindings';
 import { splitFrontmatter } from '@graphite/editor';
 import { DAILY_TEMPLATE_REF, buildDailyDoc, dailyRef } from '../../lib/dailyDoc';
+import { dateFromYmd, journalStreaks, monthFill, streakDates } from '../../lib/journalStreak';
 import {
   Presence,
   REDUCED_CROSSFADE,
@@ -46,6 +48,7 @@ const FMT_WEEKDAY_SHORT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' })
 const FMT_WEEKDAY_LONG = new Intl.DateTimeFormat('ru-RU', { weekday: 'long' });
 const FMT_DAY_MONTH = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
 const FMT_MONTH_YEAR = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' });
+const FMT_MONTH_SHORT = new Intl.DateTimeFormat('ru-RU', { month: 'short' });
 const PLURAL_RU = new Intl.PluralRules('ru-RU');
 
 /** 2024-01-01 — понедельник, с него собираем подписи дней недели. */
@@ -107,11 +110,6 @@ function ymd(date: Date): string {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
-/** Локальная дата из `ГГГГ-ММ-ДД` — без UTC-сдвига, который даёт `new Date(string)`. */
-function dateFromYmd(value: string): Date {
-  return new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)));
-}
-
 function capitalize(value: string): string {
   return value.length === 0 ? value : value[0].toUpperCase() + value.slice(1);
 }
@@ -160,6 +158,7 @@ interface DayCellProps {
   isToday: boolean;
   isSelected: boolean;
   hasEntry: boolean;
+  inStreak: boolean;
   tint?: string;
   pillLayoutId: string;
   reduced: boolean;
@@ -173,6 +172,7 @@ function DayCell({
   isToday,
   isSelected,
   hasEntry,
+  inStreak,
   tint,
   pillLayoutId,
   reduced,
@@ -185,7 +185,7 @@ function DayCell({
       whileTap={reduced ? undefined : { scale: 0.9 }}
       aria-pressed={isSelected}
       aria-current={isToday ? 'date' : undefined}
-      aria-label={`${dayAria(date)}${hasEntry ? ', есть запись' : ''}`}
+      aria-label={`${dayAria(date)}${hasEntry ? ', есть запись' : ''}${inStreak ? ', в текущей серии' : ''}`}
       className={cx(
         'relative flex size-9 items-center justify-center rounded-full text-ui tabular-nums transition-colors duration-[120ms]',
         isSelected
@@ -208,16 +208,14 @@ function DayCell({
         <span aria-hidden className="absolute inset-0 rounded-full ring-1 ring-inset ring-accent/45" />
       ) : null}
       <span className="relative z-10">{date.getDate()}</span>
-      {hasEntry ? (
-        <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-[5px] z-10 flex justify-center">
-          <motion.span
-            className="size-1 rounded-full"
-            style={{ backgroundColor: isSelected ? 'var(--bg-0)' : (tint ?? 'var(--accent)') }}
-            initial={reduced ? false : { scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: isSelected || inMonth ? 1 : 0.45 }}
-            transition={reduced ? REDUCED_CROSSFADE : springSnappy}
-          />
-        </span>
+      {hasEntry && !isSelected ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-[3px] z-0 rounded-full"
+          style={{
+            backgroundColor: `color-mix(in srgb, ${tint ?? 'var(--accent)'} ${inStreak ? (inMonth ? '42%' : '24%') : inMonth ? '22%' : '12%'}, transparent)`,
+          }}
+        />
       ) : null}
     </motion.button>
   );
@@ -339,6 +337,10 @@ export function JournalView() {
     return map;
   }, [tree]);
 
+  const dateSet = useMemo(() => new Set(entriesByDate.keys()), [entriesByDate]);
+  const streaks = useMemo(() => journalStreaks(dateSet, today), [dateSet, today]);
+  const inStreakDates = useMemo(() => streakDates(dateSet, today), [dateSet, today]);
+
   /* Цвет точки на дне календаря — из иконки заметки, иначе акцент темы. */
   const tintByDate = useMemo(() => {
     const map = new Map<string, string>();
@@ -390,6 +392,17 @@ export function JournalView() {
     setCursor((prev) => {
       const total = prev.year * 12 + prev.month + delta;
       return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12, dir: delta > 0 ? 1 : -1 };
+    });
+  }, []);
+
+  const goYearMonth = useCallback((year: number, month: number) => {
+    setCursor((prev) => {
+      const prevKey = prev.year * 12 + prev.month;
+      const nextKey = year * 12 + month;
+      if (prevKey === nextKey) {
+        return prev;
+      }
+      return { year, month, dir: nextKey > prevKey ? 1 : -1 };
     });
   }, []);
 
@@ -612,14 +625,25 @@ export function JournalView() {
             <span className="flex size-8 shrink-0 items-center justify-center rounded-s bg-accent-dim text-accent">
               <CalendarDays size={16} strokeWidth={1.75} />
             </span>
-            <div className="flex min-w-0 flex-col">
+            <div className="flex min-w-0 flex-1 flex-col">
               <h1 className="truncate text-[15px] font-semibold tracking-tight text-text-0">Дневник</h1>
               <span className="truncate text-micro text-text-3">
-                {totalEntries > 0
-                  ? `${totalEntries} ${pluralRu(totalEntries, 'запись', 'записи', 'записей')}`
-                  : 'Пока ни одной записи'}
+                {totalEntries === 0
+                  ? 'Пока ни одной записи'
+                  : streaks.current > 0
+                    ? `Серия ${streaks.current} ${pluralRu(streaks.current, 'день', 'дня', 'дней')} · рекорд ${streaks.best}`
+                    : `Пауза · рекорд ${streaks.best} ${pluralRu(streaks.best, 'день', 'дня', 'дней')}`}
               </span>
             </div>
+            {streaks.current > 0 ? (
+              <span
+                title={`Серия ${streaks.current} · рекорд ${streaks.best} · всего ${totalEntries}`}
+                className="flex h-7 shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 text-micro font-semibold tabular-nums text-accent"
+              >
+                <Flame size={13} strokeWidth={1.75} aria-hidden />
+                {streaks.current}
+              </span>
+            ) : null}
           </div>
           <Button variant="primary" className="w-full" onClick={() => openDay(today)}>
             <NotebookPen size={15} strokeWidth={1.75} />
@@ -706,6 +730,7 @@ export function JournalView() {
                     isToday={dateStr === today}
                     isSelected={dateStr === selectedDate}
                     hasEntry={entriesByDate.has(dateStr)}
+                    inStreak={inStreakDates.has(dateStr)}
                     tint={tintByDate.get(dateStr)}
                     pillLayoutId={pillLayoutId}
                     reduced={reduced}
@@ -716,6 +741,36 @@ export function JournalView() {
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {totalEntries > 0 ? (
+          <div className="flex items-end gap-0.5 px-5 pt-3" role="group" aria-label={`Плотность записей за ${cursor.year}`}>
+            {Array.from({ length: 12 }, (_, month) => {
+              const fill = monthFill(dateSet, cursor.year, month);
+              const active = month === cursor.month;
+              const label = capitalize(FMT_MONTH_SHORT.format(new Date(cursor.year, month, 1)));
+              return (
+                <button
+                  key={month}
+                  type="button"
+                  title={`${label} ${cursor.year}`}
+                  aria-label={`${label} ${cursor.year}${fill > 0 ? `, есть записи` : ''}`}
+                  aria-current={active ? 'true' : undefined}
+                  onClick={() => goYearMonth(cursor.year, month)}
+                  className={cx(
+                    'h-3.5 flex-1 rounded-xs transition-[box-shadow,transform] duration-[120ms]',
+                    active ? 'ring-1 ring-accent ring-offset-1 ring-offset-bg-1' : 'hover:opacity-90',
+                  )}
+                  style={{
+                    backgroundColor:
+                      fill === 0
+                        ? 'var(--bg-3)'
+                        : `color-mix(in srgb, var(--accent) ${Math.round(18 + fill * 72)}%, var(--bg-3))`,
+                  }}
+                />
+              );
+            })}
+          </div>
+        ) : null}
 
         {/* Уборка пустышек: нетронутые шаблоны уезжают в корзину, вернуть можно из тоста */}
         <AnimatePresence initial={false}>
