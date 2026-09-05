@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Copy, Eye, ExternalLink, Folder, FolderOpen, Terminal } from 'lucide-react';
@@ -54,10 +54,12 @@ export function FolderList({
     });
   }, [entries]);
 
+  const getScrollElement = useCallback(() => scrollRef.current, []);
+  const estimateSize = useCallback(() => ROW_HEIGHT, []);
   const virtualizer = useVirtualizer({
     count: sorted.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    getScrollElement,
+    estimateSize,
     overscan: 12,
   });
 

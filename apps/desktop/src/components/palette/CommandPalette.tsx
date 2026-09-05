@@ -30,7 +30,7 @@ import { openBriefView } from '../../stores/briefStore';
 import { pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useVaultsStore, vaultKey } from '../../stores/vaultsStore';
-import { useRecentsStore } from '../../stores/recentsStore';
+import { recentsNotesOf, useRecentsStore } from '../../stores/recentsStore';
 import { nextTheme, startThemeCrossfade } from '../../theme';
 import { NoteIcon } from '../tree/NoteIcon';
 import { RAIL_META } from '../rail/railItems';
@@ -229,7 +229,7 @@ export function CommandPalette() {
   const iconByRef = useVaultStore((s) => s.iconByRef);
   const vaultRoot = useVaultStore((s) => s.info?.root);
   const recentNoteRefs = useRecentsStore((s) =>
-    vaultRoot === undefined ? [] : s.notesOf(vaultKey(vaultRoot)),
+    recentsNotesOf(s, vaultRoot === undefined ? undefined : vaultKey(vaultRoot)),
   );
   const knownVaults = useVaultsStore((s) => s.known);
   const reduced = usePrefersReducedMotion();

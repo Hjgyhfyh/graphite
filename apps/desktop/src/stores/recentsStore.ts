@@ -46,6 +46,26 @@ export interface RecentsStore {
   notesOf(vault: string): NoteRef[];
 }
 
+const EMPTY_NOTES: NoteRef[] = [];
+const EMPTY_QUERIES: string[] = [];
+
+export function recentsNotesOf(state: Pick<RecentsStore, 'notesOf' | 'byVault'>, vault: string | undefined): NoteRef[] {
+  if (vault === undefined) {
+    return EMPTY_NOTES;
+  }
+  return state.byVault[vault]?.notes ?? EMPTY_NOTES;
+}
+
+export function recentsQueriesOf(
+  state: Pick<RecentsStore, 'queriesOf' | 'byVault'>,
+  vault: string | undefined,
+): string[] {
+  if (vault === undefined) {
+    return EMPTY_QUERIES;
+  }
+  return state.byVault[vault]?.queries ?? EMPTY_QUERIES;
+}
+
 export function hydrateDraftQuery(value: unknown): string {
   if (typeof value !== 'string') {
     return DRAFT_PERSIST_EMPTY;
@@ -141,8 +161,8 @@ export const useRecentsStore = create<RecentsStore>()(
   persist(
     (set, get) => ({
       byVault: {},
-      queriesOf: (vault) => get().byVault[vault]?.queries ?? [],
-      notesOf: (vault) => get().byVault[vault]?.notes ?? [],
+      queriesOf: (vault) => get().byVault[vault]?.queries ?? EMPTY_QUERIES,
+      notesOf: (vault) => get().byVault[vault]?.notes ?? EMPTY_NOTES,
       draftQueryOf: (vault) => get().byVault[vault]?.draftQuery ?? DRAFT_PERSIST_EMPTY,
       setDraftQuery: (vault, query) => {
         const draftQuery = hydrateDraftQuery(query);

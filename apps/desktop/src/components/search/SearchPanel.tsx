@@ -28,7 +28,7 @@ import type { NoteRef, NoteType, SearchFilters, SearchHit, SearchParams, Status,
 import { cx } from '@graphite/ui';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
-import { useRecentsStore } from '../../stores/recentsStore';
+import { recentsNotesOf, recentsQueriesOf, useRecentsStore } from '../../stores/recentsStore';
 import { vaultKey } from '../../stores/vaultsStore';
 import { NoteIcon } from '../tree/NoteIcon';
 import { copyWikiLink } from '../../lib/wikiLink';
@@ -659,8 +659,8 @@ function RecentsIdle({
   const tree = useVaultStore((s) => s.tree);
   const iconByRef = useVaultStore((s) => s.iconByRef);
   const vault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
-  const queries = useRecentsStore((s) => (vault === undefined ? [] : s.queriesOf(vault)));
-  const noteRefs = useRecentsStore((s) => (vault === undefined ? [] : s.notesOf(vault)));
+  const queries = useRecentsStore((s) => recentsQueriesOf(s, vault));
+  const noteRefs = useRecentsStore((s) => recentsNotesOf(s, vault));
 
   const notes = noteRefs
     .map((ref) => tree.find((node) => node.ref === ref))
