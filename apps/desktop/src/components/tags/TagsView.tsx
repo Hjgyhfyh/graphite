@@ -347,6 +347,7 @@ export function TagsView() {
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [skeletonVisible, setSkeletonVisible] = useState(false);
   const seqRef = useRef(0);
+  const pendingTag = useUiStore((s) => s.pendingTag);
 
   const load = useCallback(async () => {
     if (!isTauriAvailable()) {
@@ -400,6 +401,28 @@ export function TagsView() {
       setSelected(undefined);
     }
   }, [tags, phase, selected]);
+
+  useEffect(() => {
+    if (pendingTag === undefined || phase === 'loading') {
+      return;
+    }
+    const raw = useUiStore.getState().consumePendingTag();
+    if (raw === undefined) {
+      return;
+    }
+    const needle = raw.replace(/^#+/, '').trim();
+    if (needle.length === 0) {
+      return;
+    }
+    const hit = tags.find((t) => t.tag.toLocaleLowerCase('ru') === needle.toLocaleLowerCase('ru'));
+    if (hit !== undefined) {
+      setSelected(hit.tag);
+      setQuery('');
+    } else {
+      setSelected(undefined);
+      setQuery(needle);
+    }
+  }, [pendingTag, phase, tags]);
 
   const nodeByRef = useMemo(() => {
     const map = new Map<NoteRef, TreeNode>();

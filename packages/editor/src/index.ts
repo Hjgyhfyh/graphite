@@ -15,7 +15,7 @@ export type { WikiLinkItem, WikiLinkSource } from './wikilink';
 export { isWikiFollowClick, snippetFromBody, wikiLinkPreview } from './wikiHover';
 export type { WikiOpenHandler, WikiPreview, WikiPreviewSource } from './wikiHover';
 export { frontmatterHide } from './frontmatterHide';
-export { tagHighlight } from './tagHighlight';
+export { tagHighlight, findInlineTags, tagAt } from './tagHighlight';
 export { parseFrontmatter, splitFrontmatter } from './frontmatter';
 export type { FrontmatterEntry, FrontmatterSplit, ParsedFrontmatter } from './frontmatter';
 export {

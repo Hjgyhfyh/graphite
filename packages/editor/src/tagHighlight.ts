@@ -1,8 +1,9 @@
 import { syntaxTree } from '@codemirror/language';
-import type { EditorState, Range } from '@codemirror/state';
-import { Decoration, ViewPlugin } from '@codemirror/view';
-import type { DecorationSet, EditorView, ViewUpdate } from '@codemirror/view';
+import type { EditorState, Extension, Range } from '@codemirror/state';
+import { Decoration, EditorView, ViewPlugin } from '@codemirror/view';
+import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import { frontmatterEnd } from './frontmatter';
+import { isWikiFollowClick } from './wikiHover';
 
 export interface InlineTagRange {
   readonly from: number;
@@ -40,6 +41,16 @@ export function findInlineTags(text: string): InlineTagRange[] {
     out.push({ from, to });
   }
   return out;
+}
+
+/** Имя тега без `#`, если `offset` попадает в диапазон `#тега` на строке. */
+export function tagAt(text: string, offset: number): string | null {
+  for (const range of findInlineTags(text)) {
+    if (offset >= range.from && offset <= range.to) {
+      return text.slice(range.from + 1, range.to);
+    }
+  }
+  return null;
 }
 
 const TAG_MARK = Decoration.mark({ class: 'cm-gr-tag' });
@@ -83,12 +94,16 @@ function buildDecorations(view: EditorView): DecorationSet {
   return Decoration.set(items, true);
 }
 
-/**
- * Highlights inline `#tags` in the editor with the same recognition rules the
- * core indexer uses, so the styling always matches what actually lands in the
- * tag index. Frontmatter, code and link contexts are left untouched.
- */
-export const tagHighlight = ViewPlugin.fromClass(
+export function tagAround(state: EditorState, pos: number): string | null {
+  const fmEnd = frontmatterEnd(state.doc);
+  if (pos < fmEnd || inSkippedContext(state, pos)) {
+    return null;
+  }
+  const line = state.doc.lineAt(pos);
+  return tagAt(line.text, pos - line.from);
+}
+
+const tagDecorations = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
 
@@ -108,3 +123,34 @@ export const tagHighlight = ViewPlugin.fromClass(
   },
   { decorations: (plugin) => plugin.decorations },
 );
+
+function tagFollowClicks(onOpen: (tag: string) => void): Extension {
+  return EditorView.domEventHandlers({
+    click(event, view) {
+      if (!isWikiFollowClick(event)) {
+        return false;
+      }
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos === null) {
+        return false;
+      }
+      const tag = tagAround(view.state, pos);
+      if (tag === null) {
+        return false;
+      }
+      event.preventDefault();
+      onOpen(tag);
+      return true;
+    },
+  });
+}
+
+/**
+ * Highlights inline `#tags` in the editor with the same recognition rules the
+ * core indexer uses, so the styling always matches what actually lands in the
+ * tag index. Frontmatter, code and link contexts are left untouched.
+ * Ctrl/Cmd+клик открывает тег, если передан `onOpen`.
+ */
+export function tagHighlight(onOpen?: (tag: string) => void): Extension {
+  return onOpen !== undefined ? [tagDecorations, tagFollowClicks(onOpen)] : tagDecorations;
+}

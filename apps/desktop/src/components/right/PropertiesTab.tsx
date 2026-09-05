@@ -460,8 +460,15 @@ export function PropertiesTab({ noteRef }: PropertiesTabProps) {
                 transition={springSnappy}
                 className="group inline-flex h-6 items-center gap-1 rounded-full border border-stroke-1 bg-bg-2 pl-2 pr-1 text-caption text-text-1"
               >
-                <span className="text-text-3">#</span>
-                <span className="max-w-[140px] truncate">{tag}</span>
+                <button
+                  type="button"
+                  title={`Показать #${tag} в тегах`}
+                  onClick={() => useUiStore.getState().openTag(tag)}
+                  className="inline-flex max-w-[140px] items-center gap-0.5 truncate outline-none transition-colors hover:text-accent"
+                >
+                  <span className="text-text-3">#</span>
+                  <span className="truncate">{tag}</span>
+                </button>
                 <button
                   type="button"
                   aria-label={`Убрать тег ${tag}`}

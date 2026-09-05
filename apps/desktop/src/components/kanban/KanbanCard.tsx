@@ -10,6 +10,7 @@ import { NoteIcon } from '../tree/NoteIcon';
 import { highlightNameParts } from '../../lib/treeFilter';
 import { REDUCED_CROSSFADE, springSnappy, springStandard } from '../../motion';
 import { CARD_ALIAS_MAX } from '../../stores/boardStore';
+import { useUiStore } from '../../stores/uiStore';
 import { formatUpdated, typeFallbackIcon, typeLabel } from './columns';
 import type { KanbanCardData } from './columns';
 
@@ -148,12 +149,19 @@ export function CardSurface({ card, tags, titleAction, filterNeedle = '', classN
       {tags.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {tags.slice(0, 4).map((tag) => (
-            <span
+            <button
               key={tag}
-              className="inline-flex max-w-full items-center truncate rounded-full bg-bg-3 px-1.5 py-0.5 text-micro text-text-2"
+              type="button"
+              title={`Показать #${tag} в тегах`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                useUiStore.getState().openTag(tag);
+              }}
+              className="inline-flex max-w-full cursor-pointer items-center truncate rounded-full bg-bg-3 px-1.5 py-0.5 text-micro text-text-2 transition-colors hover:bg-accent/15 hover:text-accent"
             >
               #{tag}
-            </span>
+            </button>
           ))}
           {tags.length > 4 ? <span className="text-micro text-text-3">+{tags.length - 4}</span> : null}
         </div>

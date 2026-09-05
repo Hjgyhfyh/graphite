@@ -90,6 +90,7 @@ export interface UiStore {
   pendingGraphFocus: NoteRef | undefined;
   pendingTreeFilter: boolean;
   pendingBoardFilter: boolean;
+  pendingTag: string | undefined;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
   onboardingDone: boolean;
@@ -129,6 +130,8 @@ export interface UiStore {
   consumeTreeFilterFocus(): boolean;
   focusBoardFilter(): void;
   consumeBoardFilterFocus(): boolean;
+  openTag(tag: string): void;
+  consumePendingTag(): string | undefined;
   revealOnGraph(ref: NoteRef): void;
   consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
@@ -220,6 +223,7 @@ export const useUiStore = create<UiStore>()(
       pendingGraphFocus: undefined,
       pendingTreeFilter: false,
       pendingBoardFilter: false,
+      pendingTag: undefined,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
       onboardingDone: false,
@@ -379,6 +383,25 @@ export const useUiStore = create<UiStore>()(
         }
         set({ pendingBoardFilter: false });
         return true;
+      },
+      openTag: (tag) => {
+        const name = tag.trim().replace(/^#+/, '');
+        if (name.length === 0) {
+          return;
+        }
+        set({
+          pendingTag: name,
+          railView: 'tags',
+          sidebarHidden: false,
+          focusMode: false,
+        });
+      },
+      consumePendingTag: () => {
+        const tag = get().pendingTag;
+        if (tag !== undefined) {
+          set({ pendingTag: undefined });
+        }
+        return tag;
       },
       revealOnGraph: (ref) => {
         set({

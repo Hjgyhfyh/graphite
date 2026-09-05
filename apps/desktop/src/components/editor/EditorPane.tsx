@@ -250,6 +250,7 @@ const HEADING_CLASS: Record<1 | 2 | 3 | 4 | 5 | 6, string> = {
 
 interface InlineContext {
   onOpenLink: (target: string) => void;
+  onOpenTag: (tag: string) => void;
   reduced: boolean;
 }
 
@@ -369,9 +370,15 @@ function renderInline(nodes: readonly MdInline[], keyPrefix: string, ctx: Inline
         );
       case 'tag':
         return (
-          <span key={key} className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[0.92em] text-accent">
+          <button
+            key={key}
+            type="button"
+            title={`Показать #${node.value} в тегах`}
+            onClick={() => ctx.onOpenTag(node.value)}
+            className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[0.92em] text-accent transition-colors hover:bg-accent/18"
+          >
             #{node.value}
-          </span>
+          </button>
         );
       case 'wikilink':
         return <WikiLinkChip key={key} target={node.target} label={node.label} onOpen={ctx.onOpenLink} />;
@@ -675,13 +682,14 @@ interface ReadingHeaderProps {
   fallbackTitle: string;
   hideTitle: boolean;
   reduced: boolean;
+  onOpenTag: (tag: string) => void;
 }
 
 /**
  * Аккуратная шапка режима чтения (#6): вместо сырого YAML — заголовок из
  * frontmatter, статус, даты и чипы тегов/алиасов. Технические поля скрыты.
  */
-function ReadingHeader({ entries, fallbackTitle, hideTitle, reduced }: ReadingHeaderProps) {
+function ReadingHeader({ entries, fallbackTitle, hideTitle, reduced, onOpenTag }: ReadingHeaderProps) {
   const title = fmValue(entries, 'title') ?? fallbackTitle;
   const icon = fmValue(entries, 'icon');
   const iconColor = fmValue(entries, 'icon_color') ?? fmValue(entries, 'iconColor');
@@ -755,12 +763,15 @@ function ReadingHeader({ entries, fallbackTitle, hideTitle, reduced }: ReadingHe
           style={{ fontFamily: 'var(--font-ui)' }}
         >
           {tags.map((tag) => (
-            <span
+            <button
               key={`t.${tag}`}
-              className="inline-flex h-[22px] items-center rounded-full bg-accent/10 px-2.5 text-caption text-accent"
+              type="button"
+              title={`Показать #${tag} в тегах`}
+              onClick={() => onOpenTag(tag)}
+              className="inline-flex h-[22px] items-center rounded-full bg-accent/10 px-2.5 text-caption text-accent transition-colors hover:bg-accent/18"
             >
               #{tag}
-            </span>
+            </button>
           ))}
           {aliases.map((alias) => (
             <span
@@ -783,9 +794,10 @@ interface ReadingViewProps {
   reduced: boolean;
   onToggleTask: (line: number) => void;
   onOpenLink: (target: string) => void;
+  onOpenTag: (tag: string) => void;
 }
 
-function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: ReadingViewProps) {
+function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink, onOpenTag }: ReadingViewProps) {
   const split = useMemo(() => splitFrontmatter(doc), [doc]);
   const blocks = useMemo(
     () => (split !== null ? parseBlocks(split.body, split.bodyLine) : parseBlocks(doc)),
@@ -809,7 +821,7 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: Readin
     );
   }, [entries, blocks]);
 
-  const ctx: InlineContext = { onOpenLink, reduced };
+  const ctx: InlineContext = { onOpenLink, onOpenTag, reduced };
   return (
     <motion.div
       key="reading"
@@ -826,6 +838,7 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: Readin
             fallbackTitle={titleFromRef(noteRef)}
             hideTitle={hideTitle}
             reduced={reduced}
+            onOpenTag={onOpenTag}
           />
         ) : null}
         {blocks.length === 0 ? (
@@ -1374,6 +1387,10 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     }
   }, []);
 
+  const openTag = useCallback((tag: string) => {
+    useUiStore.getState().openTag(tag);
+  }, []);
+
   const wikiPreview = useCallback((target: string) => loadWikiPreview(target), []);
 
   // «Связать заметку» из палитры и глобального хоткея: фокусируем редактор и
@@ -1472,6 +1489,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
         linkSource,
         wikiPreview,
         onOpenWiki: openLink,
+        onOpenTag: openTag,
         attachments: readOnly
           ? undefined
           : {
@@ -1546,7 +1564,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       editorRef.current?.destroy();
       editorRef.current = null;
     };
-  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, wikiPreview, openLink, scheduleSave, flushSave, setDirty]);
+  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, wikiPreview, openLink, openTag, scheduleSave, flushSave, setDirty]);
 
   useEffect(() => {
     if (readingMode) {
@@ -1850,6 +1868,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
             reduced={reduced}
             onToggleTask={handleReadingToggle}
             onOpenLink={openLink}
+            onOpenTag={openTag}
           />
         ) : null}
       </Presence>

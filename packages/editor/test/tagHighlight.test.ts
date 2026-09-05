@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findInlineTags } from '../src/tagHighlight';
+import { findInlineTags, tagAt } from '../src/tagHighlight';
 
 /** Текст найденных диапазонов — так проверяются и границы, и содержимое. */
 function tags(text: string): string[] {
@@ -31,5 +31,14 @@ describe('findInlineTags — зеркало правил ядра', () => {
 
   it('тег обрезается по недопустимому символу', () => {
     expect(tags('#тег.')).toEqual(['#тег']);
+  });
+});
+
+describe('tagAt', () => {
+  it('возвращает имя без решётки внутри диапазона', () => {
+    const line = 'См. #проект и текст';
+    expect(tagAt(line, line.indexOf('#проект'))).toBe('проект');
+    expect(tagAt(line, line.indexOf('#проект') + 3)).toBe('проект');
+    expect(tagAt(line, 0)).toBeNull();
   });
 });

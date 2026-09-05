@@ -38,6 +38,8 @@ export interface CreateEditorOptions {
   wikiPreview?: WikiPreviewSource;
   /** Ctrl/Cmd+клик по `[[ссылке]]` и клик по карточке превью. */
   onOpenWiki?: (target: string) => void;
+  /** Ctrl/Cmd+клик по `#тегу` в тексте. */
+  onOpenTag?: (tag: string) => void;
   attachments?: AttachmentSaveOptions;
   images?: ImagePreviewOptions;
   /** Прятать YAML-блок свойств в начале документа (по умолчанию включено). */
@@ -104,6 +106,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
     linkSource,
     wikiPreview,
     onOpenWiki,
+    onOpenTag,
     attachments,
     images,
     hideFrontmatter = true,
@@ -151,7 +154,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       markdown({ base: markdownLanguage }),
       livePreview,
       tablePreview,
-      tagHighlight,
+      tagHighlight(onOpenTag),
       ...(wikiPreview !== undefined ? [wikiLinkPreview(wikiPreview, onOpenWiki)] : []),
       frontmatterCompartment.of(hideFrontmatter ? frontmatterHide() : []),
       typewriterCompartment.of(typewriter ? typewriterScroll() : []),
