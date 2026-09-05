@@ -49,9 +49,10 @@ interface StatChipProps {
   label: string;
   accent?: boolean;
   onClick?: () => void;
+  action?: string;
 }
 
-function StatChip({ icon: Icon, value, label, accent = false, onClick }: StatChipProps) {
+function StatChip({ icon: Icon, value, label, accent = false, onClick, action = 'открыть' }: StatChipProps) {
   const className = cx(
     'flex items-center gap-1 tabular-nums',
     accent ? 'text-accent' : 'text-text-2',
@@ -66,7 +67,7 @@ function StatChip({ icon: Icon, value, label, accent = false, onClick }: StatChi
   );
   if (onClick !== undefined) {
     return (
-      <Tooltip content={`${label}: ${value} · открыть`} side="top">
+      <Tooltip content={`${label}: ${value} · ${action}`} side="top">
         <button type="button" aria-label={`${label}: ${value}`} onClick={onClick} className={className}>
           {inner}
         </button>
@@ -532,6 +533,7 @@ export function StatusBar() {
                 value={info.counts.inbox}
                 label="Входящие"
                 accent={info.counts.inbox > 0}
+                action="разобрать"
                 onClick={() => useUiStore.getState().openSearchWith('status:inbox')}
               />
               <StatChip

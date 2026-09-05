@@ -11,6 +11,7 @@ import {
   FileText,
   FolderClosed,
   FolderKanban,
+  Inbox,
   ListChecks,
   LoaderCircle,
   NotebookPen,
@@ -470,6 +471,47 @@ function pluralResults(count: number): string {
   return `${count} ${word}`;
 }
 
+function InboxTriageActions({
+  busy,
+  onShaping,
+  onIce,
+}: {
+  busy: boolean;
+  onShaping: () => void;
+  onIce: () => void;
+}) {
+  return (
+    <span className="flex shrink-0 flex-col justify-center gap-0.5 py-1.5 pr-1.5">
+      <button
+        type="button"
+        disabled={busy}
+        title="Проработка · Ctrl+Enter"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onShaping();
+        }}
+        className="rounded-xs px-1.5 py-0.5 text-micro font-medium text-accent outline-none hover:bg-accent/10 disabled:opacity-45"
+      >
+        Проработка
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        title="Лёд · Shift+Enter"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onIce();
+        }}
+        className="rounded-xs px-1.5 py-0.5 text-micro font-medium text-text-2 outline-none hover:bg-bg-4 hover:text-text-0 disabled:opacity-45"
+      >
+        Лёд
+      </button>
+    </span>
+  );
+}
+
 type Phase = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
 type View = 'idle' | 'skeleton' | 'results' | 'empty' | 'building' | 'error';
 
@@ -652,6 +694,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const [showSkeleton, setShowSkeleton] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [unavailableHint, setUnavailableHint] = useState<string | undefined>(undefined);
+  const [busyRef, setBusyRef] = useState<NoteRef | undefined>();
   const [nonce, setNonce] = useState(0);
   const [boundaryEpoch, setBoundaryEpoch] = useState(0);
 
@@ -679,6 +722,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const vaultRoot = useVaultStore((s) => s.info?.root);
   const recentsVault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
   const parsed = useMemo(() => parseQuery(query), [query]);
+  const inboxQueue = parsed.filters.status === 'inbox';
 
   useEffect(() => {
     if (!parsed.hasQuery || phase !== 'ready' || recentsVault === undefined) {
@@ -695,6 +739,36 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
       useRecentsStore.getState().rememberQuery(recentsVault, query);
     }
     openNote(ref);
+  };
+
+  const triageHit = async (ref: NoteRef, status: Extract<Status, 'shaping' | 'iced'>) => {
+    if (busyRef !== undefined) {
+      return;
+    }
+    setBusyRef(ref);
+    try {
+      await commands.setStatus({ ref, status });
+      setHits((prev) => {
+        const next = prev.filter((hit) => hit.ref !== ref);
+        const idx = prev.findIndex((hit) => hit.ref === ref);
+        const pick = next.length === 0 ? 0 : idx < 0 ? 0 : Math.min(idx, next.length - 1);
+        window.queueMicrotask(() => setSelectedIndex(pick));
+        return next;
+      });
+      void useVaultStore.getState().loadTree();
+      void useVaultStore.getState().loadInfo();
+      useUiStore.getState().pushToast({
+        kind: 'success',
+        text: status === 'iced' ? 'На лёд' : 'В проработку',
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        kind: 'error',
+        text: isGraphiteError(error) ? error.message : 'Не удалось сменить статус',
+      });
+    } finally {
+      setBusyRef(undefined);
+    }
   };
 
   const nodeByRef = useMemo(() => {
@@ -868,6 +942,18 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
         event.preventDefault();
         setSelectedIndex(hits.length - 1);
       }
+    } else if (event.key === 'Enter' && inboxQueue && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      const target = hits[selectedIndex] ?? hits[0];
+      if (target !== undefined) {
+        void triageHit(target.ref, 'shaping');
+      }
+    } else if (event.key === 'Enter' && inboxQueue && event.shiftKey) {
+      event.preventDefault();
+      const target = hits[selectedIndex] ?? hits[0];
+      if (target !== undefined) {
+        void triageHit(target.ref, 'iced');
+      }
     } else if (event.key === 'Enter') {
       event.preventDefault();
       const target = hits[selectedIndex] ?? hits[0];
@@ -928,7 +1014,9 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
 
   const footerText =
     view === 'results'
-      ? pluralResults(hits.length)
+      ? inboxQueue
+        ? `${hits.length} во входящих`
+        : pluralResults(hits.length)
       : indexBuilding
         ? indexStatus.total > 0
           ? `Индекс: ${indexStatus.done} / ${indexStatus.total}`
@@ -1014,10 +1102,15 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
           <Presence mode="wait">
             {view === 'results' ? (
               <Fade key="results" className="flex flex-col p-2">
+                {inboxQueue ? (
+                  <p className="px-1 pb-2 text-micro text-text-3">
+                    Разберите входящие: проработка или лёд. Клик открывает заметку. Ctrl+Enter / Shift+Enter.
+                  </p>
+                ) : null}
                 <motion.ul
                   id="search-results-list"
                   role="listbox"
-                  aria-label="Результаты поиска"
+                  aria-label={inboxQueue ? 'Входящие' : 'Результаты поиска'}
                   variants={listContainerVariants}
                   initial="initial"
                   animate="animate"
@@ -1033,66 +1126,77 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                     const selected = index === selectedIndex;
                     return (
                       <motion.li key={hit.ref} variants={listItemVariants}>
-                        <button
-                          ref={(el) => {
-                            itemRefs.current[index] = el;
-                          }}
-                          type="button"
-                          id={`search-option-${index}`}
-                          role="option"
-                          aria-selected={selected}
-                          onClick={() => openHit(hit.ref)}
-                          onMouseMove={() => setSelectedIndex(index)}
+                        <div
                           className={cx(
-                            'flex w-full gap-2.5 rounded-m px-2.5 py-2 text-left transition-colors',
+                            'flex items-start rounded-m transition-colors',
                             selected ? 'bg-bg-3' : 'hover:bg-bg-2',
                           )}
+                          onMouseMove={() => setSelectedIndex(index)}
                         >
-                          <span
-                            className={cx(
-                              'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-s border bg-bg-2 transition-colors',
-                              selected ? 'border-stroke-1 text-accent' : 'border-stroke-0 text-text-2',
-                            )}
+                          <button
+                            ref={(el) => {
+                              itemRefs.current[index] = el;
+                            }}
+                            type="button"
+                            id={`search-option-${index}`}
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => openHit(hit.ref)}
+                            className="flex min-w-0 flex-1 gap-2.5 px-2.5 py-2 text-left"
                           >
-                            <TypeIcon size={15} strokeWidth={1.75} />
-                          </span>
-                          <span className="flex min-w-0 flex-1 flex-col gap-1">
-                            <span className="flex items-baseline gap-2">
-                              <span className="min-w-0 flex-1 truncate text-ui text-text-0">
-                                {hit.title.trim().length > 0 ? hit.title : 'Без названия'}
-                              </span>
-                              {date.short.length > 0 ? (
-                                <time
-                                  dateTime={hit.updated}
-                                  title={date.full}
-                                  className="shrink-0 text-micro text-text-3"
-                                >
-                                  {date.short}
-                                </time>
-                              ) : null}
+                            <span
+                              className={cx(
+                                'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-s border bg-bg-2 transition-colors',
+                                selected ? 'border-stroke-1 text-accent' : 'border-stroke-0 text-text-2',
+                              )}
+                            >
+                              <TypeIcon size={15} strokeWidth={1.75} />
                             </span>
-                            {snippets.length > 0 ? (
-                              <span className="flex flex-col gap-0.5">
-                                {snippets.map((snippet, snippetIndex) => (
-                                  <span
-                                    key={snippetIndex}
-                                    className="line-clamp-2 text-caption leading-relaxed text-text-2"
+                            <span className="flex min-w-0 flex-1 flex-col gap-1">
+                              <span className="flex items-baseline gap-2">
+                                <span className="min-w-0 flex-1 truncate text-ui text-text-0">
+                                  {hit.title.trim().length > 0 ? hit.title : 'Без названия'}
+                                </span>
+                                {date.short.length > 0 ? (
+                                  <time
+                                    dateTime={hit.updated}
+                                    title={date.full}
+                                    className="shrink-0 text-micro text-text-3"
                                   >
-                                    {highlightSnippet(snippet, parsed.terms)}
-                                  </span>
-                                ))}
-                              </span>
-                            ) : null}
-                            {status !== undefined || dir !== undefined ? (
-                              <span className="mt-0.5 flex min-w-0 items-center gap-2">
-                                {status !== undefined ? <StatusChip status={status} /> : null}
-                                {dir !== undefined ? (
-                                  <span className="min-w-0 flex-1 truncate text-micro text-text-3">{dir}</span>
+                                    {date.short}
+                                  </time>
                                 ) : null}
                               </span>
-                            ) : null}
-                          </span>
-                        </button>
+                              {snippets.length > 0 ? (
+                                <span className="flex flex-col gap-0.5">
+                                  {snippets.map((snippet, snippetIndex) => (
+                                    <span
+                                      key={snippetIndex}
+                                      className="line-clamp-2 text-caption leading-relaxed text-text-2"
+                                    >
+                                      {highlightSnippet(snippet, parsed.terms)}
+                                    </span>
+                                  ))}
+                                </span>
+                              ) : null}
+                              {status !== undefined || dir !== undefined ? (
+                                <span className="mt-0.5 flex min-w-0 items-center gap-2">
+                                  {status !== undefined ? <StatusChip status={status} /> : null}
+                                  {dir !== undefined ? (
+                                    <span className="min-w-0 flex-1 truncate text-micro text-text-3">{dir}</span>
+                                  ) : null}
+                                </span>
+                              ) : null}
+                            </span>
+                          </button>
+                          {inboxQueue ? (
+                            <InboxTriageActions
+                              busy={busyRef !== undefined}
+                              onShaping={() => void triageHit(hit.ref, 'shaping')}
+                              onIce={() => void triageHit(hit.ref, 'iced')}
+                            />
+                          ) : null}
+                        </div>
                       </motion.li>
                     );
                   })}
@@ -1134,12 +1238,17 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
             ) : view === 'empty' ? (
               <Fade key="empty" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
                 <span className="grid size-11 place-items-center rounded-full border border-stroke-0 bg-bg-2 text-text-2">
-                  <SearchX size={20} strokeWidth={1.75} />
+                  {inboxQueue ? <Inbox size={20} strokeWidth={1.75} /> : <SearchX size={20} strokeWidth={1.75} />}
                 </span>
                 <div className="flex flex-col gap-1">
-                  <p className="text-ui text-text-1">Ничего не найдено</p>
-                  <p className="text-caption text-text-2">Уточните запрос или измените операторы.</p>
+                  <p className="text-ui text-text-1">{inboxQueue ? 'Входящие пусты' : 'Ничего не найдено'}</p>
+                  <p className="text-caption text-text-2">
+                    {inboxQueue
+                      ? 'Новые искры появятся с Ctrl+Alt+Space.'
+                      : 'Уточните запрос или измените операторы.'}
+                  </p>
                 </div>
+                {inboxQueue ? null : (
                 <div className="flex flex-wrap justify-center gap-1.5">
                   {(['tag:', 'status:', 'type:', 'path:', 'updated:'] as const).map((op) => (
                     <button
@@ -1152,6 +1261,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                     </button>
                   ))}
                 </div>
+                )}
               </Fade>
             ) : view === 'error' ? (
               <Fade key="error" className="flex flex-1 flex-col">
