@@ -13,6 +13,7 @@ import { vaultKey } from '../../stores/vaultsStore';
 import { useRecentsStore } from '../../stores/recentsStore';
 import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
 import { filterNeedle, highlightNameParts, nameMatchesFilter } from '../../lib/treeFilter';
+import { copyWikiLink } from '../../lib/wikiLink';
 import {
   REDUCED_CROSSFADE,
   listContainerVariants,
@@ -465,7 +466,15 @@ export function TasksView() {
                 <motion.section key={group.ref} variants={listItemVariants} className="flex flex-col gap-1">
                   <button
                     type="button"
-                    onClick={() => jumpToNote(group.ref)}
+                    title="Клик — открыть заметку · Ctrl — скопировать ссылку"
+                    onClick={(event) => {
+                      if (event.ctrlKey || event.metaKey) {
+                        event.preventDefault();
+                        void copyWikiLink(group.ref);
+                        return;
+                      }
+                      jumpToNote(group.ref);
+                    }}
                     className="group flex items-center gap-1.5 self-start rounded-s px-1.5 py-1 transition-colors duration-[120ms] hover:bg-bg-1"
                   >
                     <GroupIcon size={13} strokeWidth={1.75} className={group.isPlan ? 'text-accent' : 'text-text-3'} />
@@ -492,7 +501,15 @@ export function TasksView() {
                         <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
                           <button
                             type="button"
-                            onClick={() => jumpToTask(task)}
+                            title="Клик — открыть задачу · Ctrl — скопировать ссылку"
+                            onClick={(event) => {
+                              if (event.ctrlKey || event.metaKey) {
+                                event.preventDefault();
+                                void copyWikiLink(task.source.ref);
+                                return;
+                              }
+                              jumpToTask(task);
+                            }}
                             className="min-w-0 flex-1 text-left"
                           >
                             <TaskText text={task.text} done={task.done} reduced={reduced} needle={needle} />
