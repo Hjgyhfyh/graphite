@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { motion } from 'motion/react';
 import type { Variants } from 'motion/react';
 import { ArrowUpRight, Hash, RotateCw, Search, SearchX, Tags, Unplug, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import { cx } from '@graphite/ui';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
 import { titleFromRef } from '../../stores/tabsStore';
+import { copyTag, copyWikiLink } from '../../lib/wikiLink';
 import { NoteIcon } from '../tree/NoteIcon';
 import {
   Presence,
@@ -171,9 +172,16 @@ function TagChip({ info, weight, selected, reduced, animateLayout, index, onTogg
       whileHover={reduced ? undefined : { y: -3, scale: 1.04 }}
       whileTap={reduced ? undefined : { scale: 0.96, y: -1 }}
       transition={springSnappy}
-      onClick={onToggle}
+      onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          void copyTag(info.tag);
+          return;
+        }
+        onToggle();
+      }}
       aria-pressed={selected}
-      title={`#${info.tag} — ${info.count} ${plural(info.count, 'заметка', 'заметки', 'заметок')}`}
+      title={`#${info.tag} — ${info.count} ${plural(info.count, 'заметка', 'заметки', 'заметок')}. Ctrl — скопировать`}
       className={cx(
         'flex select-none items-center gap-[0.45em] rounded-full border font-medium leading-none',
         'transition-[box-shadow,border-color,background-color,color] duration-200',
@@ -266,22 +274,34 @@ function TagNotesPanel({ info, notes, reduced, onClose }: TagNotesPanelProps) {
     >
       <div className="flex h-full flex-col" style={{ width: PANEL_WIDTH }}>
         <div className="flex items-center gap-2.5 border-b border-stroke-0 px-4 py-3">
-          <span
-            className="flex size-7 shrink-0 items-center justify-center rounded-s border"
-            style={{
-              color,
-              backgroundColor: `color-mix(in srgb, ${color} 16%, var(--bg-2))`,
-              borderColor: `color-mix(in srgb, ${color} 38%, var(--stroke-0))`,
+          <button
+            type="button"
+            onClick={(event) => {
+              if (event.ctrlKey || event.metaKey) {
+                event.preventDefault();
+                void copyTag(info.tag);
+              }
             }}
+            title={`Ctrl — скопировать #${info.tag}`}
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-s text-left outline-none hover:bg-bg-2/80"
           >
-            <Hash size={14} strokeWidth={2.25} aria-hidden />
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-ui font-medium text-text-0">#{info.tag}</span>
-            <span className="text-micro text-text-3">
-              {notes.length} {plural(notes.length, 'заметка', 'заметки', 'заметок')}
+            <span
+              className="flex size-7 shrink-0 items-center justify-center rounded-s border"
+              style={{
+                color,
+                backgroundColor: `color-mix(in srgb, ${color} 16%, var(--bg-2))`,
+                borderColor: `color-mix(in srgb, ${color} 38%, var(--stroke-0))`,
+              }}
+            >
+              <Hash size={14} strokeWidth={2.25} aria-hidden />
             </span>
-          </div>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-ui font-medium text-text-0">#{info.tag}</span>
+              <span className="text-micro text-text-3">
+                {notes.length} {plural(notes.length, 'заметка', 'заметки', 'заметок')}
+              </span>
+            </span>
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -307,8 +327,15 @@ function TagNotesPanel({ info, notes, reduced, onClose }: TagNotesPanelProps) {
                 <motion.li key={note.ref} custom={index} variants={reduced ? reducedFadeVariants : noteItemVariants}>
                   <button
                     type="button"
-                    onClick={() => jumpToNote(note.ref)}
-                    title={refToPath(note.ref) ?? note.title}
+                    onClick={(event) => {
+                      if (event.ctrlKey || event.metaKey) {
+                        event.preventDefault();
+                        void copyWikiLink(note.ref);
+                        return;
+                      }
+                      jumpToNote(note.ref);
+                    }}
+                    title={`${refToPath(note.ref) ?? note.title}. Ctrl — скопировать ссылку`}
                     className="group flex w-full items-center gap-2.5 rounded-m px-2.5 py-2 text-left transition-colors duration-[120ms] hover:bg-bg-2"
                   >
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-s border border-stroke-0 bg-bg-2 text-text-2">
@@ -496,6 +523,14 @@ export function TagsView() {
 
   const onInputKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        const first = filtered[0];
+        if (first !== undefined) {
+          event.preventDefault();
+          void copyTag(first.tag);
+        }
+        return;
+      }
       if (event.key === 'Enter') {
         const first = filtered[0];
         if (first !== undefined) {

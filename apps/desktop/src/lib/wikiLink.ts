@@ -28,11 +28,22 @@ function titleOf(ref: NoteRef): string {
 }
 
 export async function copyWikiLink(ref: NoteRef, heading?: string): Promise<void> {
-  const text = wikiLinkMarkup(titleOf(ref), heading);
+  await copyMarkup(wikiLinkMarkup(titleOf(ref), heading), 'Не удалось скопировать ссылку');
+}
+
+export async function copyTag(tag: string): Promise<void> {
+  const name = tag.trim().replace(/^#+/, '');
+  if (name.length === 0) {
+    return;
+  }
+  await copyMarkup(`#${name}`, 'Не удалось скопировать тег');
+}
+
+async function copyMarkup(text: string, fail: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
     useUiStore.getState().pushToast({ kind: 'success', text: `Скопировано ${text}` });
   } catch {
-    useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось скопировать ссылку' });
+    useUiStore.getState().pushToast({ kind: 'error', text: fail });
   }
 }
