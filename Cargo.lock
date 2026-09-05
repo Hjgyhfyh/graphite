@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "graphite-app"
-version = "1.41.0"
+version = "1.42.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "graphite-mcp"
-version = "1.41.0"
+version = "1.42.0"
 dependencies = [
  "rmcp",
  "rpc",
@@ -1867,7 +1867,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "history"
-version = "1.41.0"
+version = "1.42.0"
 dependencies = [
  "blake3",
  "rpc",
@@ -3559,7 +3559,7 @@ dependencies = [
 
 [[package]]
 name = "rpc"
-version = "1.41.0"
+version = "1.42.0"
 dependencies = [
  "anyhow",
  "interprocess",
@@ -4282,7 +4282,7 @@ dependencies = [
 
 [[package]]
 name = "sync-core"
-version = "1.41.0"
+version = "1.42.0"
 dependencies = [
  "chrono",
  "hex",
@@ -5398,7 +5398,7 @@ dependencies = [
 
 [[package]]
 name = "vault-core"
-version = "1.41.0"
+version = "1.42.0"
 dependencies = [
  "blake3",
  "comrak",

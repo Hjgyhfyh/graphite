@@ -765,6 +765,12 @@ function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
         if (consumeTreeDropClick()) {
           return;
         }
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          void copyWikiLink(node.data.isFolder ? folderNoteRef(node.data) : node.data.ref);
+          return;
+        }
         node.handleClick(event);
       }}
       onFocus={(event) => event.stopPropagation()}
@@ -772,7 +778,12 @@ function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
         if (node.isEditing) {
           return;
         }
-        if (
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.nativeEvent.stopImmediatePropagation();
+          void copyWikiLink(node.data.isFolder ? folderNoteRef(node.data) : node.data.ref);
+        } else if (
           event.key === 'Enter' &&
           !event.altKey &&
           !event.ctrlKey &&
@@ -797,6 +808,7 @@ function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
         }
       }}
       className="flex items-center px-1 outline-none"
+      title="Клик — открыть · Ctrl — скопировать ссылку"
     >
       {children}
     </div>
@@ -828,7 +840,15 @@ function PinnedRow({ item }: { item: PinnedItem }) {
         >
           <button
             type="button"
-            onClick={() => ctx.openNote(item.ref)}
+            title="Клик — открыть · Ctrl — скопировать ссылку"
+            onClick={(event) => {
+              if (event.ctrlKey || event.metaKey) {
+                event.preventDefault();
+                void copyWikiLink(item.ref);
+                return;
+              }
+              ctx.openNote(item.ref);
+            }}
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
           >
             <NoteIcon
