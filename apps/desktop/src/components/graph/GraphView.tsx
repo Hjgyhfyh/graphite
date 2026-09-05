@@ -9,6 +9,7 @@ import { Button, Switch, Tooltip, cx, easePoints } from '@graphite/ui';
 import { Fade, Presence, SlideUp, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { copyWikiLink } from '../../lib/wikiLink';
 import { resolveIconColor } from '../tree/NoteIcon';
 import { egoSubgraph } from '../../lib/graphEgo';
 import { GraphFind } from './GraphFind';
@@ -1112,8 +1113,15 @@ export function GraphView() {
         nd.fx = null;
         nd.fy = null;
         if (!done.moved) {
+          if (ev.ctrlKey || ev.metaKey) {
+            void copyWikiLink(nd.ref);
+            return;
+          }
           useVaultStore.getState().openNote(nd.ref);
-          useUiStore.getState().setRailView('tree');
+          // В окрестности остаёмся на графе — соседи переедут вместе с заметкой.
+          if (!localModeRef.current) {
+            useUiStore.getState().setRailView('tree');
+          }
           return;
         }
         if (!reducedRef.current) {
@@ -1429,7 +1437,8 @@ export function GraphView() {
                   <span className="truncate text-ui font-medium text-text-0">{hoverMeta.title}</span>
                 </span>
                 <span className="text-micro text-text-2">
-                  {hoverMeta.degree} {plural(hoverMeta.degree, 'связь', 'связи', 'связей')} · клик — открыть
+                  {hoverMeta.degree} {plural(hoverMeta.degree, 'связь', 'связи', 'связей')} ·{' '}
+                  {localMode ? 'клик — окрестность' : 'клик — открыть'} · Ctrl — скопировать ссылку
                 </span>
               </motion.div>
             </div>
@@ -1450,7 +1459,7 @@ export function GraphView() {
         {hasGraph && stats.edges > 0 ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-6">
             <span className="animate-fade-in rounded-full border border-stroke-0 bg-bg-1/75 px-3 py-1 text-micro text-text-3 backdrop-blur-sm">
-              Колесо — масштаб · Перетаскивание — панорама · Двойной клик — вписать · Поиск — подлететь
+              Колесо — масштаб · Перетаскивание — панорама · Двойной клик — вписать · Ctrl+клик — ссылка
             </span>
           </div>
         ) : null}
