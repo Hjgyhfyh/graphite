@@ -31,6 +31,7 @@ import {
   Import,
   LayoutTemplate,
   Link2,
+  Network,
   Palette,
   Pencil,
   Pin,
@@ -625,6 +626,11 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
                     label="Скопировать вики-ссылку"
                     onSelect={() => void copyWikiLink(data.ref)}
                   />
+                  <MenuItem
+                    icon={Network}
+                    label="Показать на графе"
+                    onSelect={() => useUiStore.getState().revealOnGraph(data.ref)}
+                  />
                 </>
               ) : null}
               <MenuSeparator />
@@ -669,6 +675,11 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
                 icon={Link2}
                 label="Скопировать вики-ссылку"
                 onSelect={() => void copyWikiLink(data.ref)}
+              />
+              <MenuItem
+                icon={Network}
+                label="Показать на графе"
+                onSelect={() => useUiStore.getState().revealOnGraph(data.ref)}
               />
               <MenuSeparator />
               <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.startRename(node)} />
@@ -803,6 +814,11 @@ function PinnedRow({ item }: { item: PinnedItem }) {
           <MenuItem icon={FileText} label="Открыть" onSelect={() => ctx.openNote(item.ref)} />
           <MenuItem icon={Columns2} label="Открыть в новой панели" onSelect={() => ctx.openInNewPane(item.ref)} />
           <MenuItem icon={Link2} label="Скопировать вики-ссылку" onSelect={() => void copyWikiLink(item.ref)} />
+          <MenuItem
+            icon={Network}
+            label="Показать на графе"
+            onSelect={() => useUiStore.getState().revealOnGraph(item.ref)}
+          />
           <MenuSeparator />
           <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.renameByRef(item.ref)} />
           <MenuItem

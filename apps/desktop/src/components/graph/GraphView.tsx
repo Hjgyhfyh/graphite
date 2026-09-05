@@ -10,6 +10,8 @@ import { Fade, Presence, SlideUp, springSnappy, usePrefersReducedMotion } from '
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { resolveIconColor } from '../tree/NoteIcon';
+import { GraphFind } from './GraphFind';
+import type { GraphCatalogItem } from './GraphFind';
 
 const TAU = Math.PI * 2;
 const MIN_ZOOM = 0.15;
@@ -32,6 +34,7 @@ const SETTLE_TICKS_MAX = 600;
 const PREWARM_TICKS = 60;
 const CLICK_SLOP_PX = 4;
 const GRID_WORLD_STEP = 64;
+const PULSE_MS = 1800;
 
 interface SimNode {
   ref: NoteRef;
@@ -86,6 +89,8 @@ interface Engine {
   camTarget: CameraFit | null;
   hover: number;
   dim: number;
+  pinned: number;
+  pulseUntil: number;
   autoFit: boolean;
   interacted: boolean;
   w: number;
@@ -178,6 +183,8 @@ function createEngine(): Engine {
     camTarget: null,
     hover: -1,
     dim: 0,
+    pinned: -1,
+    pulseUntil: 0,
     autoFit: true,
     interacted: false,
     w: 1,
@@ -439,6 +446,8 @@ function buildEngine(e: Engine, data: GraphData): void {
   e.labelOrder = nodes.map((_, i) => i).sort((p, q) => nodes[q].degree - nodes[p].degree);
   e.hover = -1;
   e.dim = 0;
+  e.pinned = -1;
+  e.pulseUntil = 0;
   e.camTarget = null;
   if (!e.interacted) {
     e.autoFit = true;
@@ -473,6 +482,12 @@ function computeFit(e: Engine): CameraFit | null {
   return { k, tx: e.w / 2 - cx0 * k, ty: e.h / 2 - cy0 * k };
 }
 
+function computeNodeFit(e: Engine, idx: number): CameraFit {
+  const nd = e.nodes[idx];
+  const k = clamp(Math.min(e.w / 220, e.h / 180, MAX_ZOOM), 1.15, 2.6);
+  return { k, tx: e.w / 2 - nd.x * k, ty: e.h / 2 - nd.y * k };
+}
+
 function drawScene(e: Engine, ctx: CanvasRenderingContext2D, labelsOn: boolean): void {
   const { w, h, dpr, k, tx, ty, theme, nodes, edges } = e;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -500,6 +515,9 @@ function drawScene(e: Engine, ctx: CanvasRenderingContext2D, labelsOn: boolean):
 
   const hover = e.hover;
   const dim = e.dim;
+  const now = performance.now();
+  const pulsing = e.pulseUntil > now;
+  const pulse = pulsing ? 0.5 + 0.5 * Math.sin(now / 130) : 0;
   let litSet: Set<number> | null = null;
   if (hover >= 0 && hover < nodes.length) {
     litSet = new Set(e.adjacency[hover]);
@@ -608,6 +626,24 @@ function drawScene(e: Engine, ctx: CanvasRenderingContext2D, labelsOn: boolean):
       ctx.arc(sx, sy, sr + 3 + 2 * dim, 0, TAU);
       ctx.stroke();
     }
+    if (i === e.pinned) {
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr + 5, 0, TAU);
+      ctx.stroke();
+    }
+    if (pulsing && i === hover) {
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 0.28 + 0.5 * pulse;
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr + 7 + 8 * pulse, 0, TAU);
+      ctx.stroke();
+    }
   }
 
   // Подписи: приоритет хабам, мелкие скрываются при отдалении, ховер-кластер подписан всегда.
@@ -678,8 +714,11 @@ function StateCard({ icon: Icon, title, text, children }: StateCardProps) {
 
 export function GraphView() {
   const reduced = usePrefersReducedMotion();
+  const currentRef = useVaultStore((s) => s.currentRef);
+  const pendingGraphFocus = useUiStore((s) => s.pendingGraphFocus);
   const [status, setStatus] = useState<ViewStatus>('loading');
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
+  const [catalog, setCatalog] = useState<GraphCatalogItem[]>([]);
   const [labelsOn, setLabelsOn] = useState(true);
   const [hoverMeta, setHoverMeta] = useState<HoverMeta | null>(null);
   const [slowLoad, setSlowLoad] = useState(false);
@@ -690,8 +729,15 @@ export function GraphView() {
   const tooltipTransformRef = useRef('translate3d(-9999px, -9999px, 0)');
   const reducedRef = useRef(reduced);
   const labelsOnRef = useRef(labelsOn);
-  const apiRef = useRef<{ requestFrame(): void; reload(): void } | null>(null);
+  const currentRefLive = useRef(currentRef);
+  const apiRef = useRef<{
+    requestFrame(): void;
+    reload(): void;
+    focusRef(ref: NoteRef): boolean;
+    markPinned(ref: NoteRef | undefined): void;
+  } | null>(null);
 
+  currentRefLive.current = currentRef;
   reducedRef.current = reduced;
   labelsOnRef.current = labelsOn;
 
@@ -854,6 +900,10 @@ export function GraphView() {
         engine.dim = dimTarget;
       }
 
+      if (engine.pulseUntil > performance.now()) {
+        active = true;
+      }
+
       drawScene(engine, ctx2d, labelsOnRef.current);
       if (engine.hover >= 0 && engine.hover < engine.nodes.length) {
         placeTooltip(engine.nodes[engine.hover]);
@@ -877,9 +927,29 @@ export function GraphView() {
       requestFrame();
     }
 
+    function applyPinned(ref: NoteRef | undefined): void {
+      engine.pinned = ref === undefined ? -1 : engine.nodes.findIndex((node) => node.ref === ref);
+      requestFrame();
+    }
+
+    function focusNode(ref: NoteRef): boolean {
+      const idx = engine.nodes.findIndex((node) => node.ref === ref);
+      if (idx < 0) {
+        return false;
+      }
+      engine.interacted = true;
+      engine.autoFit = false;
+      engine.camTarget = computeNodeFit(engine, idx);
+      engine.pulseUntil = reducedRef.current ? 0 : performance.now() + PULSE_MS;
+      setHover(idx);
+      requestFrame();
+      return true;
+    }
+
     async function load(): Promise<void> {
       if (!isTauriAvailable()) {
         if (!disposed) {
+          setCatalog([]);
           setStatus('offline');
         }
         return;
@@ -898,11 +968,14 @@ export function GraphView() {
         if (!engine.interacted) {
           jumpFit();
         }
+        applyPinned(currentRefLive.current);
+        setCatalog(engine.nodes.map((node) => ({ ref: node.ref, title: node.title })));
         setStats({ nodes: engine.nodes.length, edges: engine.edges.length });
         setStatus('ready');
         requestFrame();
       } catch {
         if (!disposed) {
+          setCatalog([]);
           setStatus('error');
         }
       }
@@ -1101,6 +1174,8 @@ export function GraphView() {
       reload: () => {
         void load();
       },
+      focusRef: focusNode,
+      markPinned: applyPinned,
     };
     void load();
 
@@ -1121,6 +1196,24 @@ export function GraphView() {
       canvas.removeEventListener('dblclick', onDblClick);
     };
   }, []);
+
+  useEffect(() => {
+    apiRef.current?.markPinned(currentRef);
+  }, [currentRef]);
+
+  useEffect(() => {
+    if (status !== 'ready' || pendingGraphFocus === undefined) {
+      return;
+    }
+    const ok = apiRef.current?.focusRef(pendingGraphFocus) === true;
+    useUiStore.getState().consumeGraphFocus();
+    if (!ok) {
+      useUiStore.getState().pushToast({
+        kind: 'info',
+        text: 'Этой заметки нет на графе',
+      });
+    }
+  }, [status, pendingGraphFocus]);
 
   const rebuild = useCallback(() => {
     apiRef.current?.reload();
@@ -1184,7 +1277,18 @@ export function GraphView() {
             </span>
           ) : null}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {hasGraph ? (
+            <GraphFind
+              catalog={catalog}
+              currentRef={currentRef}
+              onFocus={(ref) => {
+                if (apiRef.current?.focusRef(ref) !== true) {
+                  useUiStore.getState().pushToast({ kind: 'info', text: 'Этой заметки нет на графе' });
+                }
+              }}
+            />
+          ) : null}
           <label className="flex cursor-pointer select-none items-center gap-2 text-caption text-text-2">
             <Switch checked={labelsOn} onCheckedChange={setLabelsOn} aria-label="Показывать подписи узлов" />
             Подписи
@@ -1244,7 +1348,7 @@ export function GraphView() {
         {hasGraph && stats.edges > 0 ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-6">
             <span className="animate-fade-in rounded-full border border-stroke-0 bg-bg-1/75 px-3 py-1 text-micro text-text-3 backdrop-blur-sm">
-              Колесо — масштаб · Перетаскивание — панорама · Двойной клик — вписать
+              Колесо — масштаб · Перетаскивание — панорама · Двойной клик — вписать · Поиск — подлететь
             </span>
           </div>
         ) : null}

@@ -9,6 +9,7 @@ export type ActionId =
   | 'view.tasks'
   | 'view.brief'
   | 'view.today'
+  | 'view.graphFocus'
   | 'settings.open'
   | 'nav.back'
   | 'nav.forward'
@@ -64,6 +65,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'view.tasks', title: 'Задачи', group: 'Навигация' },
   { id: 'view.brief', title: 'Бриф для Claude (идея → задание)', group: 'Навигация' },
   { id: 'view.today', title: 'Сегодня в дневнике', group: 'Навигация' },
+  { id: 'view.graphFocus', title: 'Показать текущую заметку на графе', group: 'Навигация' },
   { id: 'settings.open', title: 'Настройки', group: 'Навигация' },
   { id: 'nav.back', title: 'Назад', group: 'Навигация' },
   { id: 'nav.forward', title: 'Вперёд', group: 'Навигация' },
@@ -112,6 +114,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'view.tasks': ['Ctrl+Shift+T'],
   'view.brief': ['Ctrl+Shift+B'],
   'view.today': ['Ctrl+Shift+J'],
+  'view.graphFocus': ['Ctrl+Shift+G'],
   'settings.open': ['Ctrl+Comma'],
   'nav.back': ['Alt+Left'],
   'nav.forward': ['Alt+Right'],

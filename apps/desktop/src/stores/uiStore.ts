@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { NoteRef } from '@graphite/bindings';
 import type { Theme } from '../theme';
 import { applyTheme, isTheme } from '../theme';
 import { todayYmd } from '../lib/dailyDoc';
@@ -85,6 +86,7 @@ export interface UiStore {
   pendingSearch: string | undefined;
   journalDate: string | undefined;
   pendingTreeReveal: string | undefined;
+  pendingGraphFocus: NoteRef | undefined;
   floatingCaptureOpen: boolean;
   onboardingDone: boolean;
   toasts: Toast[];
@@ -119,6 +121,8 @@ export interface UiStore {
   consumeJournalDate(): string | undefined;
   requestTreeReveal(id: string): void;
   consumeTreeReveal(): string | undefined;
+  revealOnGraph(ref: NoteRef): void;
+  consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
   setOnboardingDone(done: boolean): void;
@@ -202,6 +206,7 @@ export const useUiStore = create<UiStore>()(
       pendingSearch: undefined,
       journalDate: undefined,
       pendingTreeReveal: undefined,
+      pendingGraphFocus: undefined,
       floatingCaptureOpen: false,
       onboardingDone: false,
       toasts: [],
@@ -331,6 +336,20 @@ export const useUiStore = create<UiStore>()(
           set({ pendingTreeReveal: undefined });
         }
         return id;
+      },
+      revealOnGraph: (ref) => {
+        set({
+          pendingGraphFocus: ref,
+          railView: 'graph',
+          focusMode: false,
+        });
+      },
+      consumeGraphFocus: () => {
+        const ref = get().pendingGraphFocus;
+        if (ref !== undefined) {
+          set({ pendingGraphFocus: undefined });
+        }
+        return ref;
       },
       setFloatingCaptureOpen: (open) => {
         set({ floatingCaptureOpen: open });

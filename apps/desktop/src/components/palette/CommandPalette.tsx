@@ -12,6 +12,7 @@ import {
   HardDrive,
   History,
   Loader,
+  Network,
   PlugZap,
   Palette,
   Search,
@@ -50,6 +51,21 @@ const VIEW_ACTIONS: readonly PaletteAction[] = [
     icon: CalendarDays,
     run: () => {
       useUiStore.getState().openJournalDay();
+    },
+  },
+  {
+    id: 'graph.focusCurrent',
+    title: 'Показать текущую заметку на графе',
+    icon: Network,
+    run: () => {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        const ui = useUiStore.getState();
+        ui.setFocusMode(false);
+        ui.setRailView('graph');
+        return;
+      }
+      useUiStore.getState().revealOnGraph(ref);
     },
   },
   ...RAIL_DEFAULT_ORDER.map((view) => ({
@@ -287,7 +303,11 @@ export function CommandPalette() {
   const commandMatches = useMemo(
     () =>
       ACTIONS.filter(
-        (action) => action.id !== 'palette.open' && action.id !== 'view.today' && matches(dq, action.title, action.group),
+        (action) =>
+          action.id !== 'palette.open' &&
+          action.id !== 'view.today' &&
+          action.id !== 'view.graphFocus' &&
+          matches(dq, action.title, action.group),
       ),
     [dq],
   );

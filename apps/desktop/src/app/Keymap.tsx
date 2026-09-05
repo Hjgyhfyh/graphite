@@ -24,6 +24,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'view.tasks',
   'view.brief',
   'view.today',
+  'view.graphFocus',
   'sidebar.toggleTree',
   'sidebar.toggleRight',
   'aiFeed.toggle',
@@ -143,6 +144,16 @@ function runBuiltin(id: ActionId): boolean {
     case 'view.today':
       ui.openJournalDay();
       return true;
+    case 'view.graphFocus': {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        ui.setFocusMode(false);
+        ui.setRailView('graph');
+        return true;
+      }
+      ui.revealOnGraph(ref);
+      return true;
+    }
     case 'prompts.history':
       openPromptHistory();
       return true;
