@@ -13,6 +13,8 @@ export type { HtmlRenderOptions } from './htmlExport';
 export { openWikiLinkPicker } from './wikilink';
 export type { WikiLinkItem, WikiLinkSource } from './wikilink';
 export { isWikiFollowClick, snippetFromBody, wikiLinkPreview, wikiNoteTitle } from './wikiHover';
+export { wrapPlainMention } from './wrapMention';
+export type { WikiMentionReplace } from './wrapMention';
 export type { WikiOpenHandler, WikiPreview, WikiPreviewSource } from './wikiHover';
 export { frontmatterHide } from './frontmatterHide';
 export { tagHighlight, findInlineTags, tagAt } from './tagHighlight';

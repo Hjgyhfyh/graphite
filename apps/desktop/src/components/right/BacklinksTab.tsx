@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDownLeft, Inbox, TextQuote } from 'lucide-react';
-import { cx } from '@graphite/ui';
-import { commands } from '@graphite/bindings';
+import { Tooltip, cx } from '@graphite/ui';
+import { commands, isGraphiteError } from '@graphite/bindings';
 import type { LinkIn, NoteRef, RelType } from '@graphite/bindings';
+import { wrapPlainMention } from '@graphite/editor';
 import { springSnappy, usePrefersReducedMotion } from '../../motion';
 import { titleFromRef } from '../../stores/tabsStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { mentionNeedle, pickUnlinkedMentions } from '../../lib/unlinkedMentions';
 import type { MentionHit } from '../../lib/unlinkedMentions';
@@ -37,12 +39,13 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
   const [links, setLinks] = useState<LinkIn[]>([]);
   const [mentions, setMentions] = useState<MentionHit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busyRef, setBusyRef] = useState<NoteRef | undefined>();
   const noteTitle = useMemo(
     () => tree.find((node) => node.ref === noteRef)?.title ?? titleFromRef(noteRef),
     [tree, noteRef],
   );
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let cancelled = false;
     setLinks([]);
     setMentions([]);
@@ -79,6 +82,10 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
     };
   }, [noteRef, noteTitle]);
 
+  useEffect(() => {
+    return load();
+  }, [load]);
+
   const nodeByRef = useMemo(() => {
     const map: Record<NoteRef, { title: string; icon?: string; color?: string }> = {};
     for (const node of tree) {
@@ -90,6 +97,64 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
   const titleOf = (ref: NoteRef): string => nodeByRef[ref]?.title ?? titleFromRef(ref);
   const iconOf = (ref: NoteRef): { icon?: string; color?: string } =>
     iconByRef[ref] ?? { icon: nodeByRef[ref]?.icon, color: nodeByRef[ref]?.color };
+
+  const linkMention = async (mention: MentionHit) => {
+    const needle = mentionNeedle(noteTitle);
+    if (needle === undefined || busyRef !== undefined) {
+      return;
+    }
+    setBusyRef(mention.ref);
+    try {
+      const apply = async (rev: string, content: string): Promise<boolean> => {
+        const replace = wrapPlainMention(content, needle);
+        if (replace === undefined) {
+          return false;
+        }
+        await commands.noteEdit({
+          ref: mention.ref,
+          rev,
+          ops: [{ op: 'replace', oldString: replace.oldString, newString: replace.newString }],
+        });
+        return true;
+      };
+
+      const read = await commands.noteRead({ ref: mention.ref });
+      let ok = false;
+      try {
+        ok = await apply(read.rev, read.content);
+      } catch (error) {
+        if (!(isGraphiteError(error) && error.code === 'CONFLICT')) {
+          throw error;
+        }
+        const fresh = await commands.noteRead({ ref: mention.ref });
+        ok = await apply(fresh.rev, fresh.content);
+      }
+      if (!ok) {
+        useUiStore.getState().pushToast({
+          kind: 'info',
+          text: 'В тексте нет точного имени — откройте заметку и поставьте [[ссылку]] сами',
+        });
+        return;
+      }
+      setMentions((prev) => prev.filter((item) => item.ref !== mention.ref));
+      setLinks((prev) =>
+        prev.some((edge) => edge.from === mention.ref)
+          ? prev
+          : [{ from: mention.ref, type: 'related' }, ...prev],
+      );
+      useUiStore.getState().pushToast({
+        kind: 'success',
+        text: `Связано из «${titleOf(mention.ref)}»`,
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        kind: 'error',
+        text: isGraphiteError(error) ? error.message : 'Не удалось связать',
+      });
+    } finally {
+      setBusyRef(undefined);
+    }
+  };
 
   const empty = !loading && links.length === 0 && mentions.length === 0;
 
@@ -174,6 +239,7 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
             <AnimatePresence initial={false}>
               {mentions.map((mention) => {
                 const info = iconOf(mention.ref);
+                const busy = busyRef === mention.ref;
                 return (
                   <motion.li
                     key={mention.ref}
@@ -182,11 +248,12 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
                     transition={springSnappy}
+                    className="group flex items-start gap-0.5 rounded-s pr-1 hover:bg-bg-2"
                   >
                     <button
                       type="button"
                       onClick={() => useVaultStore.getState().openNote(mention.ref)}
-                      className="group flex w-full items-start gap-2 rounded-s px-2 py-1.5 text-left outline-none transition-colors duration-[120ms] hover:bg-bg-2"
+                      className="flex min-w-0 flex-1 items-start gap-2 rounded-s px-2 py-1.5 text-left outline-none"
                     >
                       <NoteIcon
                         icon={info.icon}
@@ -203,6 +270,20 @@ export function BacklinksTab({ noteRef }: BacklinksTabProps) {
                         ) : null}
                       </span>
                     </button>
+                    <Tooltip content="Обернуть упоминание в [[вики-ссылку]]" side="left">
+                      <button
+                        type="button"
+                        disabled={busyRef !== undefined}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void linkMention(mention);
+                        }}
+                        className="mt-1 shrink-0 rounded-xs px-1.5 py-0.5 text-micro font-medium text-accent outline-none hover:bg-accent/10 disabled:opacity-45"
+                      >
+                        {busy ? '…' : 'Связать'}
+                      </button>
+                    </Tooltip>
                   </motion.li>
                 );
               })}
