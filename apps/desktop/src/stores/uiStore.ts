@@ -95,6 +95,8 @@ export interface UiStore {
   pendingTag: string | undefined;
   pendingTaskJump: TaskJumpTarget | undefined;
   pendingReadingJump: number | undefined;
+  readingScrollEl: HTMLElement | undefined;
+  readingScrollRef: NoteRef | undefined;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
   onboardingDone: boolean;
@@ -142,6 +144,7 @@ export interface UiStore {
   consumeTaskJump(): TaskJumpTarget | undefined;
   requestReadingJump(line: number): void;
   consumeReadingJump(): number | undefined;
+  bindReadingScroll(noteRef: NoteRef, el: HTMLElement | null): void;
   revealOnGraph(ref: NoteRef): void;
   consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
@@ -237,6 +240,8 @@ export const useUiStore = create<UiStore>()(
       pendingTag: undefined,
       pendingTaskJump: undefined,
       pendingReadingJump: undefined,
+      readingScrollEl: undefined,
+      readingScrollRef: undefined,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
       onboardingDone: false,
@@ -454,6 +459,18 @@ export const useUiStore = create<UiStore>()(
           set({ pendingReadingJump: undefined });
         }
         return line;
+      },
+      bindReadingScroll: (noteRef, el) => {
+        if (el === null) {
+          if (get().readingScrollRef === noteRef) {
+            set({ readingScrollEl: undefined, readingScrollRef: undefined });
+          }
+          return;
+        }
+        if (get().readingScrollEl === el && get().readingScrollRef === noteRef) {
+          return;
+        }
+        set({ readingScrollEl: el, readingScrollRef: noteRef });
       },
       revealOnGraph: (ref) => {
         set({

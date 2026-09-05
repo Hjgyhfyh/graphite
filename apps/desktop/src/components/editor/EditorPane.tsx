@@ -816,6 +816,12 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink, onOpenTa
   );
   const pendingHeading = useUiStore((s) => s.pendingReadingJump);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const noteRefLive = useRef(noteRef);
+  noteRefLive.current = noteRef;
+  const setScroller = useCallback((node: HTMLDivElement | null) => {
+    scrollerRef.current = node;
+    useUiStore.getState().bindReadingScroll(noteRefLive.current, node);
+  }, []);
   const entries = split?.frontmatter.entries;
   const hideTitle = useMemo(() => {
     if (entries === undefined) {
@@ -835,6 +841,13 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink, onOpenTa
   }, [entries, blocks]);
 
   useEffect(() => {
+    useUiStore.getState().bindReadingScroll(noteRef, scrollerRef.current);
+    return () => {
+      useUiStore.getState().bindReadingScroll(noteRef, null);
+    };
+  }, [noteRef]);
+
+  useEffect(() => {
     if (pendingHeading === undefined) {
       return;
     }
@@ -850,7 +863,7 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink, onOpenTa
   return (
     <motion.div
       key="reading"
-      ref={scrollerRef}
+      ref={setScroller}
       className="absolute inset-0 z-10 overflow-y-auto bg-bg-0"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}

@@ -6,7 +6,7 @@ export { parseBlocks, parseInline, parseTableBlock, sweepDoneTasks, sweepLinesDo
 export { trySectionMerge, splitSections } from './sectionMerge';
 export type { MdAlign, MdBlock, MdInline, MdListItem, MdTable, MdTask, SweepDoneResult } from './markdown';
 export { doneFold } from './doneFold';
-export { parseHeadings } from './headings';
+export { parseHeadings, pickActiveIndex } from './headings';
 export type { MdHeading } from './headings';
 export { collectImageTargets, renderBodyHtml } from './htmlExport';
 export type { HtmlRenderOptions } from './htmlExport';

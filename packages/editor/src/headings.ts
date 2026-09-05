@@ -42,6 +42,22 @@ function flattenInline(nodes: readonly MdInline[]): string {
 }
 
 /**
+ * Индекс последнего значения `values[i] <= top` (массив по возрастанию).
+ * Для оглавления: строки заголовков vs верх видимой области, либо offsetTop vs scrollTop.
+ */
+export function pickActiveIndex(values: readonly number[], top: number): number | undefined {
+  let current: number | undefined;
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i] <= top) {
+      current = i;
+    } else {
+      break;
+    }
+  }
+  return current;
+}
+
+/**
  * Сканер заголовков для оглавления: H1–H6 тела документа с номерами строк,
  * пригодными для прыжка курсором. Frontmatter пропускается через смещение
  * `bodyLine`, содержимое fenced-блоков не сканируется, инлайн-разметка в

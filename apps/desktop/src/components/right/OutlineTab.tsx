@@ -6,7 +6,7 @@ import { cx } from '@graphite/ui';
 import { GRAPHITE_EVENT, commands, isTauriAvailable } from '@graphite/bindings';
 import type { NoteChangedEvent, NoteRef } from '@graphite/bindings';
 import { listen } from '@tauri-apps/api/event';
-import { parseHeadings } from '@graphite/editor';
+import { parseHeadings, pickActiveIndex } from '@graphite/editor';
 import type { MdHeading } from '@graphite/editor';
 import { Fade, Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useEditorViewsStore } from '../../stores/editorViewsStore';
@@ -101,33 +101,57 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
 
   const headings = useMemo(() => (doc === undefined ? [] : parseHeadings(doc)), [doc]);
   const minLevel = useMemo(() => headings.reduce((min, h) => Math.min(min, h.level), 6), [headings]);
+  const readingMode = useUiStore((s) => s.readingMode);
+  const readingScrollEl = useUiStore((s) => s.readingScrollEl);
+  const readingScrollRef = useUiStore((s) => s.readingScrollRef);
 
-  // Подсветка текущего раздела: активен последний заголовок над верхней
+  // Подсветка текущего раздела в правке: последний заголовок над верхней
   // видимой строкой редактора.
   useEffect(() => {
-    if (view === undefined) {
-      setActiveLine(undefined);
+    if (readingMode || view === undefined) {
+      if (!readingMode && view === undefined) {
+        setActiveLine(undefined);
+      }
       return;
     }
     const scroller = view.scrollDOM;
     const syncActive = () => {
       const block = view.lineBlockAtHeight(scroller.scrollTop);
       const topLine = view.state.doc.lineAt(block.from).number - 1;
-      let current: number | undefined;
-      for (const heading of headings) {
-        if (heading.line <= topLine) {
-          current = heading.line;
-        } else {
-          break;
-        }
-      }
-      setActiveLine(current);
+      const index = pickActiveIndex(
+        headings.map((heading) => heading.line),
+        topLine,
+      );
+      setActiveLine(index === undefined ? undefined : headings[index].line);
     };
     syncActive();
     scroller.addEventListener('scroll', syncActive, { passive: true });
     return () => scroller.removeEventListener('scroll', syncActive);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, headings]);
+  }, [view, headings, readingMode]);
+
+  // В чтении редактор скрыт — следим за прокруткой статьи (`#gr-h-<строка>`).
+  useEffect(() => {
+    if (!readingMode || readingScrollRef !== noteRef || readingScrollEl === undefined) {
+      return;
+    }
+    const scroller = readingScrollEl;
+    const syncActive = () => {
+      const hostTop = scroller.getBoundingClientRect().top;
+      const top = scroller.scrollTop + 24;
+      const offsets = headings.map((heading) => {
+        const el = scroller.querySelector(`#gr-h-${heading.line}`);
+        if (!(el instanceof HTMLElement)) {
+          return Number.POSITIVE_INFINITY;
+        }
+        return el.getBoundingClientRect().top - hostTop + scroller.scrollTop;
+      });
+      const index = pickActiveIndex(offsets, top);
+      setActiveLine(index === undefined ? undefined : headings[index].line);
+    };
+    syncActive();
+    scroller.addEventListener('scroll', syncActive, { passive: true });
+    return () => scroller.removeEventListener('scroll', syncActive);
+  }, [readingMode, readingScrollEl, readingScrollRef, noteRef, headings]);
 
   const jumpTo = (heading: MdHeading) => {
     if (view === undefined) {
