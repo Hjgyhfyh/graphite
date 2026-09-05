@@ -317,8 +317,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   },
   openNote: (ref) => {
     useTabsStore.getState().open(ref);
-    set({ currentRef: ref });
-    useNavStore.getState().record(ref);
+    if (get().currentRef !== ref) {
+      set({ currentRef: ref });
+      useNavStore.getState().record(ref);
+    }
     const vault = recentsVault(get().info?.root);
     if (vault !== undefined && ref !== WELCOME_NOTE_REF) {
       useRecentsStore.getState().rememberNote(vault, ref);

@@ -330,7 +330,7 @@ function WindowTitleSync() {
     if (!isTauriAvailable()) {
       return;
     }
-    void getCurrentWindow().setTitle(title);
+    void getCurrentWindow().setTitle(title).catch(() => undefined);
   }, [railView, noteTitle, focusMode]);
 
   return null;
@@ -416,12 +416,15 @@ export function AppShell() {
               {focusMode ? null : <Rail />}
             </PanelItem>
             <PanelItem className="flex min-h-0 shrink-0">
+              {/* Arborist не держим в свёрнутой колонке: на полном дереве это ловило React #185. */}
               <CollapsibleColumn open={showSidebar} width={treeWidth} className="relative h-full shrink-0">
-                {railView === 'search' ? (
-                  <SearchPanel width={treeWidth} onWidthChange={setTreeWidth} />
-                ) : (
-                  <TreePanel width={treeWidth} onWidthChange={setTreeWidth} />
-                )}
+                {showSidebar ? (
+                  railView === 'search' ? (
+                    <SearchPanel width={treeWidth} onWidthChange={setTreeWidth} />
+                  ) : (
+                    <TreePanel width={treeWidth} onWidthChange={setTreeWidth} />
+                  )
+                ) : null}
               </CollapsibleColumn>
             </PanelItem>
             <PanelItem className="flex min-h-0 min-w-0 flex-1">

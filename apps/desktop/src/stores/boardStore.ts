@@ -136,7 +136,12 @@ export const useBoardStore = create<BoardStore>()(
           return;
         }
         set((s) => {
-          const next = mutate(s.byVault[vk] ?? defaultBoardConfig());
+          const existing = s.byVault[vk];
+          const current = existing ?? defaultBoardConfig();
+          const next = mutate(current);
+          if (next === current) {
+            return s;
+          }
           const byVault = { ...s.byVault };
           // Конфиг без отличий от дефолта не храним — persist не разрастается.
           if (isDefaultBoardConfig(next)) {
@@ -205,7 +210,13 @@ export const useBoardStore = create<BoardStore>()(
           });
         },
         reorderColumns: (vk, order) => {
-          update(vk, (config) => ({ ...config, order: normalizeOrder(order) }));
+          update(vk, (config) => {
+            const next = normalizeOrder(order);
+            if (next.length === config.order.length && next.every((status, index) => status === config.order[index])) {
+              return config;
+            }
+            return { ...config, order: next };
+          });
         },
         resetBoard: (vk) => {
           update(vk, () => defaultBoardConfig());

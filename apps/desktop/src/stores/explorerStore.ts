@@ -185,6 +185,9 @@ export const useExplorerStore = create<ExplorerStore>()(
       },
       reorderSaved: (ids) => {
         set((s) => {
+          if (s.saved.length === ids.length && s.saved.every((saved, index) => saved.id === ids[index])) {
+            return s;
+          }
           const byId = new Map(s.saved.map((saved) => [saved.id, saved]));
           const next: SavedPath[] = [];
           ids.forEach((id) => {

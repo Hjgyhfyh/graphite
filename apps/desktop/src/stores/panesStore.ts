@@ -82,10 +82,18 @@ export const usePanesStore = create<PanesStore>()((set, get) => ({
     syncCurrentRef(get());
   },
   setActivePane: (id) => {
+    if (get().activePaneId === id) {
+      syncCurrentRef(get());
+      return;
+    }
     set((s) => (s.panes.some((p) => p.id === id) ? { activePaneId: id } : s));
     syncCurrentRef(get());
   },
   setPaneActiveTab: (paneId, tabId) => {
+    const pane = get().panes.find((p) => p.id === paneId);
+    if (pane === undefined || pane.activeTabId === tabId) {
+      return;
+    }
     set((s) => ({
       panes: s.panes.map((p) => (p.id === paneId ? { ...p, activeTabId: tabId } : p)),
     }));

@@ -2,14 +2,14 @@ import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState } f
 import type { ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { CornerDownLeft, PenLine, X } from 'lucide-react';
-import { Kbd, TooltipProvider, cx } from '@graphite/ui';
+import { Button, Kbd, TooltipProvider, cx } from '@graphite/ui';
 import { isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
 import { AppShell } from './app/AppShell';
 import { AppMotionConfig } from './motion';
 import { titleFromRef } from './stores/tabsStore';
 import { useVaultStore } from './stores/vaultStore';
-import { useUiStore } from './stores/uiStore';
+import { useUiStore, recoverUiAfterCrash } from './stores/uiStore';
 import { captureNoteTarget, capturePlaceholder, submitQuickCapture } from './lib/quickCapture';
 import { CaptureDestSwitch } from './components/capture/CaptureDestSwitch';
 
@@ -18,7 +18,54 @@ const EditorPane = lazy(() =>
 );
 
 export function App() {
-  return <AppShell />;
+  return (
+    <AppErrorBoundary>
+      <AppShell />
+    </AppErrorBoundary>
+  );
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+
+  static getDerivedStateFromError(error: unknown): { error: string } {
+    return { error: error instanceof Error ? error.message : 'не удалось отрисовать интерфейс' };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
+    console.error('app render error', error, info);
+    recoverUiAfterCrash();
+  }
+
+  render(): ReactNode {
+    if (this.state.error !== null) {
+      return (
+        <div className="flex h-dvh flex-col items-center justify-center gap-3 bg-bg-0 px-8 text-center text-text-0">
+          <p className="text-h3 text-text-0">Интерфейс не смог открыться</p>
+          <p className="max-w-md text-caption text-text-2">
+            Обычно это сбой отрисовки. Можно открыть проводник или перезапустить окно.
+          </p>
+          <p className="max-w-lg font-mono text-micro text-text-3">{this.state.error}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                recoverUiAfterCrash();
+                this.setState({ error: null });
+              }}
+            >
+              Открыть проводник
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>
+              Перезапустить
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 async function hideSelfWindow(): Promise<void> {

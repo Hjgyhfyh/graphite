@@ -89,7 +89,13 @@ export function RailLayoutEditor() {
       <Reorder.Group
         axis="y"
         values={railOrder}
-        onReorder={(next) => useUiStore.getState().setRailOrder(next)}
+        onReorder={(next) => {
+          const current = useUiStore.getState().railOrder;
+          if (next.length === current.length && next.every((id, index) => id === current[index])) {
+            return;
+          }
+          useUiStore.getState().setRailOrder(next);
+        }}
         className="flex flex-col gap-1.5"
       >
         {railOrder.map((view) => (

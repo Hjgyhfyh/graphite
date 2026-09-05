@@ -194,6 +194,18 @@ function isRailView(value: unknown): value is RailView {
 // Чинит сохранённую раскладку рейки под текущий набор разделов: неизвестные id
 // отбрасываются, дубли схлопываются, недостающие разделы дописываются в конец
 // в дефолтном порядке (новые view будущих версий появляются видимыми).
+export function sameRailLayout(
+  a: { railOrder: readonly RailItemView[]; railHidden: readonly RailItemView[] },
+  b: { railOrder: readonly RailItemView[]; railHidden: readonly RailItemView[] },
+): boolean {
+  return (
+    a.railOrder.length === b.railOrder.length &&
+    a.railOrder.every((id, index) => id === b.railOrder[index]) &&
+    a.railHidden.length === b.railHidden.length &&
+    a.railHidden.every((id, index) => id === b.railHidden[index])
+  );
+}
+
 export function normalizeRailOrder(
   order: unknown,
   hidden: unknown,
@@ -269,7 +281,10 @@ export const useUiStore = create<UiStore>()(
         set({ railView: v });
       },
       setRailOrder: (order) => {
-        set((s) => normalizeRailOrder(order, s.railHidden));
+        set((s) => {
+          const next = normalizeRailOrder(order, s.railHidden);
+          return sameRailLayout(next, s) ? s : next;
+        });
       },
       toggleRailItemHidden: (view) => {
         set((s) => ({
@@ -600,6 +615,10 @@ export const useUiStore = create<UiStore>()(
     },
   ),
 );
+
+export function recoverUiAfterCrash(): void {
+  useUiStore.setState({ railView: 'explorer', focusMode: false, sidebarHidden: false });
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {

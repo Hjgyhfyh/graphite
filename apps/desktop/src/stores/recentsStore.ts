@@ -225,6 +225,9 @@ export const useRecentsStore = create<RecentsStore>()(
       rememberNote: (vault, ref) => {
         set((s) => {
           const current = slotOf(s.byVault, vault);
+          if (current.notes[0] === ref) {
+            return s;
+          }
           const rest = current.notes.filter((item) => item !== ref);
           return { byVault: writeSlot(s.byVault, vault, { ...current, notes: [ref, ...rest].slice(0, NOTE_CAP) }) };
         });

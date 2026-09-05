@@ -312,6 +312,7 @@ function EmptyState() {
 
 function useElementSize() {
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const lastRef = useRef({ width: 0, height: 0 });
   const observerRef = useRef<ResizeObserver | null>(null);
   const callbackRef = useCallback((el: HTMLDivElement | null) => {
     observerRef.current?.disconnect();
@@ -321,7 +322,12 @@ function useElementSize() {
     }
     const measure = () => {
       const rect = el.getBoundingClientRect();
-      setSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
+      const next = { width: Math.floor(rect.width), height: Math.floor(rect.height) };
+      if (next.width === lastRef.current.width && next.height === lastRef.current.height) {
+        return;
+      }
+      lastRef.current = next;
+      setSize(next);
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -793,7 +799,7 @@ function Row({ node, attrs, innerRef, children }: RowRendererProps<ArNode>) {
           event.preventDefault();
           event.stopPropagation();
           event.nativeEvent.stopImmediatePropagation();
-          if (node.data.isFolder) {
+          if (node.data.virtual === true) {
             node.toggle();
           } else {
             ctx.openNote(node.data.ref);
@@ -1196,7 +1202,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   }, []);
 
   const handleActivate = useCallback((node: NodeApi<ArNode>) => {
-    if (node.data.isFolder) {
+    if (node.data.virtual === true) {
       node.toggle();
       return;
     }
