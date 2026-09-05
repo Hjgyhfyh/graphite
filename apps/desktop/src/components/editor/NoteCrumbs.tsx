@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Tooltip, cx } from '@graphite/ui';
 import type { NoteRef } from '@graphite/bindings';
@@ -16,6 +17,20 @@ export function NoteCrumbs({ noteRef }: { noteRef: NoteRef }) {
     return null;
   }
 
+  const openFolder = (dir: string, ref: NoteRef | undefined) => {
+    revealInTree(treeIdForDir(dir, tree), dir);
+    useVaultStore.getState().openNote(ref ?? folderNoteRef(dir));
+  };
+
+  const onFolderClick = (dir: string, ref: NoteRef | undefined, event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      void copyWikiLink(ref ?? folderNoteRef(dir));
+      return;
+    }
+    openFolder(dir, ref);
+  };
+
   return (
     <nav
       aria-label="Путь заметки"
@@ -23,6 +38,7 @@ export function NoteCrumbs({ noteRef }: { noteRef: NoteRef }) {
     >
       {crumbs.map((crumb, index) => {
         const last = index === crumbs.length - 1;
+        const folderLink = wikiLinkMarkup(crumb.label);
         return (
           <span key={`${crumb.kind}:${crumb.dir ?? crumb.label}:${index}`} className="flex min-w-0 items-center gap-0.5">
             {index > 0 ? (
@@ -39,15 +55,14 @@ export function NoteCrumbs({ noteRef }: { noteRef: NoteRef }) {
                 </button>
               </Tooltip>
             ) : (
-              <Tooltip content="Открыть папку" side="bottom">
+              <Tooltip content={`Открыть папку · Ctrl — скопировать ${folderLink}`} side="bottom">
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(event) => {
                     if (crumb.dir === undefined) {
                       return;
                     }
-                    revealInTree(treeIdForDir(crumb.dir, tree), crumb.dir);
-                    useVaultStore.getState().openNote(crumb.ref ?? folderNoteRef(crumb.dir));
+                    onFolderClick(crumb.dir, crumb.ref, event);
                   }}
                   className={cx(
                     'max-w-[12rem] truncate rounded-xs px-1 py-0.5 text-text-2 transition-colors duration-[120ms]',
