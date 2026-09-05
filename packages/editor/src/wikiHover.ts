@@ -20,6 +20,18 @@ export interface WikiPreview {
 export type WikiPreviewSource = (target: string) => Promise<WikiPreview>;
 export type WikiOpenHandler = (target: string) => void;
 
+/** Имя заметки из цели `[[папка/Имя#якорь|подпись]]` — без пути и якоря. */
+export function wikiNoteTitle(target: string): string {
+  const trimmed = target.trim();
+  if (trimmed.length === 0) {
+    return '';
+  }
+  const hash = trimmed.indexOf('#');
+  const path = hash >= 0 ? trimmed.slice(0, hash) : trimmed;
+  const sep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return (sep >= 0 ? path.slice(sep + 1) : path).trim();
+}
+
 const SKIP_CONTEXT = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText']);
 const WIKI_MARK = Decoration.mark({ class: 'cm-gr-wiki' });
 const WIKI_BRACES = Decoration.mark({ class: 'cm-gr-mark' });
@@ -223,6 +235,7 @@ function wikiHoverTooltip(source: WikiPreviewSource, onOpen?: WikiOpenHandler): 
             if (preview.missing) {
               dom.classList.add('cm-gr-wiki-tip-missing');
               body.textContent = 'Заметка не найдена';
+              hint.textContent = onOpen !== undefined ? 'Создать · клик' : '';
               return;
             }
             body.textContent = preview.snippet.length > 0 ? preview.snippet : 'Пустая заметка';

@@ -280,6 +280,9 @@ export const graphiteDark = EditorView.theme(
     '.cm-gr-wiki-tip-missing .cm-gr-wiki-tip-body': {
       fontStyle: 'italic',
     },
+    '.cm-gr-wiki-tip-missing .cm-gr-wiki-tip-hint': {
+      color: 'var(--accent)',
+    },
     '.cm-gr-wiki-tip-missing .cm-gr-wiki-tip-hint:empty': {
       display: 'none',
     },

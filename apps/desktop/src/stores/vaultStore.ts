@@ -29,6 +29,8 @@ export interface NoteIconInfo {
 
 export interface CreateNoteOptions {
   parent?: NoteRef;
+  /** Создать рядом с этой заметкой (в той же папке), а не как дочернюю. */
+  beside?: NoteRef;
   title?: string;
   type?: NoteType;
 }
@@ -50,7 +52,7 @@ export interface VaultStore {
   flashNote(ref: NoteRef): void;
   applyNoteChanged(e: NoteChangedEvent): void;
   setIndexStatus(s: IndexProgressEvent): void;
-  createNote(opts?: CreateNoteOptions): Promise<void>;
+  createNote(opts?: CreateNoteOptions): Promise<NoteRef | undefined>;
   duplicateNote(ref: NoteRef): Promise<void>;
   createFolder(parent?: NoteRef, title?: string): Promise<NoteRef | undefined>;
   addPathNotes(paths: string[], parent?: NoteRef): Promise<number>;
@@ -363,16 +365,22 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   },
   createNote: async (opts) => {
     try {
+      const parent =
+        opts?.beside !== undefined && opts.beside !== WELCOME_NOTE_REF
+          ? siblingParentRef(opts.beside)
+          : opts?.parent;
       const created = await commands.noteCreate({
         title: opts?.title ?? 'Новая заметка',
-        parent: opts?.parent,
+        parent,
         type: opts?.type,
       });
       await get().loadTree();
       void get().loadInfo();
       get().openNote(created.ref);
+      return created.ref;
     } catch (error) {
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось создать заметку') });
+      return undefined;
     }
   },
   duplicateNote: async (ref) => {

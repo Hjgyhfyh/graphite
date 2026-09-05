@@ -1,7 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { snippetFromBody, wikiLinkAround, wikiLinkAt, wikiLinksInLine, isWikiFollowClick } from '../src/wikiHover';
+import { snippetFromBody, wikiLinkAround, wikiLinkAt, wikiLinksInLine, isWikiFollowClick, wikiNoteTitle } from '../src/wikiHover';
 
 describe('wikiLinksInLine', () => {
   it('находит цель и подпись', () => {
@@ -45,6 +45,14 @@ describe('wikiLinkAround', () => {
     const hit = wikiLinkAround(state, 14);
     expect(hit?.target).toBe('Цель');
     expect(state.sliceDoc(hit?.from ?? 0, hit?.to ?? 0)).toBe('[[Цель]]');
+  });
+});
+
+describe('wikiNoteTitle', () => {
+  it('берёт последний сегмент и отрезает якорь', () => {
+    expect(wikiNoteTitle('  папка/Имя#раздел  ')).toBe('Имя');
+    expect(wikiNoteTitle('Проект')).toBe('Проект');
+    expect(wikiNoteTitle('#только-якорь')).toBe('');
   });
 });
 

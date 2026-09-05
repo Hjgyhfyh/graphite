@@ -42,6 +42,7 @@ import {
   toggleCode,
   toggleInlineFormat,
   toggleTaskOnLine,
+  wikiNoteTitle,
 } from '@graphite/editor';
 import type {
   EditorHandle,
@@ -265,13 +266,15 @@ function WikiLinkChip({
 }) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<WikiPreview | null>(null);
+  const tree = useVaultStore((s) => s.tree);
+  const missing = useMemo(() => resolveWikiTarget(target) === undefined, [target, tree]);
 
   return (
     <span
       className="relative inline"
       onMouseEnter={() => {
         setOpen(true);
-        if (preview === null) {
+        if (preview === null || preview.missing) {
           void loadWikiPreview(target).then(setPreview);
         }
       }}
@@ -280,7 +283,10 @@ function WikiLinkChip({
       <button
         type="button"
         onClick={() => onOpen(target)}
-        className="rounded-xs text-accent underline decoration-accent/40 underline-offset-2 transition-colors hover:decoration-accent"
+        className={cx(
+          'rounded-xs text-accent underline underline-offset-2 transition-colors',
+          missing ? 'decoration-accent/35 decoration-dashed hover:decoration-accent' : 'decoration-accent/40 hover:decoration-accent',
+        )}
       >
         {label}
       </button>
@@ -298,7 +304,9 @@ function WikiLinkChip({
           <span className={cx('line-clamp-4 text-caption leading-relaxed text-text-2', preview.missing && 'italic')}>
             {preview.missing ? 'Заметка не найдена' : preview.snippet.length > 0 ? preview.snippet : 'Пустая заметка'}
           </span>
-          <span className="text-micro text-text-3">Открыть · клик</span>
+          <span className={cx('text-micro', preview.missing ? 'text-accent' : 'text-text-3')}>
+            {preview.missing ? 'Создать · клик' : 'Открыть · клик'}
+          </span>
         </span>
       ) : open && preview === null ? (
         <span
@@ -1144,6 +1152,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const savingRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const dragPathsRef = useRef<string[]>([]);
+  const creatingWikiRef = useRef(false);
 
   const setDirty = useTabsStore((s) => s.setDirty);
   const readingMode = useUiStore((s) => s.readingMode);
@@ -1378,14 +1387,36 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
     return scored.slice(0, 40).map((entry) => entry.item);
   }, []);
 
-  const openLink = useCallback((target: string) => {
-    const hit = resolveWikiTarget(target);
-    if (hit !== undefined) {
-      useVaultStore.getState().openNote(hit.ref);
-    } else {
-      useUiStore.getState().pushToast({ kind: 'info', text: `Заметка «${target}» пока не найдена` });
-    }
-  }, []);
+  const openLink = useCallback(
+    (target: string) => {
+      const hit = resolveWikiTarget(target);
+      if (hit !== undefined) {
+        useVaultStore.getState().openNote(hit.ref);
+        return;
+      }
+      const title = wikiNoteTitle(target);
+      if (title.length === 0) {
+        useUiStore.getState().pushToast({ kind: 'info', text: `Заметка «${target}» пока не найдена` });
+        return;
+      }
+      if (creatingWikiRef.current) {
+        return;
+      }
+      creatingWikiRef.current = true;
+      void useVaultStore
+        .getState()
+        .createNote({ title, beside: isWelcome ? undefined : noteRef })
+        .then((ref) => {
+          if (ref !== undefined) {
+            useUiStore.getState().pushToast({ kind: 'success', text: `Создана «${title}»` });
+          }
+        })
+        .finally(() => {
+          creatingWikiRef.current = false;
+        });
+    },
+    [isWelcome, noteRef],
+  );
 
   const openTag = useCallback((tag: string) => {
     useUiStore.getState().openTag(tag);
