@@ -9,6 +9,8 @@ import type { TaskFilter } from '../../stores/tasksStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
 import { titleFromRef } from '../../stores/tabsStore';
+import { vaultKey } from '../../stores/vaultsStore';
+import { useRecentsStore } from '../../stores/recentsStore';
 import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
 import { filterNeedle, highlightNameParts, nameMatchesFilter } from '../../lib/treeFilter';
 import {
@@ -282,15 +284,42 @@ export function TasksView() {
   const loadTasks = useTasksStore((s) => s.loadTasks);
   const tree = useVaultStore((s) => s.tree);
   const childrenByRef = useVaultStore((s) => s.childrenByRef);
+  const vaultRoot = useVaultStore((s) => s.info?.root);
   const reduced = usePrefersReducedMotion();
   const [query, setQuery] = useState('');
   const filterRef = useRef<HTMLInputElement>(null);
+  const hydratedVaultRef = useRef<string | undefined>(undefined);
   const pendingTasksFilter = useUiStore((s) => s.pendingTasksFilter);
   const filterBinding = useKeybindingsStore((s) => s.bindings['tasks.filter']);
+  const recentsVault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
 
   useEffect(() => {
-    void loadTasks();
-  }, [loadTasks]);
+    if (recentsVault === undefined) {
+      void loadTasks();
+      return;
+    }
+    if (hydratedVaultRef.current === recentsVault) {
+      return;
+    }
+    hydratedVaultRef.current = recentsVault;
+    setQuery(useRecentsStore.getState().taskQueryOf(recentsVault));
+    const saved = useRecentsStore.getState().taskFilterOf(recentsVault);
+    if (useTasksStore.getState().filter !== saved) {
+      useTasksStore.getState().setFilter(saved);
+    } else {
+      void loadTasks();
+    }
+  }, [recentsVault, loadTasks]);
+
+  useEffect(() => {
+    if (recentsVault === undefined || hydratedVaultRef.current !== recentsVault) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      useRecentsStore.getState().setTaskQuery(recentsVault, query);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, recentsVault]);
 
   useEffect(() => {
     if (!pendingTasksFilter) {
@@ -352,7 +381,12 @@ export function TasksView() {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setFilter(item.id)}
+                  onClick={() => {
+                    setFilter(item.id);
+                    if (recentsVault !== undefined) {
+                      useRecentsStore.getState().setTaskFilter(recentsVault, item.id);
+                    }
+                  }}
                   className={cx(
                     'relative h-7 rounded-s px-2.5 text-ui transition-colors duration-[120ms]',
                     active ? 'text-text-0' : 'text-text-1 hover:text-text-0',

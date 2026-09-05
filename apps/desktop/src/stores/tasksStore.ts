@@ -5,6 +5,10 @@ import { useUiStore } from './uiStore';
 
 export type TaskFilter = 'open' | 'today' | 'overdue' | 'all';
 
+export function hydrateTaskFilter(value: unknown): TaskFilter {
+  return value === 'today' || value === 'overdue' || value === 'all' || value === 'open' ? value : 'open';
+}
+
 export interface TasksStore {
   tasks: TaskHit[];
   filter: TaskFilter;

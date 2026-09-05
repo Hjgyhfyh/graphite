@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { NoteRef } from '@graphite/bindings';
+import { hydrateTaskFilter } from './tasksStore';
+import type { TaskFilter } from './tasksStore';
 
 const QUERY_CAP = 8;
 const NOTE_CAP = 8;
@@ -16,6 +18,10 @@ export interface VaultRecents {
   treeFilter: string;
   /** Фильтр канбана «Поток» — переживает уход с доски и перезапуск. */
   boardFilter: string;
+  /** Текстовый фильтр списка задач. */
+  taskQuery: string;
+  /** Пилюля задач: открытые / сегодня / просрочено / все. */
+  taskFilter: TaskFilter;
 }
 
 export interface RecentsStore {
@@ -28,6 +34,10 @@ export interface RecentsStore {
   treeFilterOf(vault: string): string;
   setBoardFilter(vault: string, query: string): void;
   boardFilterOf(vault: string): string;
+  setTaskQuery(vault: string, query: string): void;
+  taskQueryOf(vault: string): string;
+  setTaskFilter(vault: string, filter: TaskFilter): void;
+  taskFilterOf(vault: string): TaskFilter;
   rememberNote(vault: string, ref: NoteRef): void;
   forgetNote(vault: string, ref: NoteRef): void;
   remapNote(vault: string, oldRef: NoteRef, nextRef: NoteRef): void;
@@ -54,11 +64,9 @@ function emptySlot(): VaultRecents {
     draftQuery: DRAFT_PERSIST_EMPTY,
     treeFilter: DRAFT_PERSIST_EMPTY,
     boardFilter: DRAFT_PERSIST_EMPTY,
+    taskQuery: DRAFT_PERSIST_EMPTY,
+    taskFilter: 'open',
   };
-}
-
-function slotOf(byVault: Record<string, VaultRecents>, vault: string): VaultRecents {
-  return byVault[vault] ?? emptySlot();
 }
 
 function slotIsEmpty(slot: VaultRecents): boolean {
@@ -67,8 +75,14 @@ function slotIsEmpty(slot: VaultRecents): boolean {
     slot.notes.length === 0 &&
     slot.draftQuery.length === 0 &&
     slot.treeFilter.length === 0 &&
-    slot.boardFilter.length === 0
+    slot.boardFilter.length === 0 &&
+    slot.taskQuery.length === 0 &&
+    slot.taskFilter === 'open'
   );
+}
+
+function slotOf(byVault: Record<string, VaultRecents>, vault: string): VaultRecents {
+  return byVault[vault] ?? emptySlot();
 }
 
 function writeSlot(
@@ -106,14 +120,18 @@ function sanitizeRecents(value: unknown): Record<string, VaultRecents> {
     const draftQuery = hydrateDraftQuery(raw.draftQuery);
     const treeFilter = hydrateDraftQuery(raw.treeFilter);
     const boardFilter = hydrateDraftQuery(raw.boardFilter);
+    const taskQuery = hydrateDraftQuery(raw.taskQuery);
+    const taskFilter = hydrateTaskFilter(raw.taskFilter);
     if (
       queries.length > 0 ||
       notes.length > 0 ||
       draftQuery.length > 0 ||
       treeFilter.length > 0 ||
-      boardFilter.length > 0
+      boardFilter.length > 0 ||
+      taskQuery.length > 0 ||
+      taskFilter !== 'open'
     ) {
-      result[vault] = { queries, notes, draftQuery, treeFilter, boardFilter };
+      result[vault] = { queries, notes, draftQuery, treeFilter, boardFilter, taskQuery, taskFilter };
     }
   }
   return result;
@@ -156,6 +174,28 @@ export const useRecentsStore = create<RecentsStore>()(
             return s;
           }
           return { byVault: writeSlot(s.byVault, vault, { ...current, boardFilter }) };
+        });
+      },
+      taskQueryOf: (vault) => get().byVault[vault]?.taskQuery ?? DRAFT_PERSIST_EMPTY,
+      setTaskQuery: (vault, query) => {
+        const taskQuery = hydrateDraftQuery(query);
+        set((s) => {
+          const current = slotOf(s.byVault, vault);
+          if (current.taskQuery === taskQuery) {
+            return s;
+          }
+          return { byVault: writeSlot(s.byVault, vault, { ...current, taskQuery }) };
+        });
+      },
+      taskFilterOf: (vault) => get().byVault[vault]?.taskFilter ?? 'open',
+      setTaskFilter: (vault, filter) => {
+        const taskFilter = hydrateTaskFilter(filter);
+        set((s) => {
+          const current = slotOf(s.byVault, vault);
+          if (current.taskFilter === taskFilter) {
+            return s;
+          }
+          return { byVault: writeSlot(s.byVault, vault, { ...current, taskFilter }) };
         });
       },
       rememberQuery: (vault, query) => {
