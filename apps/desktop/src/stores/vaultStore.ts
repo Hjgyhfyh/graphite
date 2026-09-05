@@ -321,6 +321,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     const vault = recentsVault(get().info?.root);
     if (vault !== undefined && ref !== WELCOME_NOTE_REF) {
       useRecentsStore.getState().rememberNote(vault, ref);
+      useUiStore.getState().setLastNoteRef(ref);
     }
   },
   flashNote: (ref) => {
@@ -484,6 +485,9 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         useRecentsStore.getState().remapNote(vault, ref, nextRef);
       }
       set((s) => ({ currentRef: s.currentRef === ref ? nextRef : s.currentRef }));
+      if (useUiStore.getState().lastNoteRef === ref) {
+        useUiStore.getState().setLastNoteRef(nextRef);
+      }
       await get().loadTree();
     } catch (error) {
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось переименовать') });
@@ -501,6 +505,9 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         useRecentsStore.getState().dropNote(vault, ref);
       }
       set((s) => ({ currentRef: s.currentRef === ref ? undefined : s.currentRef }));
+      if (useUiStore.getState().lastNoteRef === ref) {
+        useUiStore.getState().setLastNoteRef(undefined);
+      }
       await get().loadTree();
       void get().loadInfo();
       useUiStore.getState().pushToast({

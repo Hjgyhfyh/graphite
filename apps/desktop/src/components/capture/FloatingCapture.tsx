@@ -10,7 +10,7 @@ import { useActionHandler } from '../../app/Keymap';
 import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
-import { submitQuickCapture } from '../../lib/quickCapture';
+import { captureNoteTarget, capturePlaceholder, submitQuickCapture } from '../../lib/quickCapture';
 import { CaptureDestSwitch } from './CaptureDestSwitch';
 
 const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
@@ -46,6 +46,9 @@ export function FloatingCapture() {
   const pushToast = useUiStore((s) => s.pushToast);
   const captureDest = useUiStore((s) => s.captureDest);
   const setCaptureDest = useUiStore((s) => s.setCaptureDest);
+  const lastNoteRef = useUiStore((s) => s.lastNoteRef);
+  const currentRef = useVaultStore((s) => s.currentRef);
+  const noteTarget = captureNoteTarget(currentRef ?? lastNoteRef);
   const captureBinding = useKeybindingsStore((s) => s.bindings['capture.quick']);
   const reduced = usePrefersReducedMotion();
 
@@ -100,7 +103,10 @@ export function FloatingCapture() {
     setSaving(true);
     try {
       const dest = useUiStore.getState().captureDest;
-      await submitQuickCapture(body, dest);
+      const target = captureNoteTarget(
+        useVaultStore.getState().currentRef ?? useUiStore.getState().lastNoteRef,
+      );
+      const result = await submitQuickCapture(body, dest, target);
       window.setTimeout(
         () => {
           setOpen(false);
@@ -111,6 +117,15 @@ export function FloatingCapture() {
               kind: 'success',
               text: 'Добавлено в дневник за сегодня',
               action: { label: 'Открыть', run: () => useUiStore.getState().openJournalDay() },
+            });
+          } else if (dest === 'note') {
+            pushToast({
+              kind: 'success',
+              text: 'Дописано в открытую заметку',
+              action: {
+                label: 'Открыть',
+                run: () => useVaultStore.getState().openNote(result.ref),
+              },
             });
           } else {
             pushToast({ kind: 'success', text: 'Записано во «Входящие»' });
@@ -166,7 +181,7 @@ export function FloatingCapture() {
     }
   };
 
-  const canSave = text.trim().length > 0 && !saving;
+  const canSave = text.trim().length > 0 && !saving && (captureDest !== 'note' || noteTarget !== undefined);
 
   const cardInitial = reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 };
   const cardAnimate = saving ? { opacity: 0 } : reduced ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 };
@@ -219,7 +234,11 @@ export function FloatingCapture() {
               >
                 <PenLine size={14} strokeWidth={1.75} className="text-ai" />
                 <span className="text-caption font-medium text-text-1">Быстрая запись</span>
-                <CaptureDestSwitch dest={captureDest} onChange={setCaptureDest} />
+                <CaptureDestSwitch
+                  dest={captureDest}
+                  onChange={setCaptureDest}
+                  noteAvailable={noteTarget !== undefined}
+                />
                 <div className="flex-1" />
                 <button
                   type="button"
@@ -241,11 +260,7 @@ export function FloatingCapture() {
                   onChange={(event) => setText(event.target.value)}
                   onKeyDown={onKeyDown}
                   aria-label="Текст быстрой записи"
-                  placeholder={
-                    captureDest === 'journal'
-                      ? 'Что на уме? Попадёт в сегодняшний дневник.'
-                      : 'Что на уме? Запишется во «Входящие».'
-                  }
+                  placeholder={capturePlaceholder(captureDest)}
                   className="block h-20 w-full resize-none bg-transparent px-3.5 py-3 text-body text-text-0 outline-none placeholder:text-text-3"
                 />
               </motion.div>

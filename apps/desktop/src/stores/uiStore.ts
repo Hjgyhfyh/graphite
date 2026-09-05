@@ -5,6 +5,7 @@ import type { Theme } from '../theme';
 import { applyTheme, isTheme } from '../theme';
 import { todayYmd } from '../lib/dailyDoc';
 import type { CaptureDest } from '../lib/quickCapture';
+import { hydrateCaptureDest } from '../lib/quickCapture';
 import type { TaskJumpTarget } from '../lib/taskJump';
 
 export const TREE_WIDTH_MIN = 240;
@@ -104,6 +105,7 @@ export interface UiStore {
   readingScrollRef: NoteRef | undefined;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
+  lastNoteRef: NoteRef | undefined;
   onboardingDone: boolean;
   toasts: Toast[];
   setRailView(v: RailView): void;
@@ -158,6 +160,7 @@ export interface UiStore {
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
   setCaptureDest(dest: CaptureDest): void;
+  setLastNoteRef(ref: NoteRef | undefined): void;
   setOnboardingDone(done: boolean): void;
   pushToast(t: Omit<Toast, 'id'>): string;
   dismissToast(id: string): void;
@@ -259,6 +262,7 @@ export const useUiStore = create<UiStore>()(
       readingScrollRef: undefined,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
+      lastNoteRef: undefined,
       onboardingDone: false,
       toasts: [],
       setRailView: (v) => {
@@ -520,6 +524,12 @@ export const useUiStore = create<UiStore>()(
       setCaptureDest: (dest) => {
         set({ captureDest: dest });
       },
+      setLastNoteRef: (ref) => {
+        if (get().lastNoteRef === ref) {
+          return;
+        }
+        set({ lastNoteRef: ref });
+      },
       setOnboardingDone: (done) => {
         set({ onboardingDone: done });
       },
@@ -558,6 +568,7 @@ export const useUiStore = create<UiStore>()(
         graphHops: s.graphHops,
         graphLabelsOn: s.graphLabelsOn,
         captureDest: s.captureDest,
+        lastNoteRef: s.lastNoteRef,
         onboardingDone: s.onboardingDone,
       }),
       merge: (persisted, current) => {
@@ -577,7 +588,8 @@ export const useUiStore = create<UiStore>()(
           graphLocalMode: saved.graphLocalMode === true,
           graphHops: hydrateGraphHops(saved.graphHops),
           graphLabelsOn: saved.graphLabelsOn !== false,
-          captureDest: saved.captureDest === 'journal' ? 'journal' : 'inbox',
+          captureDest: hydrateCaptureDest(saved.captureDest),
+          lastNoteRef: typeof saved.lastNoteRef === 'string' && saved.lastNoteRef.length > 0 ? saved.lastNoteRef : undefined,
           theme: isTheme(saved.theme) ? saved.theme : 'default',
           focusMode: saved.focusMode === true,
           typewriter: saved.typewriter !== false,
@@ -595,11 +607,14 @@ if (typeof window !== 'undefined') {
       return;
     }
     try {
-      const parsed = JSON.parse(event.newValue) as { state?: { captureDest?: unknown } };
-      const dest = parsed.state?.captureDest;
-      if (dest === 'inbox' || dest === 'journal') {
-        useUiStore.setState({ captureDest: dest });
-      }
+      const parsed = JSON.parse(event.newValue) as {
+        state?: { captureDest?: unknown; lastNoteRef?: unknown };
+      };
+      const last = parsed.state?.lastNoteRef;
+      useUiStore.setState({
+        captureDest: hydrateCaptureDest(parsed.state?.captureDest),
+        lastNoteRef: typeof last === 'string' && last.length > 0 ? last : undefined,
+      });
     } catch {
       /* битый persist — оставляем текущее */
     }
