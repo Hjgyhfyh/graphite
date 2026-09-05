@@ -4,12 +4,14 @@ import type { Transition } from 'motion/react';
 import { motion } from 'motion/react';
 import { CornerDownLeft, PenLine, X } from 'lucide-react';
 import { Kbd, Tooltip, cx } from '@graphite/ui';
-import { commands, isGraphiteError } from '@graphite/bindings';
+import { isGraphiteError } from '@graphite/bindings';
 import { Presence, REDUCED_CROSSFADE, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useActionHandler } from '../../app/Keymap';
 import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { submitQuickCapture } from '../../lib/quickCapture';
+import { CaptureDestSwitch } from './CaptureDestSwitch';
 
 const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
 const WINDOW_FADE: Transition = { duration: 0.16, ease: EASE_IN };
@@ -42,6 +44,8 @@ export function FloatingCapture() {
   const open = useUiStore((s) => s.floatingCaptureOpen);
   const setOpen = useUiStore((s) => s.setFloatingCaptureOpen);
   const pushToast = useUiStore((s) => s.pushToast);
+  const captureDest = useUiStore((s) => s.captureDest);
+  const setCaptureDest = useUiStore((s) => s.setCaptureDest);
   const captureBinding = useKeybindingsStore((s) => s.bindings['capture.quick']);
   const reduced = usePrefersReducedMotion();
 
@@ -95,13 +99,22 @@ export function FloatingCapture() {
     }
     setSaving(true);
     try {
-      await commands.quickCapture(body);
+      const dest = useUiStore.getState().captureDest;
+      await submitQuickCapture(body, dest);
       window.setTimeout(
         () => {
           setOpen(false);
           setText('');
           setSaving(false);
-          pushToast({ kind: 'success', text: 'Записано во «Входящие»' });
+          if (dest === 'journal') {
+            pushToast({
+              kind: 'success',
+              text: 'Добавлено в дневник за сегодня',
+              action: { label: 'Открыть', run: () => useUiStore.getState().openJournalDay() },
+            });
+          } else {
+            pushToast({ kind: 'success', text: 'Записано во «Входящие»' });
+          }
           void useVaultStore.getState().loadTree();
         },
         reduced ? 90 : 190,
@@ -206,10 +219,7 @@ export function FloatingCapture() {
               >
                 <PenLine size={14} strokeWidth={1.75} className="text-ai" />
                 <span className="text-caption font-medium text-text-1">Быстрая запись</span>
-                <span aria-hidden className="text-text-3">
-                  ·
-                </span>
-                <span className="text-micro text-text-3">Входящие</span>
+                <CaptureDestSwitch dest={captureDest} onChange={setCaptureDest} />
                 <div className="flex-1" />
                 <button
                   type="button"
@@ -231,7 +241,11 @@ export function FloatingCapture() {
                   onChange={(event) => setText(event.target.value)}
                   onKeyDown={onKeyDown}
                   aria-label="Текст быстрой записи"
-                  placeholder="Что на уме? Запишется во «Входящие»."
+                  placeholder={
+                    captureDest === 'journal'
+                      ? 'Что на уме? Попадёт в сегодняшний дневник.'
+                      : 'Что на уме? Запишется во «Входящие».'
+                  }
                   className="block h-20 w-full resize-none bg-transparent px-3.5 py-3 text-body text-text-0 outline-none placeholder:text-text-3"
                 />
               </motion.div>

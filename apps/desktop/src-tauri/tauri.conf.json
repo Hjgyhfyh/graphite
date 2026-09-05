@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Graphite",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "identifier": "com.graphite.app",
   "build": {
     "devUrl": "http://localhost:1420",
@@ -25,7 +25,7 @@
         "url": "index.html?window=capture",
         "title": "Быстрая запись",
         "width": 480,
-        "height": 184,
+        "height": 196,
         "resizable": false,
         "decorations": false,
         "transparent": true,

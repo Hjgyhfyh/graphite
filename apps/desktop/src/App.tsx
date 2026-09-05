@@ -3,12 +3,15 @@ import type { ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode } from '
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { CornerDownLeft, PenLine, X } from 'lucide-react';
 import { Kbd, TooltipProvider, cx } from '@graphite/ui';
-import { commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
+import { isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
 import { AppShell } from './app/AppShell';
 import { AppMotionConfig } from './motion';
 import { titleFromRef } from './stores/tabsStore';
 import { useVaultStore } from './stores/vaultStore';
+import { useUiStore } from './stores/uiStore';
+import { submitQuickCapture } from './lib/quickCapture';
+import { CaptureDestSwitch } from './components/capture/CaptureDestSwitch';
 
 const EditorPane = lazy(() =>
   import('./components/editor/EditorPane').then((module) => ({ default: module.EditorPane })),
@@ -39,6 +42,8 @@ export function CaptureApp() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const captureDest = useUiStore((s) => s.captureDest);
+  const setCaptureDest = useUiStore((s) => s.setCaptureDest);
 
   const focusInput = useCallback(() => {
     const el = textareaRef.current;
@@ -113,7 +118,7 @@ export function CaptureApp() {
     setSaving(true);
     setError(null);
     try {
-      await commands.quickCapture(body);
+      await submitQuickCapture(body, useUiStore.getState().captureDest);
       setText('');
       setSaving(false);
       await hideSelfWindow();
@@ -146,10 +151,9 @@ export function CaptureApp() {
         >
           <PenLine size={14} strokeWidth={1.75} className="pointer-events-none text-ai" />
           <span className="pointer-events-none text-caption font-medium text-text-1">Быстрая запись</span>
-          <span aria-hidden className="pointer-events-none text-text-3">
-            ·
+          <span className="ml-auto">
+            <CaptureDestSwitch dest={captureDest} onChange={setCaptureDest} />
           </span>
-          <span className="pointer-events-none text-micro text-text-3">Входящие</span>
         </header>
 
         <textarea
@@ -159,7 +163,11 @@ export function CaptureApp() {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
           aria-label="Текст быстрой записи"
-          placeholder="Что на уме? Запишется во «Входящие»."
+          placeholder={
+            captureDest === 'journal'
+              ? 'Что на уме? Попадёт в сегодняшний дневник.'
+              : 'Что на уме? Запишется во «Входящие».'
+          }
           className="block min-h-0 w-full flex-1 resize-none bg-transparent px-3.5 py-3 text-body text-text-0 outline-none placeholder:text-text-3"
         />
 

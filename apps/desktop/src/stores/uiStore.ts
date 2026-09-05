@@ -4,6 +4,7 @@ import type { NoteRef } from '@graphite/bindings';
 import type { Theme } from '../theme';
 import { applyTheme, isTheme } from '../theme';
 import { todayYmd } from '../lib/dailyDoc';
+import type { CaptureDest } from '../lib/quickCapture';
 
 export const TREE_WIDTH_MIN = 240;
 export const TREE_WIDTH_MAX = 420;
@@ -88,6 +89,7 @@ export interface UiStore {
   pendingTreeReveal: string | undefined;
   pendingGraphFocus: NoteRef | undefined;
   floatingCaptureOpen: boolean;
+  captureDest: CaptureDest;
   onboardingDone: boolean;
   toasts: Toast[];
   setRailView(v: RailView): void;
@@ -125,6 +127,7 @@ export interface UiStore {
   consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
+  setCaptureDest(dest: CaptureDest): void;
   setOnboardingDone(done: boolean): void;
   pushToast(t: Omit<Toast, 'id'>): string;
   dismissToast(id: string): void;
@@ -182,6 +185,8 @@ export function normalizeRailOrder(
   return { railOrder, railHidden };
 }
 
+const UI_PERSIST_KEY = 'graphite.ui';
+
 export const useUiStore = create<UiStore>()(
   persist(
     (set, get) => ({
@@ -208,6 +213,7 @@ export const useUiStore = create<UiStore>()(
       pendingTreeReveal: undefined,
       pendingGraphFocus: undefined,
       floatingCaptureOpen: false,
+      captureDest: 'inbox',
       onboardingDone: false,
       toasts: [],
       setRailView: (v) => {
@@ -357,6 +363,9 @@ export const useUiStore = create<UiStore>()(
       toggleFloatingCapture: () => {
         set((s) => ({ floatingCaptureOpen: !s.floatingCaptureOpen }));
       },
+      setCaptureDest: (dest) => {
+        set({ captureDest: dest });
+      },
       setOnboardingDone: (done) => {
         set({ onboardingDone: done });
       },
@@ -373,7 +382,7 @@ export const useUiStore = create<UiStore>()(
       },
     }),
     {
-      name: 'graphite.ui',
+      name: UI_PERSIST_KEY,
       partialize: (s) => ({
         railView: s.railView,
         railOrder: s.railOrder,
@@ -391,6 +400,7 @@ export const useUiStore = create<UiStore>()(
         focusMode: s.focusMode,
         typewriter: s.typewriter,
         editorScale: s.editorScale,
+        captureDest: s.captureDest,
         onboardingDone: s.onboardingDone,
       }),
       merge: (persisted, current) => {
@@ -407,6 +417,7 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_DEFAULT,
           ),
           editorScale: hydrateNumber(saved.editorScale, EDITOR_SCALE_MIN, EDITOR_SCALE_MAX, EDITOR_SCALE_DEFAULT),
+          captureDest: saved.captureDest === 'journal' ? 'journal' : 'inbox',
           theme: isTheme(saved.theme) ? saved.theme : 'default',
           focusMode: saved.focusMode === true,
           typewriter: saved.typewriter !== false,
@@ -417,3 +428,20 @@ export const useUiStore = create<UiStore>()(
     },
   ),
 );
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== UI_PERSIST_KEY || event.newValue == null) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(event.newValue) as { state?: { captureDest?: unknown } };
+      const dest = parsed.state?.captureDest;
+      if (dest === 'inbox' || dest === 'journal') {
+        useUiStore.setState({ captureDest: dest });
+      }
+    } catch {
+      /* битый persist — оставляем текущее */
+    }
+  });
+}
