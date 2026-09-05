@@ -5,11 +5,12 @@ import type { LucideIcon } from 'lucide-react';
 import { CircleAlert, Loader2, RefreshCw, Unplug, Waypoints } from 'lucide-react';
 import { commands, isTauriAvailable } from '@graphite/bindings';
 import type { GraphData, NoteRef } from '@graphite/bindings';
-import { Button, Switch, cx, easePoints } from '@graphite/ui';
+import { Button, Switch, Tooltip, cx, easePoints } from '@graphite/ui';
 import { Fade, Presence, SlideUp, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { resolveIconColor } from '../tree/NoteIcon';
+import { egoSubgraph } from '../../lib/graphEgo';
 import { GraphFind } from './GraphFind';
 import type { GraphCatalogItem } from './GraphFind';
 
@@ -720,6 +721,7 @@ export function GraphView() {
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
   const [catalog, setCatalog] = useState<GraphCatalogItem[]>([]);
   const [labelsOn, setLabelsOn] = useState(true);
+  const [localMode, setLocalMode] = useState(false);
   const [hoverMeta, setHoverMeta] = useState<HoverMeta | null>(null);
   const [slowLoad, setSlowLoad] = useState(false);
 
@@ -729,10 +731,12 @@ export function GraphView() {
   const tooltipTransformRef = useRef('translate3d(-9999px, -9999px, 0)');
   const reducedRef = useRef(reduced);
   const labelsOnRef = useRef(labelsOn);
+  const localModeRef = useRef(localMode);
   const currentRefLive = useRef(currentRef);
   const apiRef = useRef<{
     requestFrame(): void;
     reload(): void;
+    applyView(): void;
     focusRef(ref: NoteRef): boolean;
     markPinned(ref: NoteRef | undefined): void;
   } | null>(null);
@@ -740,6 +744,7 @@ export function GraphView() {
   currentRefLive.current = currentRef;
   reducedRef.current = reduced;
   labelsOnRef.current = labelsOn;
+  localModeRef.current = localMode;
 
   useEffect(() => {
     apiRef.current?.requestFrame();
@@ -775,6 +780,7 @@ export function GraphView() {
     let raf = 0;
     let drag: DragState | null = null;
     let lastHover = -1;
+    let cached: GraphData | null = null;
 
     const themeWatch = new MutationObserver(() => {
       engine.theme = readTheme();
@@ -946,7 +952,7 @@ export function GraphView() {
       return true;
     }
 
-    async function load(): Promise<void> {
+    async function load(opts: { fetch?: boolean; refit?: boolean } = {}): Promise<void> {
       if (!isTauriAvailable()) {
         if (!disposed) {
           setCatalog([]);
@@ -954,14 +960,31 @@ export function GraphView() {
         }
         return;
       }
-      setStatus('loading');
+      const refresh = cached === null || opts.fetch === true;
+      if (refresh) {
+        setStatus('loading');
+      }
       try {
-        const data = await commands.graphData();
-        if (disposed) {
+        if (refresh) {
+          cached = await commands.graphData();
+        }
+        if (disposed || cached === null) {
           return;
         }
+        const data = cached;
+        const center = currentRefLive.current;
+        const view =
+          localModeRef.current
+            ? center === undefined
+              ? { nodes: [], edges: [] }
+              : egoSubgraph(data, center, 1)
+            : data;
         setHover(-1);
-        buildEngine(engine, data);
+        buildEngine(engine, view);
+        if (opts.refit === true) {
+          engine.interacted = false;
+          engine.autoFit = true;
+        }
         if (reducedRef.current) {
           settle(engine);
         }
@@ -1172,12 +1195,14 @@ export function GraphView() {
     apiRef.current = {
       requestFrame,
       reload: () => {
-        void load();
+        void load({ fetch: true, refit: true });
+      },
+      applyView: () => {
+        void load({ refit: true });
       },
       focusRef: focusNode,
       markPinned: applyPinned,
     };
-    void load();
 
     return () => {
       disposed = true;
@@ -1200,6 +1225,16 @@ export function GraphView() {
   useEffect(() => {
     apiRef.current?.markPinned(currentRef);
   }, [currentRef]);
+
+  useEffect(() => {
+    apiRef.current?.applyView();
+  }, [localMode]);
+
+  useEffect(() => {
+    if (localMode) {
+      apiRef.current?.applyView();
+    }
+  }, [currentRef, localMode]);
 
   useEffect(() => {
     if (status !== 'ready' || pendingGraphFocus === undefined) {
@@ -1230,7 +1265,22 @@ export function GraphView() {
       </Fade>
     );
   } else if (status === 'ready' && stats.nodes === 0) {
-    overlay = (
+    overlay = localMode ? (
+      <StateCard
+        key="local-empty"
+        icon={Waypoints}
+        title={currentRef === undefined ? 'Нет открытой заметки' : 'Нет окрестности'}
+        text={
+          currentRef === undefined
+            ? 'Откройте заметку — граф покажет её и ближайших соседей по ссылкам.'
+            : 'Этой заметки нет среди узлов графа. Выключите окрестность, чтобы увидеть весь vault.'
+        }
+      >
+        <Button size="sm" onClick={() => setLocalMode(false)}>
+          Весь граф
+        </Button>
+      </StateCard>
+    ) : (
       <StateCard
         key="empty"
         icon={Waypoints}
@@ -1270,6 +1320,9 @@ export function GraphView() {
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 pb-4 pt-6">
         <div className="flex items-baseline gap-3">
           <h1 className="text-h2 text-text-0">Граф</h1>
+          {localMode ? (
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-micro font-medium text-accent">окрестность</span>
+          ) : null}
           {hasGraph ? (
             <span className="animate-fade-in text-caption tabular-nums text-text-3">
               {stats.nodes} {plural(stats.nodes, 'заметка', 'заметки', 'заметок')} · {stats.edges}{' '}
@@ -1289,6 +1342,17 @@ export function GraphView() {
               }}
             />
           ) : null}
+          <Tooltip content="Только открытая заметка и её соседи по [[ссылкам]]" side="bottom">
+            <label className="flex cursor-pointer select-none items-center gap-2 text-caption text-text-2">
+              <Switch
+                checked={localMode}
+                onCheckedChange={setLocalMode}
+                disabled={status === 'offline' || status === 'error'}
+                aria-label="Только окрестность текущей заметки"
+              />
+              Окрестность
+            </label>
+          </Tooltip>
           <label className="flex cursor-pointer select-none items-center gap-2 text-caption text-text-2">
             <Switch checked={labelsOn} onCheckedChange={setLabelsOn} aria-label="Показывать подписи узлов" />
             Подписи
