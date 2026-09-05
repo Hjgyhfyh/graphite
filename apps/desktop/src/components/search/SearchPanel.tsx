@@ -645,6 +645,7 @@ class SearchBoundary extends Component<SearchBoundaryProps, { tripped: boolean }
 }
 
 const QUERY_COMMIT_MS = 1200;
+const DRAFT_COMMIT_MS = 250;
 
 function RecentsIdle({
   onPickQuery,
@@ -748,19 +749,46 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const lastViewRef = useRef<View>('idle');
   const indexBuildingRef = useRef(false);
   const boundaryTrippedRef = useRef(false);
+  const vaultHydratedRef = useRef<string | undefined>(undefined);
+  const skipDraftOnceRef = useRef(false);
   const pendingSearch = useUiStore((s) => s.pendingSearch);
-
-  useEffect(() => {
-    if (pendingSearch === undefined) {
-      return;
-    }
-    setQuery(pendingSearch);
-    useUiStore.getState().consumePendingSearch();
-    window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [pendingSearch]);
-
   const vaultRoot = useVaultStore((s) => s.info?.root);
   const recentsVault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
+
+  // Внешний запрос (бейдж инбокса, палитра) важнее черновика. Черновик
+  // поднимаем один раз на хранилище — иначе уход на дерево обнулял поле.
+  useEffect(() => {
+    if (pendingSearch !== undefined) {
+      setQuery(pendingSearch);
+      useUiStore.getState().consumePendingSearch();
+      skipDraftOnceRef.current = true;
+      if (recentsVault !== undefined) {
+        vaultHydratedRef.current = recentsVault;
+      }
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    if (recentsVault === undefined || vaultHydratedRef.current === recentsVault) {
+      return;
+    }
+    vaultHydratedRef.current = recentsVault;
+    if (skipDraftOnceRef.current) {
+      skipDraftOnceRef.current = false;
+      return;
+    }
+    setQuery(useRecentsStore.getState().draftQueryOf(recentsVault));
+  }, [pendingSearch, recentsVault]);
+
+  useEffect(() => {
+    if (recentsVault === undefined || vaultHydratedRef.current !== recentsVault) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      useRecentsStore.getState().setDraftQuery(recentsVault, query);
+    }, DRAFT_COMMIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [query, recentsVault]);
+
   const parsed = useMemo(() => parseQuery(query), [query]);
   const statusFilter = parsed.filters.status;
   const triage = statusFilter !== undefined ? triageFor(statusFilter) : undefined;

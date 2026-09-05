@@ -4,16 +4,22 @@ import type { NoteRef } from '@graphite/bindings';
 
 const QUERY_CAP = 8;
 const NOTE_CAP = 8;
+export const DRAFT_QUERY_MAX = 200;
+const DRAFT_PERSIST_EMPTY = '';
 
 export interface VaultRecents {
   queries: string[];
   notes: NoteRef[];
+  /** Живой текст поля поиска — переживает уход с панели и перезапуск. */
+  draftQuery: string;
 }
 
 export interface RecentsStore {
   byVault: Record<string, VaultRecents>;
   rememberQuery(vault: string, query: string): void;
   forgetQuery(vault: string, query: string): void;
+  setDraftQuery(vault: string, query: string): void;
+  draftQueryOf(vault: string): string;
   rememberNote(vault: string, ref: NoteRef): void;
   forgetNote(vault: string, ref: NoteRef): void;
   remapNote(vault: string, oldRef: NoteRef, nextRef: NoteRef): void;
@@ -22,12 +28,23 @@ export interface RecentsStore {
   notesOf(vault: string): NoteRef[];
 }
 
+export function hydrateDraftQuery(value: unknown): string {
+  if (typeof value !== 'string') {
+    return DRAFT_PERSIST_EMPTY;
+  }
+  return value.length > DRAFT_QUERY_MAX ? value.slice(0, DRAFT_QUERY_MAX) : value;
+}
+
 function foldQuery(value: string): string {
   return value.trim().toLowerCase().replace(/ё/g, 'е');
 }
 
 function slotOf(byVault: Record<string, VaultRecents>, vault: string): VaultRecents {
-  return byVault[vault] ?? { queries: [], notes: [] };
+  return byVault[vault] ?? { queries: [], notes: [], draftQuery: DRAFT_PERSIST_EMPTY };
+}
+
+function slotIsEmpty(slot: VaultRecents): boolean {
+  return slot.queries.length === 0 && slot.notes.length === 0 && slot.draftQuery.length === 0;
 }
 
 function writeSlot(
@@ -35,7 +52,7 @@ function writeSlot(
   vault: string,
   next: VaultRecents,
 ): Record<string, VaultRecents> {
-  if (next.queries.length === 0 && next.notes.length === 0) {
+  if (slotIsEmpty(next)) {
     const { [vault]: _, ...rest } = byVault;
     return rest;
   }
@@ -62,8 +79,9 @@ function sanitizeRecents(value: unknown): Record<string, VaultRecents> {
           NOTE_CAP,
         )
       : [];
-    if (queries.length > 0 || notes.length > 0) {
-      result[vault] = { queries, notes };
+    const draftQuery = hydrateDraftQuery(raw.draftQuery);
+    if (queries.length > 0 || notes.length > 0 || draftQuery.length > 0) {
+      result[vault] = { queries, notes, draftQuery };
     }
   }
   return result;
@@ -75,6 +93,17 @@ export const useRecentsStore = create<RecentsStore>()(
       byVault: {},
       queriesOf: (vault) => get().byVault[vault]?.queries ?? [],
       notesOf: (vault) => get().byVault[vault]?.notes ?? [],
+      draftQueryOf: (vault) => get().byVault[vault]?.draftQuery ?? DRAFT_PERSIST_EMPTY,
+      setDraftQuery: (vault, query) => {
+        const draftQuery = hydrateDraftQuery(query);
+        set((s) => {
+          const current = slotOf(s.byVault, vault);
+          if (current.draftQuery === draftQuery) {
+            return s;
+          }
+          return { byVault: writeSlot(s.byVault, vault, { ...current, draftQuery }) };
+        });
+      },
       rememberQuery: (vault, query) => {
         const trimmed = query.trim();
         if (trimmed.length < 2) {
