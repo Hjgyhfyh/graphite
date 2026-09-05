@@ -103,10 +103,12 @@ pub fn tasks_query(
             due: task.due.clone(),
             priority: task.priority,
             source: TaskSource {
-                r#ref: NoteRef(format!("id:{}", task.note_id.0)),
+                r#ref: note_ui_ref(owner, &task.note_id.0),
                 anchor: task.anchor.clone(),
             },
-            plan: plan_note_id.map(|id| NoteRef(format!("id:{id}"))),
+            plan: plan_note_id
+                .as_ref()
+                .map(|id| note_ui_ref(note_by_id.get(id), id)),
             stage: task.stage.clone(),
         });
         if hits.len() >= limit {
@@ -214,7 +216,7 @@ pub fn task_check(
             .filter(|t| t.status == TaskStatus::Done)
             .count() as u32;
         progress_by_plan.push(PlanProgressBrief {
-            r#ref: NoteRef(format!("id:{plan_id}")),
+            r#ref: note_ui_ref(Some(meta), plan_id),
             done,
             total,
         });
@@ -251,6 +253,16 @@ pub fn activity_get(
         _ => params,
     };
     history::journal::activity(&journal_dir, params).map_err(super::history::hist_err)
+}
+
+/// Ссылка для UI/вкладок: путь, как в дереве (`path:…`). Иначе клиент не
+/// находит уже открытую вкладку и рисует заголовок «Заметка» (`titleFromRef`
+/// не умеет `id:`). Если пути нет — оставляем стабильный `id:`.
+fn note_ui_ref(meta: Option<&NoteMeta>, fallback_id: &str) -> NoteRef {
+    match meta {
+        Some(m) if !m.path.is_empty() => NoteRef(format!("path:{}", m.path)),
+        _ => NoteRef(format!("id:{fallback_id}")),
+    }
 }
 
 /// Карта `id → метаданные` по всем заметкам индекса.
