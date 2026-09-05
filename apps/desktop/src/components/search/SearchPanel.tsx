@@ -23,10 +23,13 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { commands, isGraphiteError } from '@graphite/bindings';
-import type { NoteType, SearchFilters, SearchHit, SearchParams, Status, TreeNode } from '@graphite/bindings';
+import type { NoteRef, NoteType, SearchFilters, SearchHit, SearchParams, Status, TreeNode } from '@graphite/bindings';
 import { cx } from '@graphite/ui';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
+import { useRecentsStore } from '../../stores/recentsStore';
+import { vaultKey } from '../../stores/vaultsStore';
+import { NoteIcon } from '../tree/NoteIcon';
 import { Fade, Presence, listContainerVariants, listItemVariants, usePrefersReducedMotion } from '../../motion';
 
 export interface SearchPanelProps {
@@ -559,6 +562,89 @@ class SearchBoundary extends Component<SearchBoundaryProps, { tripped: boolean }
   }
 }
 
+const QUERY_COMMIT_MS = 1200;
+
+function RecentsIdle({
+  onPickQuery,
+  onOpenNote,
+}: {
+  onPickQuery: (query: string) => void;
+  onOpenNote: (ref: NoteRef) => void;
+}) {
+  const vaultRoot = useVaultStore((s) => s.info?.root);
+  const tree = useVaultStore((s) => s.tree);
+  const iconByRef = useVaultStore((s) => s.iconByRef);
+  const vault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
+  const queries = useRecentsStore((s) => (vault === undefined ? [] : s.queriesOf(vault)));
+  const noteRefs = useRecentsStore((s) => (vault === undefined ? [] : s.notesOf(vault)));
+
+  const notes = noteRefs
+    .map((ref) => tree.find((node) => node.ref === ref))
+    .filter((node): node is TreeNode => node !== undefined);
+
+  if (queries.length === 0 && notes.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {queries.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="px-2 pb-0.5 text-micro uppercase tracking-wide text-text-3">Недавние запросы</p>
+          {queries.map((item) => (
+            <div key={item} className="group flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => onPickQuery(item)}
+                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-s px-2 py-1.5 text-left transition-colors hover:bg-bg-2"
+              >
+                <Clock size={14} strokeWidth={1.75} className="shrink-0 text-text-3" aria-hidden />
+                <span className="min-w-0 flex-1 truncate font-mono text-caption text-text-1">{item}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={`Убрать запрос «${item}»`}
+                onClick={() => {
+                  if (vault !== undefined) {
+                    useRecentsStore.getState().forgetQuery(vault, item);
+                  }
+                }}
+                className="grid size-6 shrink-0 place-items-center rounded-xs text-text-3 opacity-0 transition-opacity hover:bg-bg-3 hover:text-text-0 group-hover:opacity-100"
+              >
+                <X size={12} strokeWidth={2} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {notes.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="px-2 pb-0.5 text-micro uppercase tracking-wide text-text-3">Недавно открытые</p>
+          {notes.map((node) => {
+            const info = iconByRef[node.ref] ?? { icon: node.icon, color: node.iconColor };
+            return (
+              <button
+                key={node.ref}
+                type="button"
+                onClick={() => onOpenNote(node.ref)}
+                className="flex min-w-0 items-center gap-2.5 rounded-s px-2 py-1.5 text-left transition-colors hover:bg-bg-2"
+              >
+                <NoteIcon
+                  icon={info.icon}
+                  color={info.color}
+                  size={15}
+                  className={info.color === undefined ? 'shrink-0 text-text-2' : 'shrink-0'}
+                />
+                <span className="min-w-0 flex-1 truncate text-caption text-text-1">{node.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -590,7 +676,27 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }, [pendingSearch]);
 
+  const vaultRoot = useVaultStore((s) => s.info?.root);
+  const recentsVault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
   const parsed = useMemo(() => parseQuery(query), [query]);
+
+  useEffect(() => {
+    if (!parsed.hasQuery || phase !== 'ready' || recentsVault === undefined) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      useRecentsStore.getState().rememberQuery(recentsVault, query);
+    }, QUERY_COMMIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [query, parsed.hasQuery, phase, recentsVault]);
+
+  const openHit = (ref: string) => {
+    if (recentsVault !== undefined && query.trim().length >= 2) {
+      useRecentsStore.getState().rememberQuery(recentsVault, query);
+    }
+    openNote(ref);
+  };
+
   const nodeByRef = useMemo(() => {
     const map = new Map<string, TreeNode>();
     for (const node of tree) {
@@ -766,7 +872,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
       event.preventDefault();
       const target = hits[selectedIndex] ?? hits[0];
       if (target !== undefined) {
-        openNote(target.ref);
+        openHit(target.ref);
       }
     }
   };
@@ -935,7 +1041,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                           id={`search-option-${index}`}
                           role="option"
                           aria-selected={selected}
-                          onClick={() => openNote(hit.ref)}
+                          onClick={() => openHit(hit.ref)}
                           onMouseMove={() => setSelectedIndex(index)}
                           className={cx(
                             'flex w-full gap-2.5 rounded-m px-2.5 py-2 text-left transition-colors',
@@ -1070,6 +1176,13 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                     Введите запрос или используйте операторы. Навигация — стрелками, открытие — Enter.
                   </p>
                 </div>
+                <RecentsIdle
+                  onPickQuery={(value) => {
+                    setQuery(value);
+                    window.requestAnimationFrame(() => inputRef.current?.focus());
+                  }}
+                  onOpenNote={(ref) => openNote(ref)}
+                />
                 <div className="flex flex-col gap-1">
                   {OPERATOR_HELP.map((item) => (
                     <button

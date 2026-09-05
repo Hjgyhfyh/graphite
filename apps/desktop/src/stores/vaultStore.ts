@@ -11,9 +11,15 @@ import type {
   VaultInfoResponse,
 } from '@graphite/bindings';
 import { useNavStore } from './navStore';
+import { useRecentsStore } from './recentsStore';
 import { useTabsStore } from './tabsStore';
 import { useUiStore } from './uiStore';
-import { useVaultsStore } from './vaultsStore';
+import { useVaultsStore, vaultKey } from './vaultsStore';
+import { WELCOME_NOTE_REF } from '../components/editor/editorSession';
+
+function recentsVault(root: string | undefined): string | undefined {
+  return root === undefined ? undefined : vaultKey(root);
+}
 
 export interface NoteIconInfo {
   icon?: string;
@@ -263,6 +269,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     useTabsStore.getState().open(ref);
     set({ currentRef: ref });
     useNavStore.getState().record(ref);
+    const vault = recentsVault(get().info?.root);
+    if (vault !== undefined && ref !== WELCOME_NOTE_REF) {
+      useRecentsStore.getState().rememberNote(vault, ref);
+    }
   },
   flashNote: (ref) => {
     set({ currentRef: ref });
@@ -378,6 +388,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       const nextRef = refFromPath(result.pathNew);
       useTabsStore.getState().remapRef(ref, { ref: nextRef, title });
       useNavStore.getState().remap(ref, nextRef);
+      const vault = recentsVault(get().info?.root);
+      if (vault !== undefined) {
+        useRecentsStore.getState().remapNote(vault, ref, nextRef);
+      }
       set((s) => ({ currentRef: s.currentRef === ref ? nextRef : s.currentRef }));
       await get().loadTree();
     } catch (error) {
@@ -391,6 +405,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
         useTabsStore.getState().close(tab.id);
       }
       useNavStore.getState().drop(ref);
+      const vault = recentsVault(get().info?.root);
+      if (vault !== undefined) {
+        useRecentsStore.getState().dropNote(vault, ref);
+      }
       set((s) => ({ currentRef: s.currentRef === ref ? undefined : s.currentRef }));
       await get().loadTree();
       void get().loadInfo();
@@ -420,6 +438,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       const title = useTabsStore.getState().tabs.find((t) => t.noteRef === ref)?.title ?? '';
       useTabsStore.getState().remapRef(ref, { ref: nextRef, title });
       useNavStore.getState().remap(ref, nextRef);
+      const vault = recentsVault(get().info?.root);
+      if (vault !== undefined) {
+        useRecentsStore.getState().remapNote(vault, ref, nextRef);
+      }
       set((s) => ({ currentRef: s.currentRef === ref ? nextRef : s.currentRef }));
       await get().loadTree();
     } catch (error) {

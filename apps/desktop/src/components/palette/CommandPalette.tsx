@@ -29,6 +29,7 @@ import { openBriefView } from '../../stores/briefStore';
 import { pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useVaultsStore, vaultKey } from '../../stores/vaultsStore';
+import { useRecentsStore } from '../../stores/recentsStore';
 import { nextTheme, startThemeCrossfade } from '../../theme';
 import { NoteIcon } from '../tree/NoteIcon';
 import { RAIL_META } from '../rail/railItems';
@@ -199,6 +200,9 @@ export function CommandPalette() {
   const tree = useVaultStore((s) => s.tree);
   const iconByRef = useVaultStore((s) => s.iconByRef);
   const vaultRoot = useVaultStore((s) => s.info?.root);
+  const recentNoteRefs = useRecentsStore((s) =>
+    vaultRoot === undefined ? [] : s.notesOf(vaultKey(vaultRoot)),
+  );
   const knownVaults = useVaultsStore((s) => s.known);
   const reduced = usePrefersReducedMotion();
   const [query, setQuery] = useState('');
@@ -295,13 +299,23 @@ export function CommandPalette() {
     [dq, knownVaults],
   );
   const vaultActionMatches = useMemo(() => VAULT_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);
-  const noteMatches = useMemo(
-    () =>
-      hasQuery
-        ? tree.filter((node) => matches(dq, node.title, node.path)).slice(0, 8)
-        : [...tree].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 8),
-    [dq, hasQuery, tree],
-  );
+  const noteMatches = useMemo(() => {
+    if (hasQuery) {
+      return tree.filter((node) => matches(dq, node.title, node.path)).slice(0, 8);
+    }
+    const byRef = new Map(tree.map((node) => [node.ref, node] as const));
+    const fromRecents = recentNoteRefs
+      .map((ref) => byRef.get(ref))
+      .filter((node): node is (typeof tree)[number] => node !== undefined);
+    if (fromRecents.length >= 4) {
+      return fromRecents.slice(0, 8);
+    }
+    const seen = new Set(fromRecents.map((node) => node.ref));
+    const extra = [...tree]
+      .sort((a, b) => b.updated.localeCompare(a.updated))
+      .filter((node) => !seen.has(node.ref));
+    return [...fromRecents, ...extra].slice(0, 8);
+  }, [dq, hasQuery, tree, recentNoteRefs]);
   const ftUnique = useMemo(() => {
     const noteRefs = new Set(noteMatches.map((node) => node.ref));
     return ftHits.filter((hit) => !noteRefs.has(hit.ref));
