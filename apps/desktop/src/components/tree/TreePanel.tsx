@@ -38,8 +38,10 @@ import {
   Pin,
   PinOff,
   Plus,
+  Search,
   SquareKanban,
   Trash2,
+  X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { NoteRef, TreeNode } from '@graphite/bindings';
@@ -59,6 +61,14 @@ import { NoteIcon } from './NoteIcon';
 import { consumeTreeDropClick, treeDndBackend } from './treeDndBackend';
 import { copyWikiLink } from '../../lib/wikiLink';
 import { formatRelativeRu } from '../../lib/relativeTime';
+import {
+  collectVisibleIds,
+  countNameHits,
+  filterNeedle,
+  highlightNameParts,
+  nameMatchesFilter,
+} from '../../lib/treeFilter';
+import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
 
 export interface TreePanelProps {
   width: number;
@@ -105,6 +115,7 @@ interface NodeTreeContext {
   justOpened?: string;
   justMoved?: string;
   reduced: boolean;
+  filterNeedle: string;
   getNode: (id: string) => ArNode | undefined;
   openNote: (ref: NoteRef) => void;
   openInNewPane: (ref: NoteRef) => void;
@@ -140,6 +151,25 @@ function baseName(path: string): string {
 /** Ссылка на folder-note папки: у виртуальной — будущий `_index.md`. */
 function folderNoteRef(data: ArNode): NoteRef {
   return data.virtual === true ? `path:${data.path}${INDEX_SUFFIX}` : data.ref;
+}
+
+function HighlightName({ name, needle, className }: { name: string; needle: string; className?: string }) {
+  const parts = highlightNameParts(name, needle);
+  return (
+    <span className={className ?? 'min-w-0 flex-1 truncate text-left'}>
+      {needle.length === 0
+        ? name
+        : parts.map((part, index) =>
+            part.hit ? (
+              <mark key={index} className="rounded-xs bg-accent/20 text-inherit">
+                {part.text}
+              </mark>
+            ) : (
+              <span key={index}>{part.text}</span>
+            ),
+          )}
+    </span>
+  );
 }
 
 function filesPhrase(count: number): string {
@@ -585,7 +615,7 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
           {editing ? (
             <RenameInput node={node} />
           ) : (
-            <span className="min-w-0 flex-1 truncate text-left">{data.name}</span>
+            <HighlightName name={data.name} needle={ctx.filterNeedle} />
           )}
 
           {!editing && !data.isFolder && data.updated.length > 0 ? (
@@ -807,7 +837,7 @@ function PinnedRow({ item }: { item: PinnedItem }) {
               size={15}
               className={cx('shrink-0', info.color === undefined ? 'text-text-2' : undefined)}
             />
-            <span className="min-w-0 flex-1 truncate">{item.title}</span>
+            <HighlightName name={item.title} needle={ctx.filterNeedle} className="min-w-0 flex-1 truncate" />
           </button>
           <button
             type="button"
@@ -880,6 +910,8 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const [iconRequest, setIconRequest] = useState<IconRequest | undefined>(undefined);
   const [plusOpen, setPlusOpen] = useState(false);
   const [dropCount, setDropCount] = useState<number | undefined>(undefined);
+  const [filter, setFilter] = useState('');
+  const filterRef = useRef<HTMLInputElement>(null);
   const openTimer = useRef<number | undefined>(undefined);
   const moveTimer = useRef<number | undefined>(undefined);
   const renameTimer = useRef<number | undefined>(undefined);
@@ -908,6 +940,39 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
         .sort((a, b) => a.title.localeCompare(b.title, 'ru')),
     [tree, pinnedNotes],
   );
+
+  const needle = filterNeedle(filter);
+  const visibleIds = useMemo(
+    () => (needle.length === 0 ? null : collectVisibleIds(forest, needle)),
+    [forest, needle],
+  );
+  const hitCount = useMemo(
+    () => (needle.length === 0 ? 0 : countNameHits(forest, needle)),
+    [forest, needle],
+  );
+  const pinnedVisible = useMemo(
+    () => (needle.length === 0 ? pinned : pinned.filter((item) => nameMatchesFilter(item.title, needle))),
+    [pinned, needle],
+  );
+  const filterEmpty = needle.length > 0 && (visibleIds === null || visibleIds.size === 0) && pinnedVisible.length === 0;
+  const pendingTreeFilter = useUiStore((s) => s.pendingTreeFilter);
+  const filterBinding = useKeybindingsStore((s) => s.bindings['tree.filter']);
+
+  useEffect(() => {
+    setFilter('');
+  }, [vk]);
+
+  useEffect(() => {
+    if (!pendingTreeFilter) {
+      return;
+    }
+    useUiStore.getState().consumeTreeFilterFocus();
+    const frame = requestAnimationFrame(() => {
+      filterRef.current?.focus();
+      filterRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingTreeFilter]);
 
   const initialOpenState = useMemo(() => {
     const state: Record<string, boolean> = {};
@@ -1219,6 +1284,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       justOpened,
       justMoved,
       reduced,
+      filterNeedle: needle,
       getNode,
       openNote,
       openInNewPane,
@@ -1237,6 +1303,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       justOpened,
       justMoved,
       reduced,
+      needle,
       getNode,
       openNote,
       openInNewPane,
@@ -1302,6 +1369,22 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
           <div className="flex items-center gap-0.5">
             {forest.length > 0 ? (
               <>
+                <Tooltip content={`Фильтр дерева · ${formatBinding(filterBinding)}`} side="bottom">
+                  <button
+                    type="button"
+                    aria-label="Фильтр дерева"
+                    onClick={() => {
+                      filterRef.current?.focus();
+                      filterRef.current?.select();
+                    }}
+                    className={cx(
+                      'rounded-xs p-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+                      needle.length > 0 ? 'text-accent' : 'text-text-2',
+                    )}
+                  >
+                    <Search size={15} strokeWidth={1.75} />
+                  </button>
+                </Tooltip>
                 <Tooltip content="Развернуть все" side="bottom">
                   <button
                     type="button"
@@ -1380,16 +1463,59 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
         ) : null}
       </header>
 
+      {vaultReady && (forest.length > 0 || pinned.length > 0) ? (
+        <div className="shrink-0 px-2 pb-2">
+          <label className="flex h-7 items-center gap-1.5 rounded-s border border-stroke-0 bg-bg-0 px-2 focus-within:border-stroke-1">
+            <Search size={13} strokeWidth={1.75} className="shrink-0 text-text-3" aria-hidden />
+            <input
+              ref={filterRef}
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (filter.length > 0) {
+                    setFilter('');
+                  } else {
+                    event.currentTarget.blur();
+                  }
+                }
+              }}
+              aria-label="Фильтр дерева"
+              placeholder="Фильтр заметок…"
+              className="min-w-0 flex-1 bg-transparent text-caption text-text-0 outline-none placeholder:text-text-3"
+            />
+            {needle.length > 0 ? (
+              <span className="shrink-0 text-micro tabular-nums text-text-3">{hitCount}</span>
+            ) : null}
+            {filter.length > 0 ? (
+              <button
+                type="button"
+                aria-label="Сбросить фильтр"
+                onClick={() => {
+                  setFilter('');
+                  filterRef.current?.focus();
+                }}
+                className="shrink-0 rounded-xs p-0.5 text-text-3 hover:text-text-0"
+              >
+                <X size={12} strokeWidth={1.75} />
+              </button>
+            ) : null}
+          </label>
+        </div>
+      ) : null}
+
       <NodeCtx.Provider value={ctxValue}>
         {forest.length === 0 && pinned.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            {pinned.length > 0 ? (
+            {pinnedVisible.length > 0 ? (
               <div className="shrink-0 border-b border-stroke-0 px-2 pb-2 pt-1">
                 <p className="px-2 pb-1 text-micro uppercase tracking-wide text-text-3">Закреплённое</p>
                 <ul className="animate-fade-in space-y-0.5">
-                  {pinned.map((item) => (
+                  {pinnedVisible.map((item) => (
                     <li key={item.ref}>
                       <PinnedRow item={item} />
                     </li>
@@ -1399,7 +1525,12 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
             ) : null}
 
             <div ref={listRef} className="min-h-0 flex-1">
-              {forest.length > 0 ? (
+              {filterEmpty ? (
+                <div className="flex flex-col items-center justify-center gap-1 px-6 py-10 text-center">
+                  <p className="text-ui text-text-1">Ничего не найдено</p>
+                  <p className="text-caption text-text-3">Попробуйте другое имя или сбросьте фильтр</p>
+                </div>
+              ) : forest.length > 0 ? (
                 <Tree<ArNode>
                   key={vk ?? 'vault'}
                   ref={treeRef}
@@ -1416,6 +1547,8 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
                   paddingTop={4}
                   paddingBottom={8}
                   selection={currentRef}
+                  searchTerm={needle}
+                  searchMatch={(node) => visibleIds?.has(node.id) === true}
                   dndBackend={treeDndBackend}
                   disableDrag={(data) => data.virtual === true}
                   disableDrop={disableDrop}

@@ -20,6 +20,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'palette.open',
   'switcher.open',
   'search.global',
+  'tree.filter',
   'settings.open',
   'view.tasks',
   'view.brief',
@@ -134,6 +135,9 @@ function runBuiltin(id: ActionId): boolean {
     case 'search.global':
       ui.setRailView('search');
       ui.setSidebarHidden(false);
+      return true;
+    case 'tree.filter':
+      ui.focusTreeFilter();
       return true;
     case 'view.tasks':
       ui.setRailView('tasks');
