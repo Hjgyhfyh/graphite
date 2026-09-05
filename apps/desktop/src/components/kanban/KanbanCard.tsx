@@ -11,6 +11,7 @@ import { highlightNameParts } from '../../lib/treeFilter';
 import { REDUCED_CROSSFADE, springSnappy, springStandard } from '../../motion';
 import { CARD_ALIAS_MAX } from '../../stores/boardStore';
 import { useUiStore } from '../../stores/uiStore';
+import { copyWikiLink } from '../../lib/wikiLink';
 import { formatUpdated, typeFallbackIcon, typeLabel } from './columns';
 import type { KanbanCardData } from './columns';
 
@@ -327,13 +328,24 @@ export function KanbanCard({
     [card.ref, registerCard, unregisterCard],
   );
 
-  const handleClick = () => {
-    if (!consumeDropClick()) {
-      onOpen(card.ref);
+  const handleClick = (event: { ctrlKey: boolean; metaKey: boolean; preventDefault: () => void }) => {
+    if (consumeDropClick()) {
+      return;
     }
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      void copyWikiLink(card.ref);
+      return;
+    }
+    onOpen(card.ref);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      void copyWikiLink(card.ref);
+      return;
+    }
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onOpen(card.ref);
@@ -357,7 +369,8 @@ export function KanbanCard({
         titleAction={<CardAliasButton card={card} onAliasChange={onAliasChange} />}
         role="button"
         tabIndex={0}
-        aria-label={`Открыть «${card.title}»`}
+        aria-label={`Открыть «${card.title}». Ctrl+Enter — скопировать вики-ссылку`}
+        title="Клик — открыть · Ctrl — скопировать ссылку"
         onPointerDown={(event) => onLift(event, card, tags)}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
