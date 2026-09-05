@@ -55,7 +55,7 @@ const VIEW_ACTIONS: readonly PaletteAction[] = [
   },
   {
     id: 'graph.focusCurrent',
-    title: 'Показать текущую заметку на графе',
+    title: 'Показать окрестность заметки на графе',
     icon: Network,
     run: () => {
       const ref = useVaultStore.getState().currentRef;

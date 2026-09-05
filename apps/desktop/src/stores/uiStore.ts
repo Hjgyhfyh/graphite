@@ -24,6 +24,8 @@ export const EDITOR_SCALE_MAX = 1.3;
 export const EDITOR_SCALE_DEFAULT = 1;
 export const EDITOR_SCALE_STEP = 0.05;
 
+export type GraphHops = 1 | 2;
+
 const TOAST_DURATION_MS = 4000;
 
 export type RailView =
@@ -85,6 +87,9 @@ export interface UiStore {
   focusMode: boolean;
   typewriter: boolean;
   editorScale: number;
+  graphLocalMode: boolean;
+  graphHops: GraphHops;
+  graphLabelsOn: boolean;
   pendingSearch: string | undefined;
   journalDate: string | undefined;
   pendingTreeReveal: string | undefined;
@@ -126,6 +131,9 @@ export interface UiStore {
   setEditorScale(scale: number): void;
   nudgeEditorScale(delta: number): void;
   resetEditorScale(): void;
+  setGraphLocalMode(on: boolean): void;
+  setGraphHops(hops: GraphHops): void;
+  setGraphLabelsOn(on: boolean): void;
   openSearchWith(query: string): void;
   consumePendingSearch(): string | undefined;
   openJournalDay(date?: string): void;
@@ -166,6 +174,10 @@ function snapEditorScale(value: number): number {
 
 function hydrateNumber(value: unknown, min: number, max: number, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : fallback;
+}
+
+export function hydrateGraphHops(value: unknown): GraphHops {
+  return value === 2 ? 2 : 1;
 }
 
 function isRailItemView(value: unknown): value is RailItemView {
@@ -230,6 +242,9 @@ export const useUiStore = create<UiStore>()(
       focusMode: false,
       typewriter: true,
       editorScale: EDITOR_SCALE_DEFAULT,
+      graphLocalMode: false,
+      graphHops: 1,
+      graphLabelsOn: true,
       pendingSearch: undefined,
       journalDate: undefined,
       pendingTreeReveal: undefined,
@@ -333,6 +348,15 @@ export const useUiStore = create<UiStore>()(
       },
       resetEditorScale: () => {
         set({ editorScale: EDITOR_SCALE_DEFAULT });
+      },
+      setGraphLocalMode: (on) => {
+        set({ graphLocalMode: on });
+      },
+      setGraphHops: (hops) => {
+        set({ graphHops: hops });
+      },
+      setGraphLabelsOn: (on) => {
+        set({ graphLabelsOn: on });
       },
       openSearchWith: (query) => {
         set({ pendingSearch: query, railView: 'search', sidebarHidden: false, focusMode: false });
@@ -477,6 +501,7 @@ export const useUiStore = create<UiStore>()(
           pendingGraphFocus: ref,
           railView: 'graph',
           focusMode: false,
+          graphLocalMode: true,
         });
       },
       consumeGraphFocus: () => {
@@ -529,6 +554,9 @@ export const useUiStore = create<UiStore>()(
         focusMode: s.focusMode,
         typewriter: s.typewriter,
         editorScale: s.editorScale,
+        graphLocalMode: s.graphLocalMode,
+        graphHops: s.graphHops,
+        graphLabelsOn: s.graphLabelsOn,
         captureDest: s.captureDest,
         onboardingDone: s.onboardingDone,
       }),
@@ -546,6 +574,9 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_DEFAULT,
           ),
           editorScale: hydrateNumber(saved.editorScale, EDITOR_SCALE_MIN, EDITOR_SCALE_MAX, EDITOR_SCALE_DEFAULT),
+          graphLocalMode: saved.graphLocalMode === true,
+          graphHops: hydrateGraphHops(saved.graphHops),
+          graphLabelsOn: saved.graphLabelsOn !== false,
           captureDest: saved.captureDest === 'journal' ? 'journal' : 'inbox',
           theme: isTheme(saved.theme) ? saved.theme : 'default',
           focusMode: saved.focusMode === true,

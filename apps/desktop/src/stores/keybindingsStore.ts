@@ -72,7 +72,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'view.tasks', title: 'Задачи', group: 'Навигация' },
   { id: 'view.brief', title: 'Бриф для Claude (идея → задание)', group: 'Навигация' },
   { id: 'view.today', title: 'Сегодня в дневнике', group: 'Навигация' },
-  { id: 'view.graphFocus', title: 'Показать текущую заметку на графе', group: 'Навигация' },
+  { id: 'view.graphFocus', title: 'Показать окрестность заметки на графе', group: 'Навигация' },
   { id: 'settings.open', title: 'Настройки', group: 'Навигация' },
   { id: 'nav.back', title: 'Назад', group: 'Навигация' },
   { id: 'nav.forward', title: 'Вперёд', group: 'Навигация' },

@@ -720,9 +720,12 @@ export function GraphView() {
   const [status, setStatus] = useState<ViewStatus>('loading');
   const [stats, setStats] = useState({ nodes: 0, edges: 0 });
   const [catalog, setCatalog] = useState<GraphCatalogItem[]>([]);
-  const [labelsOn, setLabelsOn] = useState(true);
-  const [localMode, setLocalMode] = useState(false);
-  const [hops, setHops] = useState<1 | 2>(1);
+  const labelsOn = useUiStore((s) => s.graphLabelsOn);
+  const localMode = useUiStore((s) => s.graphLocalMode);
+  const hops = useUiStore((s) => s.graphHops);
+  const setLabelsOn = useUiStore((s) => s.setGraphLabelsOn);
+  const setLocalMode = useUiStore((s) => s.setGraphLocalMode);
+  const setHops = useUiStore((s) => s.setGraphHops);
   const [hoverMeta, setHoverMeta] = useState<HoverMeta | null>(null);
   const [slowLoad, setSlowLoad] = useState(false);
 
