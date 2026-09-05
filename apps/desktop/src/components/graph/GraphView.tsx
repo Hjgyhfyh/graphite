@@ -722,6 +722,7 @@ export function GraphView() {
   const [catalog, setCatalog] = useState<GraphCatalogItem[]>([]);
   const [labelsOn, setLabelsOn] = useState(true);
   const [localMode, setLocalMode] = useState(false);
+  const [hops, setHops] = useState<1 | 2>(1);
   const [hoverMeta, setHoverMeta] = useState<HoverMeta | null>(null);
   const [slowLoad, setSlowLoad] = useState(false);
 
@@ -732,6 +733,7 @@ export function GraphView() {
   const reducedRef = useRef(reduced);
   const labelsOnRef = useRef(labelsOn);
   const localModeRef = useRef(localMode);
+  const hopsRef = useRef(hops);
   const currentRefLive = useRef(currentRef);
   const apiRef = useRef<{
     requestFrame(): void;
@@ -745,6 +747,7 @@ export function GraphView() {
   reducedRef.current = reduced;
   labelsOnRef.current = labelsOn;
   localModeRef.current = localMode;
+  hopsRef.current = hops;
 
   useEffect(() => {
     apiRef.current?.requestFrame();
@@ -977,7 +980,7 @@ export function GraphView() {
           localModeRef.current
             ? center === undefined
               ? { nodes: [], edges: [] }
-              : egoSubgraph(data, center, 1)
+              : egoSubgraph(data, center, hopsRef.current)
             : data;
         setHover(-1);
         buildEngine(engine, view);
@@ -1234,7 +1237,7 @@ export function GraphView() {
     if (localMode) {
       apiRef.current?.applyView();
     }
-  }, [currentRef, localMode]);
+  }, [currentRef, localMode, hops]);
 
   useEffect(() => {
     if (status !== 'ready' || pendingGraphFocus === undefined) {
@@ -1272,7 +1275,9 @@ export function GraphView() {
         title={currentRef === undefined ? 'Нет открытой заметки' : 'Нет окрестности'}
         text={
           currentRef === undefined
-            ? 'Откройте заметку — граф покажет её и ближайших соседей по ссылкам.'
+            ? hops === 2
+              ? 'Откройте заметку — граф покажет её, соседей и соседей соседей.'
+              : 'Откройте заметку — граф покажет её и ближайших соседей по ссылкам.'
             : 'Этой заметки нет среди узлов графа. Выключите окрестность, чтобы увидеть весь vault.'
         }
       >
@@ -1321,7 +1326,9 @@ export function GraphView() {
         <div className="flex items-baseline gap-3">
           <h1 className="text-h2 text-text-0">Граф</h1>
           {localMode ? (
-            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-micro font-medium text-accent">окрестность</span>
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-micro font-medium text-accent">
+              {hops === 2 ? '2 шага' : 'окрестность'}
+            </span>
           ) : null}
           {hasGraph ? (
             <span className="animate-fade-in text-caption tabular-nums text-text-3">
@@ -1353,6 +1360,34 @@ export function GraphView() {
               Окрестность
             </label>
           </Tooltip>
+          {localMode ? (
+            <Tooltip content="1 — прямые соседи, 2 — ещё их соседи" side="bottom">
+              <div
+                role="group"
+                aria-label="Глубина окрестности"
+                className="flex shrink-0 rounded-full border border-stroke-0 p-0.5"
+              >
+                {([1, 2] as const).map((depth) => {
+                  const active = hops === depth;
+                  return (
+                    <button
+                      key={depth}
+                      type="button"
+                      aria-pressed={active}
+                      disabled={status === 'offline' || status === 'error'}
+                      onClick={() => setHops(depth)}
+                      className={cx(
+                        'h-6 min-w-7 rounded-full px-2 text-micro font-medium tabular-nums transition-colors duration-[120ms]',
+                        active ? 'bg-bg-3 text-text-0' : 'text-text-3 hover:text-text-1',
+                      )}
+                    >
+                      {depth}
+                    </button>
+                  );
+                })}
+              </div>
+            </Tooltip>
+          ) : null}
           <label className="flex cursor-pointer select-none items-center gap-2 text-caption text-text-2">
             <Switch checked={labelsOn} onCheckedChange={setLabelsOn} aria-label="Показывать подписи узлов" />
             Подписи
