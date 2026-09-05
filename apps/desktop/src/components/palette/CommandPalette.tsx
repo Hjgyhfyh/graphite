@@ -35,6 +35,7 @@ import { nextTheme, startThemeCrossfade } from '../../theme';
 import { NoteIcon } from '../tree/NoteIcon';
 import { RAIL_META } from '../rail/railItems';
 import { OVERLAY_SCRIM } from '../../lib/overlay';
+import { copyWikiLink } from '../../lib/wikiLink';
 import { Presence, fadeVariants, popVariants, reducedFadeVariants, usePrefersReducedMotion } from '../../motion';
 
 interface PaletteAction {
@@ -194,6 +195,17 @@ function ChordBadges({ chords }: { chords: string[] }) {
   );
 }
 
+function noteRefFromSelectedItem(root: HTMLElement): string | undefined {
+  const selected =
+    root.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]') ??
+    root.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]');
+  const ref = selected?.dataset.noteRef;
+  if (ref === undefined || ref.length === 0) {
+    return undefined;
+  }
+  return ref;
+}
+
 function FooterHint({ keys, label }: { keys: string[]; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-micro text-text-2">
@@ -226,6 +238,7 @@ export function CommandPalette() {
   const [ftState, setFtState] = useState<FullTextState>('idle');
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const skipOpenRef = useRef(false);
 
   const close = () => {
     restoreFocusRef.current = null;
@@ -251,6 +264,7 @@ export function CommandPalette() {
     setQuery('');
     setFtHits([]);
     setFtState('idle');
+    skipOpenRef.current = false;
     return undefined;
   }, [open]);
 
@@ -351,6 +365,20 @@ export function CommandPalette() {
           initial="initial"
           animate="animate"
           exit="exit"
+          onKeyDownCapture={(event) => {
+            if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') {
+              return;
+            }
+            const ref = noteRefFromSelectedItem(event.currentTarget);
+            if (ref === undefined) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            skipOpenRef.current = true;
+            void copyWikiLink(ref);
+            close();
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.preventDefault();
@@ -551,10 +579,23 @@ export function CommandPalette() {
                           key={node.ref}
                           value={`note-${node.ref}`}
                           keywords={[node.title, node.path]}
+                          data-note-ref={node.ref}
+                          onPointerDown={(event) => {
+                            if (event.ctrlKey || event.metaKey) {
+                              skipOpenRef.current = true;
+                              void copyWikiLink(node.ref);
+                              close();
+                            }
+                          }}
                           onSelect={() => {
+                            if (skipOpenRef.current) {
+                              skipOpenRef.current = false;
+                              return;
+                            }
                             close();
                             useVaultStore.getState().openNote(node.ref);
                           }}
+                          title="Enter — открыть · Ctrl — скопировать ссылку"
                           className={ROW}
                         >
                           <NoteIcon
@@ -586,7 +627,19 @@ export function CommandPalette() {
                               key={`ft-${hit.ref}`}
                               value={`ft-${hit.ref}`}
                               keywords={[hit.title]}
+                              data-note-ref={hit.ref}
+                              onPointerDown={(event) => {
+                                if (event.ctrlKey || event.metaKey) {
+                                  skipOpenRef.current = true;
+                                  void copyWikiLink(hit.ref);
+                                  close();
+                                }
+                              }}
                               onSelect={() => {
+                                if (skipOpenRef.current) {
+                                  skipOpenRef.current = false;
+                                  return;
+                                }
                                 close();
                                 useVaultStore.getState().openNote(hit.ref);
                               }}
@@ -656,6 +709,7 @@ export function CommandPalette() {
                   </Kbd>
                   открыть
                 </span>
+                <FooterHint keys={['Ctrl', '↵']} label="ссылка" />
                 <FooterHint keys={['Esc']} label="закрыть" />
               </div>
             </Command>
