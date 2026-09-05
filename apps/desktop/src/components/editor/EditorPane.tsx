@@ -23,7 +23,7 @@ import {
   Scissors,
   Strikethrough,
 } from 'lucide-react';
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import {
   attachmentInsertPos,
   attachmentMarkdown,
@@ -68,6 +68,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useEditorMetaStore } from '../../stores/editorMetaStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { loadWikiPreview, resolveWikiTarget } from '../../lib/wikiPreview';
+import { findTaskDocLine } from '../../lib/taskJump';
 import { Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useActionHandler } from '../../app/Keymap';
 import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
@@ -1156,6 +1157,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
 
   const setDirty = useTabsStore((s) => s.setDirty);
   const readingMode = useUiStore((s) => s.readingMode);
+  const pendingTaskJump = useUiStore((s) => s.pendingTaskJump);
   const toggleReadingMode = useUiStore((s) => s.toggleReadingMode);
   const focusMode = useUiStore((s) => s.focusMode);
   const toggleFocusMode = useUiStore((s) => s.toggleFocusMode);
@@ -1605,6 +1607,36 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       editorRef.current?.focus();
     }
   }, [readingMode, loaded]);
+
+  useEffect(() => {
+    if (!loaded || readingMode || isWelcome || pendingTaskJump === undefined || pendingTaskJump.ref !== noteRef) {
+      return;
+    }
+    const handle = editorRef.current;
+    if (handle === null) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const target = useUiStore.getState().consumeTaskJump();
+      if (target === undefined || editorRef.current !== handle) {
+        return;
+      }
+      const line = findTaskDocLine(handle.getDoc(), target);
+      if (line === undefined) {
+        return;
+      }
+      const view = handle.view;
+      const cmLine = Math.min(Math.max(1, line), view.state.doc.lines);
+      const docLine = view.state.doc.line(cmLine);
+      view.dispatch({
+        selection: { anchor: docLine.from },
+        effects: EditorView.scrollIntoView(docLine.from, { y: 'center', yMargin: 28 }),
+      });
+      handle.markAi(docLine.from, docLine.to);
+      handle.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loaded, readingMode, isWelcome, pendingTaskJump, noteRef]);
 
   useEffect(() => {
     editorRef.current?.setHideFrontmatter(!showPropsInText);

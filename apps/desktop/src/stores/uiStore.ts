@@ -5,6 +5,7 @@ import type { Theme } from '../theme';
 import { applyTheme, isTheme } from '../theme';
 import { todayYmd } from '../lib/dailyDoc';
 import type { CaptureDest } from '../lib/quickCapture';
+import type { TaskJumpTarget } from '../lib/taskJump';
 
 export const TREE_WIDTH_MIN = 240;
 export const TREE_WIDTH_MAX = 420;
@@ -92,6 +93,7 @@ export interface UiStore {
   pendingBoardFilter: boolean;
   pendingTasksFilter: boolean;
   pendingTag: string | undefined;
+  pendingTaskJump: TaskJumpTarget | undefined;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
   onboardingDone: boolean;
@@ -135,6 +137,8 @@ export interface UiStore {
   consumeTasksFilterFocus(): boolean;
   openTag(tag: string): void;
   consumePendingTag(): string | undefined;
+  requestTaskJump(target: TaskJumpTarget): void;
+  consumeTaskJump(): TaskJumpTarget | undefined;
   revealOnGraph(ref: NoteRef): void;
   consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
@@ -228,6 +232,7 @@ export const useUiStore = create<UiStore>()(
       pendingBoardFilter: false,
       pendingTasksFilter: false,
       pendingTag: undefined,
+      pendingTaskJump: undefined,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
       onboardingDone: false,
@@ -421,6 +426,20 @@ export const useUiStore = create<UiStore>()(
           set({ pendingTag: undefined });
         }
         return tag;
+      },
+      requestTaskJump: (target) => {
+        set({
+          pendingTaskJump: target,
+          readingMode: false,
+          focusMode: false,
+        });
+      },
+      consumeTaskJump: () => {
+        const target = get().pendingTaskJump;
+        if (target !== undefined) {
+          set({ pendingTaskJump: undefined });
+        }
+        return target;
       },
       revealOnGraph: (ref) => {
         set({

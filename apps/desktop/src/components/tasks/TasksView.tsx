@@ -131,6 +131,17 @@ function jumpToNote(ref: NoteRef): void {
   useUiStore.getState().setRailView('tree');
 }
 
+function jumpToTask(task: TaskHit): void {
+  useUiStore.getState().requestTaskJump({
+    ref: task.source.ref,
+    taskId: task.id,
+    text: task.text,
+    anchor: task.source.anchor,
+  });
+  useVaultStore.getState().openNote(task.source.ref);
+  useUiStore.getState().setRailView('tree');
+}
+
 interface TaskCheckboxProps {
   done: boolean;
   reduced: boolean;
@@ -447,7 +458,7 @@ export function TasksView() {
                         <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
                           <button
                             type="button"
-                            onClick={() => jumpToNote(task.source.ref)}
+                            onClick={() => jumpToTask(task)}
                             className="min-w-0 flex-1 text-left"
                           >
                             <TaskText text={task.text} done={task.done} reduced={reduced} needle={needle} />
