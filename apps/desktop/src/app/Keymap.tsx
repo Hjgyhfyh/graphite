@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { exportNoteHtml, exportNoteMarkdown, printNote } from '../lib/exportNote';
+import { copyWikiLink } from '../lib/wikiLink';
 import { openBriefView } from '../stores/briefStore';
 import { openPromptHistory } from '../stores/promptHistoryStore';
 import type { ActionId } from '../stores/keybindingsStore';
@@ -36,6 +37,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'note.newChild',
   'note.newFromTemplate',
   'note.copyPage',
+  'note.copyWikiLink',
   'editor.toggleReading',
   'editor.focusMode',
   'task.sweepDone',
@@ -205,6 +207,14 @@ function runBuiltin(id: ActionId): boolean {
         return false;
       }
       void printNote(ref);
+      return true;
+    }
+    case 'note.copyWikiLink': {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        return false;
+      }
+      void copyWikiLink(ref);
       return true;
     }
     case 'note.pin': {

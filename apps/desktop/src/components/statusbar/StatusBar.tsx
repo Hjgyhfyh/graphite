@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   Cloud,
   Diamond,
   FileText,
@@ -29,6 +30,7 @@ import { humanSyncError, useSyncStore } from '../../stores/syncStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useEditorMetaStore } from '../../stores/editorMetaStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { formatAbsoluteRu, formatRelativeRu } from '../../lib/relativeTime';
 
 /** Дебаунс git-статуса на note_changed: не гонять пачку git-процессов на каждый автосейв. */
 const GIT_STATUS_DEBOUNCE_MS = 4000;
@@ -389,6 +391,35 @@ function TodayChip() {
   );
 }
 
+function UpdatedChip() {
+  const currentRef = useVaultStore((s) => s.currentRef);
+  const updated = useVaultStore((s) =>
+    currentRef === undefined ? undefined : s.tree.find((node) => node.ref === currentRef)?.updated,
+  );
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (updated === undefined || updated.length === 0) {
+    return null;
+  }
+  const relative = formatRelativeRu(updated, now);
+  if (relative.length === 0) {
+    return null;
+  }
+  return (
+    <Tooltip content={`Изменено ${formatAbsoluteRu(updated)}`} side="top">
+      <span aria-label={`Изменено ${relative}`} className="flex items-center gap-1 tabular-nums text-text-2">
+        <Clock3 size={12} strokeWidth={1.75} aria-hidden />
+        {relative}
+      </span>
+    </Tooltip>
+  );
+}
+
 function DocStats() {
   const words = useEditorMetaStore((s) => s.words);
   const readingMin = useEditorMetaStore((s) => s.readingMin);
@@ -520,6 +551,7 @@ export function StatusBar() {
         {info !== undefined ? (
           <>
             <DocStats />
+            <UpdatedChip />
             <span aria-hidden className="h-3.5 w-px bg-stroke-0" />
             <NavHistoryControls />
             <span aria-hidden className="h-3.5 w-px bg-stroke-0" />

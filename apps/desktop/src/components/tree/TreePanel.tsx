@@ -30,6 +30,7 @@ import {
   FolderSymlink,
   Import,
   LayoutTemplate,
+  Link2,
   Palette,
   Pencil,
   Pin,
@@ -54,6 +55,8 @@ import { vaultKey } from '../../stores/vaultsStore';
 import { IconPicker } from './IconPicker';
 import { NoteIcon } from './NoteIcon';
 import { consumeTreeDropClick, treeDndBackend } from './treeDndBackend';
+import { copyWikiLink } from '../../lib/wikiLink';
+import { formatRelativeRu } from '../../lib/relativeTime';
 
 export interface TreePanelProps {
   width: number;
@@ -583,6 +586,18 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
             <span className="min-w-0 flex-1 truncate text-left">{data.name}</span>
           )}
 
+          {!editing && !data.isFolder && data.updated.length > 0 ? (
+            <span
+              className={cx(
+                'shrink-0 text-micro tabular-nums text-text-3 transition-opacity duration-[120ms]',
+                active ? 'opacity-100' : 'opacity-0 group-hover/node:opacity-100 group-focus-within/node:opacity-100',
+              )}
+              title={data.updated}
+            >
+              {formatRelativeRu(data.updated)}
+            </span>
+          ) : null}
+
           {pinned && !editing ? (
             <Pin size={11} strokeWidth={1.75} className="shrink-0 text-text-2" />
           ) : null}
@@ -604,6 +619,11 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
                     icon={Columns2}
                     label="Открыть в новой панели"
                     onSelect={() => ctx.openInNewPane(data.ref)}
+                  />
+                  <MenuItem
+                    icon={Link2}
+                    label="Скопировать вики-ссылку"
+                    onSelect={() => void copyWikiLink(data.ref)}
                   />
                 </>
               ) : null}
@@ -645,6 +665,11 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
             <>
               <MenuItem icon={FileText} label="Открыть" onSelect={() => ctx.openNote(data.ref)} />
               <MenuItem icon={Columns2} label="Открыть в новой панели" onSelect={() => ctx.openInNewPane(data.ref)} />
+              <MenuItem
+                icon={Link2}
+                label="Скопировать вики-ссылку"
+                onSelect={() => void copyWikiLink(data.ref)}
+              />
               <MenuSeparator />
               <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.startRename(node)} />
               <MenuItem
@@ -777,6 +802,7 @@ function PinnedRow({ item }: { item: PinnedItem }) {
         <ContextMenu.Content className={MENU_CONTENT}>
           <MenuItem icon={FileText} label="Открыть" onSelect={() => ctx.openNote(item.ref)} />
           <MenuItem icon={Columns2} label="Открыть в новой панели" onSelect={() => ctx.openInNewPane(item.ref)} />
+          <MenuItem icon={Link2} label="Скопировать вики-ссылку" onSelect={() => void copyWikiLink(item.ref)} />
           <MenuSeparator />
           <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.renameByRef(item.ref)} />
           <MenuItem
@@ -805,6 +831,7 @@ function PinnedRow({ item }: { item: PinnedItem }) {
 
 export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const tree = useVaultStore((s) => s.tree);
+  const pendingTreeReveal = useUiStore((s) => s.pendingTreeReveal);
   const currentRef = useVaultStore((s) => s.currentRef);
   const vaultRoot = useVaultStore((s) => s.info?.root);
   const pinnedNotes = useVaultStore((s) => s.pinnedNotes);
@@ -884,6 +911,42 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
       /* узел ещё не в дереве */
     }
   }, [currentRef]);
+
+  useEffect(() => {
+    if (pendingTreeReveal === undefined) {
+      return;
+    }
+    const target = useUiStore.getState().consumeTreeReveal();
+    if (target === undefined) {
+      return;
+    }
+    let cancelled = false;
+    const tryScroll = (attempt: number) => {
+      if (cancelled) {
+        return;
+      }
+      const api = treeRef.current;
+      if (api !== undefined) {
+        try {
+          api.openParents(target);
+          if (api.isOpen(target) === false) {
+            api.open(target);
+          }
+          void api.scrollTo(target)?.catch(() => undefined);
+        } catch {
+          /* узел ещё не в дереве */
+        }
+        return;
+      }
+      if (attempt < 10) {
+        window.setTimeout(() => tryScroll(attempt + 1), 40);
+      }
+    };
+    tryScroll(0);
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingTreeReveal]);
 
   useEffect(() => {
     if (!isTauriAvailable()) {

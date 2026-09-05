@@ -9,6 +9,7 @@ import type { Pane } from '../../stores/panesStore';
 import { useTabsStore } from '../../stores/tabsStore';
 import { EditorPane } from '../editor/EditorPane';
 import { EditorTransition } from '../editor/EditorTransition';
+import { NoteCrumbs } from '../editor/NoteCrumbs';
 import { NOTE_DND_TYPE, PaneTabs, TAB_DND_TYPE } from './PaneTabs';
 import { useVaultStore } from '../../stores/vaultStore';
 
@@ -160,6 +161,7 @@ function PaneColumn({
         <span aria-hidden className="pointer-events-none absolute inset-0 z-20 ring-1 ring-inset ring-accent/40" />
       ) : null}
       <PaneTabs paneId={pane.id} />
+      {tab !== undefined && tab.kind === 'editor' ? <NoteCrumbs noteRef={tab.noteRef} /> : null}
       <div
         className="relative flex min-h-0 flex-1 flex-col"
         onDragEnter={onBodyDragEnter}

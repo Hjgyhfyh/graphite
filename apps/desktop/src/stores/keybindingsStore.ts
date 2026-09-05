@@ -18,6 +18,7 @@ export type ActionId =
   | 'note.rename'
   | 'note.delete'
   | 'note.copyPage'
+  | 'note.copyWikiLink'
   | 'note.pin'
   | 'note.exportHtml'
   | 'note.exportMd'
@@ -69,6 +70,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'note.rename', title: 'Переименовать', group: 'Заметки' },
   { id: 'note.delete', title: 'Удалить в корзину', group: 'Заметки' },
   { id: 'note.copyPage', title: 'Скопировать для ИИ', group: 'Заметки' },
+  { id: 'note.copyWikiLink', title: 'Скопировать вики-ссылку', group: 'Заметки' },
   { id: 'note.pin', title: 'Закрепить заметку', group: 'Заметки' },
   { id: 'note.exportHtml', title: 'Экспорт в HTML…', group: 'Заметки' },
   { id: 'note.exportMd', title: 'Сохранить копию .md…', group: 'Заметки' },
@@ -113,6 +115,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'note.rename': ['F2'],
   'note.delete': ['Delete'],
   'note.copyPage': ['Ctrl+Shift+C'],
+  'note.copyWikiLink': ['Ctrl+Alt+C'],
   'note.pin': ['Ctrl+Shift+P'],
   'note.exportHtml': [],
   'note.exportMd': [],

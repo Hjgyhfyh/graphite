@@ -77,6 +77,7 @@ export interface UiStore {
   focusMode: boolean;
   pendingSearch: string | undefined;
   journalDate: string | undefined;
+  pendingTreeReveal: string | undefined;
   floatingCaptureOpen: boolean;
   onboardingDone: boolean;
   toasts: Toast[];
@@ -105,6 +106,8 @@ export interface UiStore {
   consumePendingSearch(): string | undefined;
   openJournalDay(date?: string): void;
   consumeJournalDate(): string | undefined;
+  requestTreeReveal(id: string): void;
+  consumeTreeReveal(): string | undefined;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
   setOnboardingDone(done: boolean): void;
@@ -180,6 +183,7 @@ export const useUiStore = create<UiStore>()(
       focusMode: false,
       pendingSearch: undefined,
       journalDate: undefined,
+      pendingTreeReveal: undefined,
       floatingCaptureOpen: false,
       onboardingDone: false,
       toasts: [],
@@ -282,6 +286,21 @@ export const useUiStore = create<UiStore>()(
           set({ journalDate: undefined });
         }
         return date;
+      },
+      requestTreeReveal: (id) => {
+        set({
+          pendingTreeReveal: id,
+          railView: 'tree',
+          sidebarHidden: false,
+          focusMode: false,
+        });
+      },
+      consumeTreeReveal: () => {
+        const id = get().pendingTreeReveal;
+        if (id !== undefined) {
+          set({ pendingTreeReveal: undefined });
+        }
+        return id;
       },
       setFloatingCaptureOpen: (open) => {
         set({ floatingCaptureOpen: open });
