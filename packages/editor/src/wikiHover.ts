@@ -1,7 +1,7 @@
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension, Range } from '@codemirror/state';
-import { Decoration, ViewPlugin, hoverTooltip } from '@codemirror/view';
-import type { DecorationSet, EditorView, Tooltip, ViewUpdate } from '@codemirror/view';
+import { Decoration, EditorView, ViewPlugin, hoverTooltip } from '@codemirror/view';
+import type { DecorationSet, Tooltip, ViewUpdate } from '@codemirror/view';
 import { frontmatterEnd } from './frontmatter';
 
 export interface WikiLinkHit {
@@ -18,6 +18,7 @@ export interface WikiPreview {
 }
 
 export type WikiPreviewSource = (target: string) => Promise<WikiPreview>;
+export type WikiOpenHandler = (target: string) => void;
 
 const SKIP_CONTEXT = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText']);
 const WIKI_MARK = Decoration.mark({ class: 'cm-gr-wiki' });
@@ -169,7 +170,24 @@ const wikiDecorations = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
-function wikiHoverTooltip(source: WikiPreviewSource): Extension {
+function bindOpen(dom: HTMLElement, target: string, onOpen: WikiOpenHandler): void {
+  dom.classList.add('cm-gr-wiki-tip-open');
+  dom.setAttribute('role', 'button');
+  dom.tabIndex = 0;
+  const open = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onOpen(target);
+  };
+  dom.addEventListener('mousedown', open);
+  dom.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      open(event);
+    }
+  });
+}
+
+function wikiHoverTooltip(source: WikiPreviewSource, onOpen?: WikiOpenHandler): Extension {
   return hoverTooltip(
     (view, pos): Tooltip | null => {
       const hit = wikiLinkAround(view.state, pos);
@@ -189,7 +207,13 @@ function wikiHoverTooltip(source: WikiPreviewSource): Extension {
           const body = document.createElement('div');
           body.className = 'cm-gr-wiki-tip-body';
           body.textContent = 'Загрузка…';
-          dom.append(title, body);
+          const hint = document.createElement('div');
+          hint.className = 'cm-gr-wiki-tip-hint';
+          hint.textContent = onOpen !== undefined ? 'Открыть · клик' : 'Ctrl+клик по ссылке';
+          dom.append(title, body, hint);
+          if (onOpen !== undefined) {
+            bindOpen(dom, hit.target, onOpen);
+          }
           let cancelled = false;
           void source(hit.target).then((preview) => {
             if (cancelled) {
@@ -216,7 +240,38 @@ function wikiHoverTooltip(source: WikiPreviewSource): Extension {
   );
 }
 
+/** Ctrl/Cmd+клик по `[[ссылке]]` — открыть, не ставя курсор. */
+export function isWikiFollowClick(event: {
+  button: number;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+}): boolean {
+  return event.button === 0 && (event.ctrlKey || event.metaKey) && !event.altKey;
+}
+
+function wikiFollowClicks(onOpen: WikiOpenHandler): Extension {
+  return EditorView.domEventHandlers({
+    click(event, view) {
+      if (!isWikiFollowClick(event)) {
+        return false;
+      }
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos === null) {
+        return false;
+      }
+      const hit = wikiLinkAround(view.state, pos);
+      if (hit === null) {
+        return false;
+      }
+      event.preventDefault();
+      onOpen(hit.target);
+      return true;
+    },
+  });
+}
+
 /** Подсветка `[[ссылок]]` и карточка с превью заметки по наведению. */
-export function wikiLinkPreview(source: WikiPreviewSource): Extension {
-  return [wikiDecorations, wikiHoverTooltip(source)];
+export function wikiLinkPreview(source: WikiPreviewSource, onOpen?: WikiOpenHandler): Extension {
+  return [wikiDecorations, wikiHoverTooltip(source, onOpen), ...(onOpen !== undefined ? [wikiFollowClicks(onOpen)] : [])];
 }

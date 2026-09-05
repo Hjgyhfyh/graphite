@@ -1,7 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { snippetFromBody, wikiLinkAround, wikiLinkAt, wikiLinksInLine } from '../src/wikiHover';
+import { snippetFromBody, wikiLinkAround, wikiLinkAt, wikiLinksInLine, isWikiFollowClick } from '../src/wikiHover';
 
 describe('wikiLinksInLine', () => {
   it('находит цель и подпись', () => {
@@ -45,5 +45,18 @@ describe('wikiLinkAround', () => {
     const hit = wikiLinkAround(state, 14);
     expect(hit?.target).toBe('Цель');
     expect(state.sliceDoc(hit?.from ?? 0, hit?.to ?? 0)).toBe('[[Цель]]');
+  });
+});
+
+describe('isWikiFollowClick', () => {
+  it('ловит Ctrl или Cmd с левой кнопкой', () => {
+    expect(isWikiFollowClick({ button: 0, ctrlKey: true, metaKey: false, altKey: false })).toBe(true);
+    expect(isWikiFollowClick({ button: 0, ctrlKey: false, metaKey: true, altKey: false })).toBe(true);
+  });
+
+  it('не срабатывает без модификатора, с Alt или не с левой кнопкой', () => {
+    expect(isWikiFollowClick({ button: 0, ctrlKey: false, metaKey: false, altKey: false })).toBe(false);
+    expect(isWikiFollowClick({ button: 0, ctrlKey: true, metaKey: false, altKey: true })).toBe(false);
+    expect(isWikiFollowClick({ button: 1, ctrlKey: true, metaKey: false, altKey: false })).toBe(false);
   });
 });

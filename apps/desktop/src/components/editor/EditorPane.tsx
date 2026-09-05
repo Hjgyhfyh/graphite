@@ -286,12 +286,18 @@ function WikiLinkChip({
       {open && preview !== null ? (
         <span
           role="tooltip"
-          className="absolute left-0 top-[calc(100%+6px)] z-30 flex w-64 max-w-[min(16rem,calc(100vw-2rem))] flex-col gap-1 rounded-s border border-stroke-1 bg-bg-2 px-2.5 py-2 shadow-2"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpen(target);
+          }}
+          className="absolute left-0 top-[calc(100%+6px)] z-30 flex w-64 max-w-[min(16rem,calc(100vw-2rem))] cursor-pointer flex-col gap-1 rounded-s border border-stroke-1 bg-bg-2 px-2.5 py-2 shadow-2"
         >
           <span className="truncate text-ui font-semibold text-text-0">{preview.title}</span>
           <span className={cx('line-clamp-4 text-caption leading-relaxed text-text-2', preview.missing && 'italic')}>
             {preview.missing ? 'Заметка не найдена' : preview.snippet.length > 0 ? preview.snippet : 'Пустая заметка'}
           </span>
+          <span className="text-micro text-text-3">Открыть · клик</span>
         </span>
       ) : open && preview === null ? (
         <span
@@ -1465,6 +1471,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
         typewriter: useUiStore.getState().typewriter,
         linkSource,
         wikiPreview,
+        onOpenWiki: openLink,
         attachments: readOnly
           ? undefined
           : {
@@ -1539,7 +1546,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       editorRef.current?.destroy();
       editorRef.current = null;
     };
-  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, wikiPreview, scheduleSave, flushSave, setDirty]);
+  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, wikiPreview, openLink, scheduleSave, flushSave, setDirty]);
 
   useEffect(() => {
     if (readingMode) {

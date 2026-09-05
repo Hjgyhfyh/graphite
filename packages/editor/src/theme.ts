@@ -236,11 +236,13 @@ export const graphiteDark = EditorView.theme(
       textDecoration: 'underline',
       textDecorationColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
       textUnderlineOffset: '2px',
+      cursor: 'pointer',
     },
     '.cm-tooltip.cm-tooltip-hover': {
       padding: '0',
       fontFamily: 'var(--font-ui, system-ui, sans-serif)',
       boxShadow: 'var(--sh-2)',
+      pointerEvents: 'auto',
     },
     '.cm-gr-wiki-tip': {
       display: 'flex',
@@ -248,6 +250,9 @@ export const graphiteDark = EditorView.theme(
       gap: '4px',
       maxWidth: '280px',
       padding: '8px 10px',
+    },
+    '.cm-gr-wiki-tip-open': {
+      cursor: 'pointer',
     },
     '.cm-gr-wiki-tip-title': {
       fontSize: '13px',
@@ -267,8 +272,16 @@ export const graphiteDark = EditorView.theme(
       WebkitBoxOrient: 'vertical',
       overflow: 'hidden',
     },
+    '.cm-gr-wiki-tip-hint': {
+      fontSize: '11px',
+      lineHeight: '14px',
+      color: 'var(--text-3)',
+    },
     '.cm-gr-wiki-tip-missing .cm-gr-wiki-tip-body': {
       fontStyle: 'italic',
+    },
+    '.cm-gr-wiki-tip-missing .cm-gr-wiki-tip-hint:empty': {
+      display: 'none',
     },
     '.cm-gr-tag': {
       color: 'var(--accent)',
