@@ -23,6 +23,8 @@ import { graphiteDark } from './theme';
 import { typewriterScroll } from './typewriter';
 import { openWikiLinkPicker, wikiLinkCompletion } from './wikilink';
 import type { WikiLinkSource } from './wikilink';
+import { wikiLinkPreview } from './wikiHover';
+import type { WikiPreviewSource } from './wikiHover';
 
 const external = Annotation.define<boolean>();
 
@@ -33,6 +35,7 @@ export interface CreateEditorOptions {
   readOnly?: boolean;
   onChange?: (doc: string) => void;
   linkSource?: WikiLinkSource;
+  wikiPreview?: WikiPreviewSource;
   attachments?: AttachmentSaveOptions;
   images?: ImagePreviewOptions;
   /** Прятать YAML-блок свойств в начале документа (по умолчанию включено). */
@@ -97,6 +100,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
     readOnly = false,
     onChange,
     linkSource,
+    wikiPreview,
     attachments,
     images,
     hideFrontmatter = true,
@@ -145,6 +149,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       livePreview,
       tablePreview,
       tagHighlight,
+      ...(wikiPreview !== undefined ? [wikiLinkPreview(wikiPreview)] : []),
       frontmatterCompartment.of(hideFrontmatter ? frontmatterHide() : []),
       typewriterCompartment.of(typewriter ? typewriterScroll() : []),
       taskCheckboxes,

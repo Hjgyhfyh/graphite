@@ -52,6 +52,7 @@ import type {
   MdBlock,
   MdInline,
   WikiLinkItem,
+  WikiPreview,
 } from '@graphite/editor';
 import { GRAPHITE_EVENT, commands, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type { NoteChangedEvent, NoteRef } from '@graphite/bindings';
@@ -65,6 +66,7 @@ import { titleFromRef, useTabsStore } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useEditorMetaStore } from '../../stores/editorMetaStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { loadWikiPreview, resolveWikiTarget } from '../../lib/wikiPreview';
 import { Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useActionHandler } from '../../app/Keymap';
 import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
@@ -251,6 +253,58 @@ interface InlineContext {
   reduced: boolean;
 }
 
+function WikiLinkChip({
+  target,
+  label,
+  onOpen,
+}: {
+  target: string;
+  label: string;
+  onOpen: (target: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<WikiPreview | null>(null);
+
+  return (
+    <span
+      className="relative inline"
+      onMouseEnter={() => {
+        setOpen(true);
+        if (preview === null) {
+          void loadWikiPreview(target).then(setPreview);
+        }
+      }}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        onClick={() => onOpen(target)}
+        className="rounded-xs text-accent underline decoration-accent/40 underline-offset-2 transition-colors hover:decoration-accent"
+      >
+        {label}
+      </button>
+      {open && preview !== null ? (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-[calc(100%+6px)] z-30 flex w-64 max-w-[min(16rem,calc(100vw-2rem))] flex-col gap-1 rounded-s border border-stroke-1 bg-bg-2 px-2.5 py-2 shadow-2"
+        >
+          <span className="truncate text-ui font-semibold text-text-0">{preview.title}</span>
+          <span className={cx('line-clamp-4 text-caption leading-relaxed text-text-2', preview.missing && 'italic')}>
+            {preview.missing ? 'Заметка не найдена' : preview.snippet.length > 0 ? preview.snippet : 'Пустая заметка'}
+          </span>
+        </span>
+      ) : open && preview === null ? (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-[calc(100%+6px)] z-30 rounded-s border border-stroke-1 bg-bg-2 px-2.5 py-2 text-caption text-text-2 shadow-2"
+        >
+          Загрузка…
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function markerNumber(marker: string): string {
   const digits = marker.replace(/[^0-9]/g, '');
   return digits.length > 0 ? digits : '1';
@@ -314,16 +368,7 @@ function renderInline(nodes: readonly MdInline[], keyPrefix: string, ctx: Inline
           </span>
         );
       case 'wikilink':
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => ctx.onOpenLink(node.target)}
-            className="rounded-xs text-accent underline decoration-accent/40 underline-offset-2 transition-colors hover:decoration-accent"
-          >
-            {node.label}
-          </button>
-        );
+        return <WikiLinkChip key={key} target={node.target} label={node.label} onOpen={ctx.onOpenLink} />;
       case 'link': {
         const external = isExternalHref(node.href);
         return (
@@ -1315,17 +1360,15 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   }, []);
 
   const openLink = useCallback((target: string) => {
-    const wanted = target.trim().toLowerCase();
-    const nodes = useVaultStore.getState().tree;
-    const hit =
-      nodes.find((node) => node.title.trim().toLowerCase() === wanted) ??
-      nodes.find((node) => node.path.toLowerCase().replace(/\.md$/, '').endsWith(wanted));
+    const hit = resolveWikiTarget(target);
     if (hit !== undefined) {
       useVaultStore.getState().openNote(hit.ref);
     } else {
       useUiStore.getState().pushToast({ kind: 'info', text: `Заметка «${target}» пока не найдена` });
     }
   }, []);
+
+  const wikiPreview = useCallback((target: string) => loadWikiPreview(target), []);
 
   // «Связать заметку» из палитры и глобального хоткея: фокусируем редактор и
   // открываем пикер; внутри самого редактора Ctrl+L обрабатывает CodeMirror.
@@ -1421,6 +1464,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
         hideFrontmatter: !useUiStore.getState().showPropsInText,
         typewriter: useUiStore.getState().typewriter,
         linkSource,
+        wikiPreview,
         attachments: readOnly
           ? undefined
           : {
@@ -1495,7 +1539,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
       editorRef.current?.destroy();
       editorRef.current = null;
     };
-  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, scheduleSave, flushSave, setDirty]);
+  }, [tabId, noteRef, isWelcome, initialDoc, linkSource, wikiPreview, scheduleSave, flushSave, setDirty]);
 
   useEffect(() => {
     if (readingMode) {
