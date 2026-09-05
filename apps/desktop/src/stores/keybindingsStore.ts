@@ -8,6 +8,7 @@ export type ActionId =
   | 'search.inNote'
   | 'tree.filter'
   | 'board.filter'
+  | 'tasks.filter'
   | 'view.tasks'
   | 'view.brief'
   | 'view.today'
@@ -67,6 +68,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'search.inNote', title: 'Поиск в заметке', group: 'Навигация' },
   { id: 'tree.filter', title: 'Фильтр дерева', group: 'Навигация' },
   { id: 'board.filter', title: 'Фильтр канбана', group: 'Навигация' },
+  { id: 'tasks.filter', title: 'Фильтр задач', group: 'Навигация' },
   { id: 'view.tasks', title: 'Задачи', group: 'Навигация' },
   { id: 'view.brief', title: 'Бриф для Claude (идея → задание)', group: 'Навигация' },
   { id: 'view.today', title: 'Сегодня в дневнике', group: 'Навигация' },
@@ -119,6 +121,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'search.inNote': ['Ctrl+F'],
   'tree.filter': ['Ctrl+Shift+E'],
   'board.filter': ['Ctrl+Shift+K'],
+  'tasks.filter': ['Ctrl+Alt+T'],
   'view.tasks': ['Ctrl+Shift+T'],
   'view.brief': ['Ctrl+Shift+B'],
   'view.today': ['Ctrl+Shift+J'],

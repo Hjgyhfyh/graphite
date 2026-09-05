@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { motion } from 'motion/react';
-import { Clock, FileText, ListChecks, ListTodo } from 'lucide-react';
+import { Clock, FileText, ListChecks, ListTodo, Search, X } from 'lucide-react';
 import { cx } from '@graphite/ui';
 import type { NoteRef, Priority, TaskHit, TreeNode } from '@graphite/bindings';
 import { useTasksStore } from '../../stores/tasksStore';
@@ -8,6 +9,8 @@ import type { TaskFilter } from '../../stores/tasksStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
 import { titleFromRef } from '../../stores/tabsStore';
+import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
+import { filterNeedle, highlightNameParts, nameMatchesFilter } from '../../lib/treeFilter';
 import {
   REDUCED_CROSSFADE,
   listContainerVariants,
@@ -60,6 +63,39 @@ function groupTasks(tasks: TaskHit[], titleFor: (ref: NoteRef) => string): TaskG
     }
   }
   return [...groups.values()].sort((a, b) => (a.isPlan === b.isPlan ? 0 : a.isPlan ? -1 : 1));
+}
+
+function filterGroups(groups: TaskGroup[], needle: string): TaskGroup[] {
+  if (needle.length === 0) {
+    return groups;
+  }
+  const out: TaskGroup[] = [];
+  for (const group of groups) {
+    if (nameMatchesFilter(group.title, needle)) {
+      out.push(group);
+      continue;
+    }
+    const tasks = group.tasks.filter((task) => nameMatchesFilter(task.text, needle));
+    if (tasks.length > 0) {
+      out.push({ ...group, tasks });
+    }
+  }
+  return out;
+}
+
+function HighlightText({ text, needle }: { text: string; needle: string }) {
+  if (needle.length === 0) {
+    return text;
+  }
+  return highlightNameParts(text, needle).map((part, index) =>
+    part.hit ? (
+      <mark key={index} className="rounded-xs bg-accent/20 text-inherit">
+        {part.text}
+      </mark>
+    ) : (
+      <span key={index}>{part.text}</span>
+    ),
+  );
 }
 
 function startOfDay(date: Date): number {
@@ -146,13 +182,14 @@ interface TaskTextProps {
   text: string;
   done: boolean;
   reduced: boolean;
+  needle: string;
 }
 
-function TaskText({ text, done, reduced }: TaskTextProps) {
+function TaskText({ text, done, reduced, needle }: TaskTextProps) {
   return (
     <span className="relative inline-block max-w-full align-baseline">
       <span className={cx('break-words text-ui transition-colors duration-[160ms]', done ? 'text-text-3' : 'text-text-0')}>
-        {text}
+        <HighlightText text={text} needle={needle} />
       </span>
       <motion.span
         aria-hidden
@@ -235,10 +272,26 @@ export function TasksView() {
   const tree = useVaultStore((s) => s.tree);
   const childrenByRef = useVaultStore((s) => s.childrenByRef);
   const reduced = usePrefersReducedMotion();
+  const [query, setQuery] = useState('');
+  const filterRef = useRef<HTMLInputElement>(null);
+  const pendingTasksFilter = useUiStore((s) => s.pendingTasksFilter);
+  const filterBinding = useKeybindingsStore((s) => s.bindings['tasks.filter']);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  useEffect(() => {
+    if (!pendingTasksFilter) {
+      return;
+    }
+    useUiStore.getState().consumeTasksFilterFocus();
+    const frame = requestAnimationFrame(() => {
+      filterRef.current?.focus();
+      filterRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingTasksFilter]);
 
   const titleByRef = useMemo(() => {
     const map = new Map<NoteRef, string>();
@@ -260,7 +313,14 @@ export function TasksView() {
     () => groupTasks(tasks, (ref) => titleByRef.get(ref) ?? titleFromRef(ref)),
     [tasks, titleByRef],
   );
+  const needle = filterNeedle(query);
+  const visibleGroups = useMemo(() => filterGroups(groups, needle), [groups, needle]);
+  const visibleCount = useMemo(
+    () => visibleGroups.reduce((sum, group) => sum + group.tasks.length, 0),
+    [visibleGroups],
+  );
   const empty = EMPTY_STATES[filter];
+  const noMatches = needle.length > 0 && tasks.length > 0 && visibleCount === 0;
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-bg-0">
@@ -268,7 +328,11 @@ export function TasksView() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-2">
             <h1 className="text-h2 text-text-0">Задачи</h1>
-            {tasks.length > 0 ? <span className="text-caption text-text-3">{tasks.length}</span> : null}
+            {tasks.length > 0 ? (
+              <span className="text-caption tabular-nums text-text-3">
+                {needle.length > 0 ? `${visibleCount} из ${tasks.length}` : tasks.length}
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-0.5">
             {FILTERS.map((item) => {
@@ -297,12 +361,50 @@ export function TasksView() {
           </div>
         </div>
 
+        <label className="flex h-8 items-center gap-1.5 rounded-s border border-stroke-0 bg-bg-1 px-2.5 focus-within:border-stroke-1">
+          <Search size={13} strokeWidth={1.75} className="shrink-0 text-text-3" aria-hidden />
+          <input
+            ref={filterRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                if (query.length > 0) {
+                  setQuery('');
+                } else {
+                  event.currentTarget.blur();
+                }
+              }
+            }}
+            aria-label={`Фильтр задач · ${formatBinding(filterBinding)}`}
+            placeholder="Фильтр задач…"
+            className="min-w-0 flex-1 bg-transparent text-ui text-text-0 outline-none placeholder:text-text-3"
+          />
+          {query.length > 0 ? (
+            <button
+              type="button"
+              aria-label="Сбросить фильтр"
+              onClick={() => {
+                setQuery('');
+                filterRef.current?.focus();
+              }}
+              className="shrink-0 rounded-xs p-0.5 text-text-3 hover:text-text-0"
+            >
+              <X size={12} strokeWidth={1.75} />
+            </button>
+          ) : null}
+        </label>
+
         <IdeaToTasks />
 
         {loading && tasks.length === 0 ? (
           <TasksSkeleton reduced={reduced} />
         ) : tasks.length === 0 ? (
           <EmptyState title={empty.title} hint={empty.hint} />
+        ) : noMatches ? (
+          <EmptyState title="Нет совпадений" hint={`По запросу «${query.trim()}» задач нет.`} />
         ) : (
           <motion.div
             key={filter}
@@ -311,7 +413,7 @@ export function TasksView() {
             animate="animate"
             className="flex flex-col gap-5"
           >
-            {groups.map((group) => {
+            {visibleGroups.map((group) => {
               const doneCount = group.tasks.filter((task) => task.done).length;
               const GroupIcon = group.isPlan ? ListChecks : FileText;
               return (
@@ -322,7 +424,9 @@ export function TasksView() {
                     className="group flex items-center gap-1.5 self-start rounded-s px-1.5 py-1 transition-colors duration-[120ms] hover:bg-bg-1"
                   >
                     <GroupIcon size={13} strokeWidth={1.75} className={group.isPlan ? 'text-accent' : 'text-text-3'} />
-                    <span className="text-caption font-medium text-text-1 group-hover:text-text-0">{group.title}</span>
+                    <span className="text-caption font-medium text-text-1 group-hover:text-text-0">
+                      <HighlightText text={group.title} needle={needle} />
+                    </span>
                     <span className="text-micro text-text-3">
                       {doneCount}/{group.tasks.length}
                     </span>
@@ -346,7 +450,7 @@ export function TasksView() {
                             onClick={() => jumpToNote(task.source.ref)}
                             className="min-w-0 flex-1 text-left"
                           >
-                            <TaskText text={task.text} done={task.done} reduced={reduced} />
+                            <TaskText text={task.text} done={task.done} reduced={reduced} needle={needle} />
                           </button>
                           <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
                             {task.priority !== undefined ? <PriorityBadge priority={task.priority} /> : null}

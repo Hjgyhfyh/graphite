@@ -90,6 +90,7 @@ export interface UiStore {
   pendingGraphFocus: NoteRef | undefined;
   pendingTreeFilter: boolean;
   pendingBoardFilter: boolean;
+  pendingTasksFilter: boolean;
   pendingTag: string | undefined;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
@@ -130,6 +131,8 @@ export interface UiStore {
   consumeTreeFilterFocus(): boolean;
   focusBoardFilter(): void;
   consumeBoardFilterFocus(): boolean;
+  focusTasksFilter(): void;
+  consumeTasksFilterFocus(): boolean;
   openTag(tag: string): void;
   consumePendingTag(): string | undefined;
   revealOnGraph(ref: NoteRef): void;
@@ -223,6 +226,7 @@ export const useUiStore = create<UiStore>()(
       pendingGraphFocus: undefined,
       pendingTreeFilter: false,
       pendingBoardFilter: false,
+      pendingTasksFilter: false,
       pendingTag: undefined,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
@@ -382,6 +386,21 @@ export const useUiStore = create<UiStore>()(
           return false;
         }
         set({ pendingBoardFilter: false });
+        return true;
+      },
+      focusTasksFilter: () => {
+        set({
+          pendingTasksFilter: true,
+          railView: 'tasks',
+          sidebarHidden: false,
+          focusMode: false,
+        });
+      },
+      consumeTasksFilterFocus: () => {
+        if (!get().pendingTasksFilter) {
+          return false;
+        }
+        set({ pendingTasksFilter: false });
         return true;
       },
       openTag: (tag) => {
