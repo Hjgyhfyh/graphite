@@ -73,6 +73,8 @@ export interface UiStore {
   reducedMotion: boolean;
   animationSpeed: number;
   theme: Theme;
+  focusMode: boolean;
+  pendingSearch: string | undefined;
   floatingCaptureOpen: boolean;
   onboardingDone: boolean;
   toasts: Toast[];
@@ -95,6 +97,10 @@ export interface UiStore {
   setReducedMotion(on: boolean): void;
   setAnimationSpeed(speed: number): void;
   setTheme(theme: Theme): void;
+  toggleFocusMode(): void;
+  setFocusMode(on: boolean): void;
+  openSearchWith(query: string): void;
+  consumePendingSearch(): string | undefined;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
   setOnboardingDone(done: boolean): void;
@@ -167,6 +173,8 @@ export const useUiStore = create<UiStore>()(
       reducedMotion: false,
       animationSpeed: ANIMATION_SPEED_DEFAULT,
       theme: 'default',
+      focusMode: false,
+      pendingSearch: undefined,
       floatingCaptureOpen: false,
       onboardingDone: false,
       toasts: [],
@@ -240,6 +248,22 @@ export const useUiStore = create<UiStore>()(
         set({ theme });
         applyTheme(theme);
       },
+      toggleFocusMode: () => {
+        set((s) => ({ focusMode: !s.focusMode }));
+      },
+      setFocusMode: (on) => {
+        set({ focusMode: on });
+      },
+      openSearchWith: (query) => {
+        set({ pendingSearch: query, railView: 'search', sidebarHidden: false, focusMode: false });
+      },
+      consumePendingSearch: () => {
+        const query = get().pendingSearch;
+        if (query !== undefined) {
+          set({ pendingSearch: undefined });
+        }
+        return query;
+      },
       setFloatingCaptureOpen: (open) => {
         set({ floatingCaptureOpen: open });
       },
@@ -277,6 +301,7 @@ export const useUiStore = create<UiStore>()(
         reducedMotion: s.reducedMotion,
         animationSpeed: s.animationSpeed,
         theme: s.theme,
+        focusMode: s.focusMode,
         onboardingDone: s.onboardingDone,
       }),
       merge: (persisted, current) => {
@@ -293,6 +318,7 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_DEFAULT,
           ),
           theme: isTheme(saved.theme) ? saved.theme : 'default',
+          focusMode: saved.focusMode === true,
           railView: isRailView(saved.railView) ? saved.railView : current.railView,
           ...normalizeRailOrder(saved.railOrder, saved.railHidden),
         };

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { motion } from 'motion/react';
 import { ArrowLeftRight, CornerDownLeft, Pin } from 'lucide-react';
 import { Kbd } from '@graphite/ui';
+import { OVERLAY_SCRIM } from '../../lib/overlay';
 import type { TreeNode } from '@graphite/bindings';
 import { activeTab, usePanesStore } from '../../stores/panesStore';
 import { useTabsStore } from '../../stores/tabsStore';
@@ -432,7 +433,7 @@ export function QuickSwitcher() {
       {open ? (
         <motion.div
           key="switcher-overlay"
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[18vh]"
+          className={`fixed inset-0 z-50 flex items-start justify-center px-4 pt-[18vh] ${OVERLAY_SCRIM}`}
           variants={reduced ? reducedFadeVariants : fadeVariants}
           initial="initial"
           animate="animate"

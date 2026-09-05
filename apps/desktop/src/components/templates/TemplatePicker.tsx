@@ -14,6 +14,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { NoteIcon } from '../tree/NoteIcon';
 import { Fade, Presence, fadeVariants, popVariants, reducedFadeVariants, usePrefersReducedMotion } from '../../motion';
+import { OVERLAY_SCRIM } from '../../lib/overlay';
 
 type PickerStep = 'pick' | 'name';
 
@@ -248,7 +249,7 @@ export function TemplatePicker() {
       {open ? (
         <motion.div
           key="template-overlay"
-          className="fixed inset-0 z-40 flex items-start justify-center bg-black/55 px-4 pt-[15vh]"
+          className={`fixed inset-0 z-40 flex items-start justify-center px-4 pt-[15vh] ${OVERLAY_SCRIM}`}
           variants={reduced ? reducedFadeVariants : fadeVariants}
           initial="initial"
           animate="animate"

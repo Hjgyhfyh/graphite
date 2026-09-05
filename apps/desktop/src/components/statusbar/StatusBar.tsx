@@ -26,6 +26,7 @@ import { useGitStore } from '../../stores/gitStore';
 import { useNavStore } from '../../stores/navStore';
 import { humanSyncError, useSyncStore } from '../../stores/syncStore';
 import { useUiStore } from '../../stores/uiStore';
+import { useEditorMetaStore } from '../../stores/editorMetaStore';
 import { useVaultStore } from '../../stores/vaultStore';
 
 /** Дебаунс git-статуса на note_changed: не гонять пачку git-процессов на каждый автосейв. */
@@ -44,17 +45,35 @@ interface StatChipProps {
   value: number;
   label: string;
   accent?: boolean;
+  onClick?: () => void;
 }
 
-function StatChip({ icon: Icon, value, label, accent = false }: StatChipProps) {
+function StatChip({ icon: Icon, value, label, accent = false, onClick }: StatChipProps) {
+  const className = cx(
+    'flex items-center gap-1 tabular-nums',
+    accent ? 'text-accent' : 'text-text-2',
+    onClick !== undefined &&
+      'rounded-xs px-1 py-0.5 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+  );
+  const inner = (
+    <>
+      <Icon size={12} strokeWidth={1.75} aria-hidden />
+      {value}
+    </>
+  );
+  if (onClick !== undefined) {
+    return (
+      <Tooltip content={`${label}: ${value} · открыть`} side="top">
+        <button type="button" aria-label={`${label}: ${value}`} onClick={onClick} className={className}>
+          {inner}
+        </button>
+      </Tooltip>
+    );
+  }
   return (
     <Tooltip content={`${label}: ${value}`} side="top">
-      <span
-        aria-label={`${label}: ${value}`}
-        className={cx('flex items-center gap-1 tabular-nums', accent ? 'text-accent' : 'text-text-2')}
-      >
-        <Icon size={12} strokeWidth={1.75} aria-hidden />
-        {value}
+      <span aria-label={`${label}: ${value}`} className={className}>
+        {inner}
       </span>
     </Tooltip>
   );
@@ -67,12 +86,28 @@ function IndexIndicator() {
   const busy = status.state !== 'idle';
   const fraction = status.total > 0 ? Math.min(1, status.done / status.total) : 0;
   const [everIndexed, setEverIndexed] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   useEffect(() => {
     if (busy || status.total > 0) {
       setEverIndexed(true);
     }
   }, [busy, status.total]);
+
+  const rebuild = async () => {
+    if (rebuilding || busy || !hasVault || !isTauriAvailable()) {
+      return;
+    }
+    setRebuilding(true);
+    try {
+      await commands.reindex(true);
+      useUiStore.getState().pushToast({ kind: 'success', text: 'Индекс пересобран' });
+    } catch {
+      useUiStore.getState().pushToast({ kind: 'error', text: 'Не удалось пересобрать индекс' });
+    } finally {
+      setRebuilding(false);
+    }
+  };
 
   return (
     <Presence mode="wait">
@@ -102,9 +137,18 @@ function IndexIndicator() {
           </span>
         </Fade>
       ) : hasVault && everIndexed ? (
-        <Fade key="fresh" className="flex items-center gap-1.5 text-text-2">
-          <span aria-hidden className="size-1.5 rounded-full bg-ok" />
-          Индекс свежий
+        <Fade key="fresh">
+          <Tooltip content="Пересобрать индекс" side="top">
+            <button
+              type="button"
+              onClick={() => void rebuild()}
+              disabled={rebuilding}
+              className="flex items-center gap-1.5 rounded-xs px-1 py-0.5 text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0 disabled:opacity-50"
+            >
+              <span aria-hidden className={cx('size-1.5 rounded-full', rebuilding ? 'bg-warn' : 'bg-ok')} />
+              {rebuilding ? 'Пересборка…' : 'Индекс свежий'}
+            </button>
+          </Tooltip>
         </Fade>
       ) : null}
     </Presence>
@@ -325,6 +369,22 @@ function GitIndicator() {
   );
 }
 
+function DocStats() {
+  const words = useEditorMetaStore((s) => s.words);
+  const readingMin = useEditorMetaStore((s) => s.readingMin);
+  const currentRef = useVaultStore((s) => s.currentRef);
+  if (currentRef === undefined || words === 0) {
+    return null;
+  }
+  const label =
+    readingMin === 0 ? `${words} сл.` : `${words} сл. · ${readingMin} мин`;
+  return (
+    <Tooltip content="Слов в открытой заметке · оценка чтения" side="top">
+      <span className="tabular-nums text-text-2">{label}</span>
+    </Tooltip>
+  );
+}
+
 export function StatusBar() {
   const info = useVaultStore((s) => s.info);
   const railView = useUiStore((s) => s.railView);
@@ -415,8 +475,22 @@ export function StatusBar() {
             <span aria-hidden className="h-3.5 w-px shrink-0 bg-stroke-0" />
             <div className="flex shrink-0 items-center gap-2.5">
               <StatChip icon={FileText} value={info.counts.notes} label="Заметок" />
-              <StatChip icon={Inbox} value={info.counts.inbox} label="Входящие" accent={info.counts.inbox > 0} />
-              <StatChip icon={ListTodo} value={info.counts.tasksOpen} label="Открытых задач" />
+              <StatChip
+                icon={Inbox}
+                value={info.counts.inbox}
+                label="Входящие"
+                accent={info.counts.inbox > 0}
+                onClick={() => useUiStore.getState().openSearchWith('status:inbox')}
+              />
+              <StatChip
+                icon={ListTodo}
+                value={info.counts.tasksOpen}
+                label="Открытых задач"
+                onClick={() => {
+                  useUiStore.getState().setFocusMode(false);
+                  useUiStore.getState().setRailView('tasks');
+                }}
+              />
             </div>
           </>
         ) : null}
@@ -424,6 +498,8 @@ export function StatusBar() {
       <div className="flex shrink-0 items-center gap-2.5">
         {info !== undefined ? (
           <>
+            <DocStats />
+            <span aria-hidden className="h-3.5 w-px bg-stroke-0" />
             <NavHistoryControls />
             <span aria-hidden className="h-3.5 w-px bg-stroke-0" />
           </>

@@ -22,6 +22,7 @@ export type ActionId =
   | 'note.exportMd'
   | 'note.print'
   | 'editor.toggleReading'
+  | 'editor.focusMode'
   | 'editor.linkNote'
   | 'format.bold'
   | 'format.italic'
@@ -71,6 +72,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'note.exportMd', title: 'Сохранить копию .md…', group: 'Заметки' },
   { id: 'note.print', title: 'Печать / PDF…', group: 'Заметки' },
   { id: 'editor.toggleReading', title: 'Режим чтения', group: 'Редактор' },
+  { id: 'editor.focusMode', title: 'Режим фокуса', group: 'Редактор' },
   { id: 'editor.linkNote', title: 'Связать заметку', group: 'Редактор' },
   { id: 'format.bold', title: 'Жирный', group: 'Редактор' },
   { id: 'format.italic', title: 'Курсив', group: 'Редактор' },
@@ -113,6 +115,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'note.exportMd': [],
   'note.print': [],
   'editor.toggleReading': ['Ctrl+E'],
+  'editor.focusMode': ['Ctrl+Shift+Backslash'],
   'editor.linkNote': ['Ctrl+L'],
   'format.bold': ['Ctrl+B'],
   'format.italic': ['Ctrl+I'],

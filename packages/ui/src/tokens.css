@@ -214,12 +214,43 @@
 }
 
 /*
- * Тема Dracula (draculatheme.com). Включается атрибутом data-theme на <html>
- * (apps/desktop/src/theme.ts). Переопределяем только базовые цвета: производные
- * (--color-*-dim, --color-status-*) и алиасы :root — var()-ссылки на этом же
- * элементе, каскад пересчитывает их сам. html[...] нужен вместо [...] — иначе
- * специфичность сравняется с :root и победит порядок правил в бандле.
+ * Темы: data-theme на <html> (apps/desktop/src/theme.ts).
+ * «Бумага» — светлая; Dracula — канон draculatheme.com.
+ * Переопределяем базовые цвета: производные (--color-*-dim, --color-status-*)
+ * и алиасы :root — var()-ссылки на этом же элементе, каскад пересчитывает их сам.
+ * html[...] нужен вместо [...] — иначе специфичность сравняется с :root.
  */
+html[data-theme='paper'] {
+  color-scheme: light;
+
+  --color-bg-0: #f4f2ec;
+  --color-bg-1: #ebe8e0;
+  --color-bg-2: #e4e0d6;
+  --color-bg-3: #d8d3c8;
+  --color-bg-4: #ccc6b8;
+
+  --color-stroke-0: #d5cfc3;
+  --color-stroke-1: #bfb7a8;
+
+  --color-text-0: #1c1b19;
+  --color-text-1: #4a4843;
+  --color-text-2: #6f6c64;
+  --color-text-3: #9a958a;
+
+  --color-accent: #4f58c9;
+  --color-selection: #5b54e0;
+  --color-ai: #1b8f7c;
+
+  --color-ok: #2f8a58;
+  --color-warn: #b07a1c;
+  --color-danger: #c45c5c;
+
+  --shadow-1: 0 1px 2px rgba(40, 36, 28, 0.08);
+  --shadow-2: 0 8px 24px rgba(40, 36, 28, 0.12);
+  --shadow-3: 0 18px 48px rgba(40, 36, 28, 0.16);
+  --inset-shadow-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
 html[data-theme='dracula'] {
   --color-bg-0: #191A21;
   --color-bg-1: #21222C;

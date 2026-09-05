@@ -36,6 +36,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'note.newFromTemplate',
   'note.copyPage',
   'editor.toggleReading',
+  'editor.focusMode',
   'task.sweepDone',
   'view.outline',
 ]);
@@ -161,6 +162,9 @@ function runBuiltin(id: ActionId): boolean {
     case 'editor.toggleReading':
       ui.toggleReadingMode();
       return true;
+    case 'editor.focusMode':
+      ui.toggleFocusMode();
+      return true;
     case 'search.inNote':
       return focusActiveEditor();
     case 'capture.quick':
@@ -254,6 +258,14 @@ export function Keymap() {
       // не должна вдобавок запускать глобальный экшен.
       if (event.defaultPrevented) {
         return;
+      }
+      if (event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        const ui = useUiStore.getState();
+        if (!ui.paletteOpen && !ui.quickSwitcherOpen && !ui.floatingCaptureOpen && ui.focusMode) {
+          ui.setFocusMode(false);
+          event.preventDefault();
+          return;
+        }
       }
       const id = useKeybindingsStore.getState().matchEvent(event);
       if (id === null) {

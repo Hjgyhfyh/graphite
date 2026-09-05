@@ -27,7 +27,7 @@ export function ThemeSelect() {
   };
 
   return (
-    <div aria-label="Тема оформления" className="flex items-center gap-1 rounded-m border border-stroke-0 bg-bg-2 p-1">
+    <div aria-label="Тема оформления" className="flex max-w-full flex-wrap items-center gap-1 rounded-m border border-stroke-0 bg-bg-2 p-1">
       {THEMES.map((option) => {
         const on = option.id === theme;
         return (

@@ -12,6 +12,7 @@ import {
   History,
   Loader,
   PlugZap,
+  Palette,
   Search,
   UploadCloud,
 } from 'lucide-react';
@@ -22,10 +23,16 @@ import type { SearchHit } from '@graphite/bindings';
 import { runAction } from '../../app/Keymap';
 import { ACTIONS, chordKeys, useKeybindingsStore } from '../../stores/keybindingsStore';
 import { useGitStore } from '../../stores/gitStore';
-import { useUiStore } from '../../stores/uiStore';
+import { useUiStore, RAIL_DEFAULT_ORDER } from '../../stores/uiStore';
+import { openBriefView } from '../../stores/briefStore';
 import { pickVaultFolder, switchVault } from '../../stores/vaultActions';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useVaultsStore, vaultKey } from '../../stores/vaultsStore';
+import { nextTheme, startThemeCrossfade } from '../../theme';
+import { NoteIcon } from '../tree/NoteIcon';
+import { RAIL_META } from '../rail/railItems';
+import { OVERLAY_SCRIM } from '../../lib/overlay';
+import { Presence, fadeVariants, popVariants, reducedFadeVariants, usePrefersReducedMotion } from '../../motion';
 
 interface PaletteAction {
   id: string;
@@ -33,6 +40,24 @@ interface PaletteAction {
   icon: LucideIcon;
   run: () => void;
 }
+
+const VIEW_ACTIONS: readonly PaletteAction[] = RAIL_DEFAULT_ORDER.map((view) => ({
+  id: `view.${view}`,
+  title: `Раздел: ${RAIL_META[view].label}`,
+  icon: RAIL_META[view].icon,
+  run: () => {
+    if (view === 'brief') {
+      openBriefView();
+      return;
+    }
+    const ui = useUiStore.getState();
+    ui.setFocusMode(false);
+    ui.setRailView(view);
+    if (view === 'tree' || view === 'search') {
+      ui.setSidebarHidden(false);
+    }
+  },
+}));
 
 const BACKUP_ACTIONS: readonly PaletteAction[] = [
   {
@@ -61,6 +86,21 @@ const BACKUP_ACTIONS: readonly PaletteAction[] = [
   },
 ];
 
+const APPEARANCE_ACTIONS: readonly PaletteAction[] = [
+  {
+    id: 'theme.cycle',
+    title: 'Следующая тема оформления',
+    icon: Palette,
+    run: () => {
+      const ui = useUiStore.getState();
+      if (!ui.reducedMotion) {
+        startThemeCrossfade();
+      }
+      ui.setTheme(nextTheme(ui.theme));
+    },
+  },
+];
+
 const VAULT_ACTIONS: readonly PaletteAction[] = [
   {
     id: 'vault.openFolder',
@@ -79,8 +119,6 @@ const VAULT_ACTIONS: readonly PaletteAction[] = [
     },
   },
 ];
-import { NoteIcon } from '../tree/NoteIcon';
-import { Presence, fadeVariants, popVariants, reducedFadeVariants, usePrefersReducedMotion } from '../../motion';
 
 type FullTextState = 'idle' | 'loading' | 'ok' | 'empty' | 'unavailable' | 'error';
 
@@ -236,6 +274,8 @@ export function CommandPalette() {
     [dq],
   );
   const backupMatches = useMemo(() => BACKUP_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);
+  const viewMatches = useMemo(() => VIEW_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);
+  const appearanceMatches = useMemo(() => APPEARANCE_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);
   const vaultMatches = useMemo(
     () => knownVaults.filter((vault) => matches(dq, vault.name, vault.path)),
     [dq, knownVaults],
@@ -258,7 +298,7 @@ export function CommandPalette() {
       {open ? (
         <motion.div
           key="palette-overlay"
-          className="fixed inset-0 z-40 flex items-start justify-center bg-black/55 px-4 pt-[15vh]"
+          className={`fixed inset-0 z-40 flex items-start justify-center px-4 pt-[15vh] ${OVERLAY_SCRIM}`}
           variants={reduced ? reducedFadeVariants : fadeVariants}
           initial="initial"
           animate="animate"
@@ -326,6 +366,52 @@ export function CommandPalette() {
                         <ChordBadges chords={bindings[action.id] ?? []} />
                       </Command.Item>
                     ))}
+                  </Command.Group>
+                ) : null}
+
+                {viewMatches.length > 0 ? (
+                  <Command.Group heading="Разделы" className={HEADING}>
+                    {viewMatches.map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <Command.Item
+                          key={action.id}
+                          value={`view-${action.id}`}
+                          keywords={[action.title]}
+                          onSelect={() => {
+                            close();
+                            action.run();
+                          }}
+                          className={ROW}
+                        >
+                          <Icon size={16} strokeWidth={1.75} className="shrink-0 text-text-3" />
+                          <span className="flex-1 truncate">{action.title}</span>
+                        </Command.Item>
+                      );
+                    })}
+                  </Command.Group>
+                ) : null}
+
+                {appearanceMatches.length > 0 ? (
+                  <Command.Group heading="Оформление" className={HEADING}>
+                    {appearanceMatches.map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <Command.Item
+                          key={action.id}
+                          value={`appear-${action.id}`}
+                          keywords={[action.title]}
+                          onSelect={() => {
+                            close();
+                            action.run();
+                          }}
+                          className={ROW}
+                        >
+                          <Icon size={16} strokeWidth={1.75} className="shrink-0 text-text-3" />
+                          <span className="flex-1 truncate">{action.title}</span>
+                        </Command.Item>
+                      );
+                    })}
                   </Command.Group>
                 ) : null}
 

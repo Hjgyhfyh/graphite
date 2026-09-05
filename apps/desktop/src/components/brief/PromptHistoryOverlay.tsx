@@ -6,6 +6,7 @@ import { cx } from '@graphite/ui';
 import { commands } from '@graphite/bindings';
 import type { PromptLogEntry, PromptLogMeta } from '@graphite/bindings';
 import { Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
+import { OVERLAY_SCRIM } from '../../lib/overlay';
 import { usePromptHistoryStore } from '../../stores/promptHistoryStore';
 import { useUiStore } from '../../stores/uiStore';
 
@@ -193,7 +194,7 @@ export function PromptHistoryOverlay() {
       {open ? (
         <motion.div
           key="prompt-history-overlay"
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 sm:p-8"
+          className={`fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-8 ${OVERLAY_SCRIM}`}
           variants={reduced ? reducedVariants : overlayVariants}
           initial="initial"
           animate="animate"

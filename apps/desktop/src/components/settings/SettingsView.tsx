@@ -291,6 +291,8 @@ export function SettingsView() {
   const setAnimationSpeed = useUiStore((s) => s.setAnimationSpeed);
   const readingMode = useUiStore((s) => s.readingMode);
   const setReadingMode = useUiStore((s) => s.setReadingMode);
+  const focusMode = useUiStore((s) => s.focusMode);
+  const setFocusMode = useUiStore((s) => s.setFocusMode);
   const showPropsInText = useUiStore((s) => s.showPropsInText);
   const setShowPropsInText = useUiStore((s) => s.setShowPropsInText);
   const pushToast = useUiStore((s) => s.pushToast);
@@ -665,7 +667,7 @@ export function SettingsView() {
               id="appearance"
               icon={Palette}
               title="Внешний вид"
-              description="Тема, анимации и режим чтения"
+              description="Тема, анимации и режим чтения. «Бумага» — светлая палитра."
               sectionRef={(el) => {
                 sectionEls.current.appearance = el;
               }}
@@ -675,6 +677,9 @@ export function SettingsView() {
               </Row>
               <Row title="Режим чтения" hint="Крупный набор без интерфейса редактора">
                 <Switch checked={readingMode} onCheckedChange={setReadingMode} />
+              </Row>
+              <Row title="Режим фокуса" hint="Прячет рейку, дерево и статусбар — только текст. Ctrl+Shift+\ или Esc">
+                <Switch checked={focusMode} onCheckedChange={setFocusMode} />
               </Row>
               <Row title="Свойства в тексте" hint="Показывать YAML-блок в начале заметки — по умолчанию он скрыт, свойства правятся на панели справа">
                 <Switch checked={showPropsInText} onCheckedChange={setShowPropsInText} />

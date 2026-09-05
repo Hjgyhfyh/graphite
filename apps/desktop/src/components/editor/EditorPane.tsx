@@ -19,6 +19,7 @@ import {
   ListChecks,
   PencilLine,
   Pilcrow,
+  Scan,
   Scissors,
   Strikethrough,
 } from 'lucide-react';
@@ -62,6 +63,7 @@ import type { NoteStatus } from '@graphite/ui';
 import { useEditorViewsStore } from '../../stores/editorViewsStore';
 import { titleFromRef, useTabsStore } from '../../stores/tabsStore';
 import { useUiStore } from '../../stores/uiStore';
+import { useEditorMetaStore } from '../../stores/editorMetaStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { Presence, springSnappy, usePrefersReducedMotion } from '../../motion';
 import { useActionHandler } from '../../app/Keymap';
@@ -1082,6 +1084,8 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const setDirty = useTabsStore((s) => s.setDirty);
   const readingMode = useUiStore((s) => s.readingMode);
   const toggleReadingMode = useUiStore((s) => s.toggleReadingMode);
+  const focusMode = useUiStore((s) => s.focusMode);
+  const toggleFocusMode = useUiStore((s) => s.toggleFocusMode);
   const showPropsInText = useUiStore((s) => s.showPropsInText);
   const reduced = usePrefersReducedMotion();
 
@@ -1103,6 +1107,13 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
 
   const [docText, setDocText] = useState('');
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!loaded) {
+      return;
+    }
+    useEditorMetaStore.getState().setFromDoc(docText);
+  }, [docText, loaded]);
   const [menu, setMenu] = useState<SelectionMenuState | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [conflict, setConflict] = useState<{ disk: string; rev: string } | null>(null);
@@ -1833,6 +1844,17 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
             </button>
           </Tooltip>
         ) : null}
+        <Tooltip content={focusMode ? 'Выйти из фокуса' : 'Режим фокуса'}>
+          <button
+            type="button"
+            onClick={() => toggleFocusMode()}
+            aria-label={focusMode ? 'Выйти из фокуса' : 'Режим фокуса'}
+            aria-pressed={focusMode}
+            className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-s border border-stroke-1 bg-bg-2 text-text-1 shadow-1 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0 active:bg-bg-4"
+          >
+            <Scan size={15} strokeWidth={1.75} />
+          </button>
+        </Tooltip>
         <Tooltip content={readingMode ? 'Режим правки' : 'Режим чтения'}>
           <button
             type="button"

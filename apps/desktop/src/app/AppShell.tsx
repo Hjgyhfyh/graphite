@@ -2,8 +2,8 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronRight, HardDrive, LoaderCircle, X } from 'lucide-react';
-import { Button, MOTION, TooltipProvider, cx } from '@graphite/ui';
+import { ChevronRight, Diamond, HardDrive, LoaderCircle, Minimize2, X } from 'lucide-react';
+import { Button, Kbd, MOTION, TooltipProvider, cx } from '@graphite/ui';
 import { commands, GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
 import type {
   IndexProgressEvent,
@@ -182,8 +182,19 @@ function VaultGate() {
   const recent = known.slice(0, 4);
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto bg-bg-0 px-6 py-10">
-      <div className="flex flex-col items-center gap-2.5 text-center">
+    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto bg-bg-0 px-6 py-10">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-80"
+        style={{
+          background:
+            'radial-gradient(ellipse 70% 50% at 50% 18%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%)',
+        }}
+      />
+      <div className="relative flex flex-col items-center gap-2.5 text-center">
+        <span className="mb-1 flex size-14 items-center justify-center rounded-l border border-stroke-0 bg-bg-1 text-accent shadow-1 inset-shadow-hairline">
+          <Diamond size={22} strokeWidth={1.5} fill="currentColor" />
+        </span>
         <h1 className="text-[26px] font-semibold tracking-tight text-text-0">Graphite</h1>
         <p className="max-w-sm text-ui leading-relaxed text-text-1">
           Заметки живут обычными markdown-файлами в вашей папке. Выберите её — и поехали.
@@ -298,6 +309,8 @@ export function AppShell() {
   const setRightWidth = useUiStore((s) => s.setRightWidth);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
+  const focusMode = useUiStore((s) => s.focusMode);
+  const setFocusMode = useUiStore((s) => s.setFocusMode);
 
   useActionHandler('note.delete', () => {
     const ref = useVaultStore.getState().currentRef;
@@ -355,7 +368,7 @@ export function AppShell() {
     };
   }, []);
 
-  const showSidebar = !sidebarHidden && (railView === 'tree' || railView === 'search');
+  const showSidebar = !focusMode && !sidebarHidden && (railView === 'tree' || railView === 'search');
 
   return (
     <AppMotionConfig>
@@ -363,7 +376,7 @@ export function AppShell() {
         <AppLaunch className="flex h-dvh flex-col overflow-hidden bg-bg-0 text-text-0">
           <PanelStagger className="flex min-h-0 min-w-0 flex-1">
             <PanelItem className="flex shrink-0">
-              <Rail />
+              {focusMode ? null : <Rail />}
             </PanelItem>
             <PanelItem className="flex min-h-0 shrink-0">
               <CollapsibleColumn open={showSidebar} width={treeWidth} className="relative h-full shrink-0">
@@ -379,7 +392,7 @@ export function AppShell() {
             </PanelItem>
             <PanelItem className="flex min-h-0 shrink-0">
               <CollapsibleColumn
-                open={rightPanelOpen && railView !== 'explorer'}
+                open={rightPanelOpen && !focusMode && railView !== 'explorer'}
                 width={rightWidth}
                 className="relative h-full shrink-0"
               >
@@ -387,8 +400,19 @@ export function AppShell() {
               </CollapsibleColumn>
             </PanelItem>
           </PanelStagger>
-          <StatusBar />
+          {focusMode ? null : <StatusBar />}
         </AppLaunch>
+        {focusMode ? (
+          <button
+            type="button"
+            onClick={() => setFocusMode(false)}
+            className="fixed left-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-s border border-stroke-1 bg-bg-2/90 px-2.5 py-1.5 text-caption text-text-1 shadow-2 backdrop-blur-sm transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+          >
+            <Minimize2 size={13} strokeWidth={1.75} />
+            Выйти из фокуса
+            <Kbd>Esc</Kbd>
+          </button>
+        ) : null}
         <CommandPalette />
         <QuickSwitcher />
         <TemplatePicker />

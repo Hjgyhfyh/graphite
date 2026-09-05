@@ -730,6 +730,12 @@ export function GraphView() {
     let drag: DragState | null = null;
     let lastHover = -1;
 
+    const themeWatch = new MutationObserver(() => {
+      engine.theme = readTheme();
+      requestFrame();
+    });
+    themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
     function requestFrame(): void {
       if (raf === 0 && !disposed) {
         raf = requestAnimationFrame(frame);
@@ -1100,6 +1106,7 @@ export function GraphView() {
 
     return () => {
       disposed = true;
+      themeWatch.disconnect();
       apiRef.current = null;
       if (raf !== 0) {
         cancelAnimationFrame(raf);

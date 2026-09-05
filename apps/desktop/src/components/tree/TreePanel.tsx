@@ -41,7 +41,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { NoteRef, TreeNode } from '@graphite/bindings';
 import { commands, isTauriAvailable } from '@graphite/bindings';
-import { Kbd, STAGGER_CAP, Tooltip, cx } from '@graphite/ui';
+import { Button, Kbd, STAGGER_CAP, Tooltip, cx } from '@graphite/ui';
 import { useActionHandler } from '../../app/Keymap';
 import { springSnappy, springStandard, usePrefersReducedMotion } from '../../motion';
 import { usePanesStore } from '../../stores/panesStore';
@@ -257,7 +257,9 @@ function collectFolderIds(nodes: readonly ArNode[]): string[] {
 function EmptyState() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-      <NoteIcon icon="FileText" size={24} className="text-text-3" />
+      <span className="flex size-12 items-center justify-center rounded-l border border-stroke-0 bg-bg-1 text-text-3">
+        <NoteIcon icon="FileText" size={22} />
+      </span>
       <p className="text-ui text-text-1">Создайте первую заметку</p>
       <div className="flex items-center gap-1 text-caption text-text-2">
         <span>или</span>
@@ -265,6 +267,9 @@ function EmptyState() {
         <Kbd>Alt</Kbd>
         <Kbd>Space</Kbd>
       </div>
+      <Button variant="primary" size="sm" onClick={() => void useVaultStore.getState().createNote()}>
+        Новая заметка
+      </Button>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Columns2, FilePlus2 } from 'lucide-react';
-import { cx, springTransition } from '@graphite/ui';
+import { Button, cx, springTransition } from '@graphite/ui';
 import { REDUCED_CROSSFADE, usePrefersReducedMotion } from '../../motion';
 import { MAX_PANES, usePanesStore } from '../../stores/panesStore';
 import type { Pane } from '../../stores/panesStore';
@@ -10,6 +10,7 @@ import { useTabsStore } from '../../stores/tabsStore';
 import { EditorPane } from '../editor/EditorPane';
 import { EditorTransition } from '../editor/EditorTransition';
 import { NOTE_DND_TYPE, PaneTabs, TAB_DND_TYPE } from './PaneTabs';
+import { useVaultStore } from '../../stores/vaultStore';
 
 const MIN_PANE_PX = 200;
 const DIVIDER_PX = 1;
@@ -41,7 +42,18 @@ interface ResizeContext {
 
 function EmptyPane() {
   return (
-    <div className="flex flex-1 items-center justify-center text-ui text-text-2">Нет открытых вкладок</div>
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="flex size-12 items-center justify-center rounded-l border border-stroke-0 bg-bg-1 text-text-3">
+        <FilePlus2 size={22} strokeWidth={1.5} />
+      </span>
+      <div className="flex flex-col gap-1">
+        <p className="text-ui text-text-0">Нет открытых вкладок</p>
+        <p className="max-w-xs text-caption text-text-2">Откройте заметку из дерева или создайте новую.</p>
+      </div>
+      <Button variant="primary" size="sm" onClick={() => void useVaultStore.getState().createNote()}>
+        Новая заметка
+      </Button>
+    </div>
   );
 }
 

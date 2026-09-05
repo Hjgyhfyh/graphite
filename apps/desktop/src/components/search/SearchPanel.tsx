@@ -26,6 +26,7 @@ import { commands, isGraphiteError } from '@graphite/bindings';
 import type { NoteType, SearchFilters, SearchHit, SearchParams, Status, TreeNode } from '@graphite/bindings';
 import { cx } from '@graphite/ui';
 import { useVaultStore } from '../../stores/vaultStore';
+import { useUiStore } from '../../stores/uiStore';
 import { Fade, Presence, listContainerVariants, listItemVariants, usePrefersReducedMotion } from '../../motion';
 
 export interface SearchPanelProps {
@@ -578,6 +579,16 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const lastViewRef = useRef<View>('idle');
   const indexBuildingRef = useRef(false);
   const boundaryTrippedRef = useRef(false);
+  const pendingSearch = useUiStore((s) => s.pendingSearch);
+
+  useEffect(() => {
+    if (pendingSearch === undefined) {
+      return;
+    }
+    setQuery(pendingSearch);
+    useUiStore.getState().consumePendingSearch();
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [pendingSearch]);
 
   const parsed = useMemo(() => parseQuery(query), [query]);
   const nodeByRef = useMemo(() => {

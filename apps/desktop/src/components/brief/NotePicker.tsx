@@ -8,6 +8,7 @@ import { useBriefStore } from '../../stores/briefStore';
 import { useVaultStore } from '../../stores/vaultStore';
 import { NoteIcon } from '../tree/NoteIcon';
 import { Presence, fadeVariants, popVariants, reducedFadeVariants, usePrefersReducedMotion } from '../../motion';
+import { OVERLAY_SCRIM } from '../../lib/overlay';
 
 export interface NotePickerProps {
   onAdd: (node: TreeNode) => boolean;
@@ -125,7 +126,7 @@ export function NotePicker({ onAdd }: NotePickerProps) {
       {open ? (
         <motion.div
           key="brief-note-picker-overlay"
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[18vh]"
+          className={`fixed inset-0 z-50 flex items-start justify-center px-4 pt-[18vh] ${OVERLAY_SCRIM}`}
           variants={reduced ? reducedFadeVariants : fadeVariants}
           initial="initial"
           animate="animate"
