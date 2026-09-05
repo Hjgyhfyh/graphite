@@ -54,6 +54,7 @@ import { useTemplatePickerStore } from '../../stores/templatePickerStore';
 import { useTreeStateStore } from '../../stores/treeStateStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { useRecentsStore } from '../../stores/recentsStore';
 import type { NoteIconInfo } from '../../stores/vaultStore';
 import { vaultKey } from '../../stores/vaultsStore';
 import { IconPicker } from './IconPicker';
@@ -912,6 +913,7 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const [dropCount, setDropCount] = useState<number | undefined>(undefined);
   const [filter, setFilter] = useState('');
   const filterRef = useRef<HTMLInputElement>(null);
+  const filterHydratedRef = useRef<string | undefined>(undefined);
   const openTimer = useRef<number | undefined>(undefined);
   const moveTimer = useRef<number | undefined>(undefined);
   const renameTimer = useRef<number | undefined>(undefined);
@@ -958,9 +960,24 @@ export function TreePanel({ width, onWidthChange }: TreePanelProps) {
   const pendingTreeFilter = useUiStore((s) => s.pendingTreeFilter);
   const filterBinding = useKeybindingsStore((s) => s.bindings['tree.filter']);
 
+  // Черновик фильтра поднимаем один раз на хранилище — иначе уход на поиск обнулял поле.
   useEffect(() => {
-    setFilter('');
+    if (vk === undefined || filterHydratedRef.current === vk) {
+      return;
+    }
+    filterHydratedRef.current = vk;
+    setFilter(useRecentsStore.getState().treeFilterOf(vk));
   }, [vk]);
+
+  useEffect(() => {
+    if (vk === undefined || filterHydratedRef.current !== vk) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      useRecentsStore.getState().setTreeFilter(vk, filter);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [filter, vk]);
 
   useEffect(() => {
     if (!pendingTreeFilter) {

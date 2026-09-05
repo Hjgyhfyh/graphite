@@ -12,6 +12,8 @@ export interface VaultRecents {
   notes: NoteRef[];
   /** Живой текст поля поиска — переживает уход с панели и перезапуск. */
   draftQuery: string;
+  /** Фильтр дерева — переживает уход на поиск и перезапуск. */
+  treeFilter: string;
 }
 
 export interface RecentsStore {
@@ -20,6 +22,8 @@ export interface RecentsStore {
   forgetQuery(vault: string, query: string): void;
   setDraftQuery(vault: string, query: string): void;
   draftQueryOf(vault: string): string;
+  setTreeFilter(vault: string, query: string): void;
+  treeFilterOf(vault: string): string;
   rememberNote(vault: string, ref: NoteRef): void;
   forgetNote(vault: string, ref: NoteRef): void;
   remapNote(vault: string, oldRef: NoteRef, nextRef: NoteRef): void;
@@ -40,11 +44,16 @@ function foldQuery(value: string): string {
 }
 
 function slotOf(byVault: Record<string, VaultRecents>, vault: string): VaultRecents {
-  return byVault[vault] ?? { queries: [], notes: [], draftQuery: DRAFT_PERSIST_EMPTY };
+  return byVault[vault] ?? { queries: [], notes: [], draftQuery: DRAFT_PERSIST_EMPTY, treeFilter: DRAFT_PERSIST_EMPTY };
 }
 
 function slotIsEmpty(slot: VaultRecents): boolean {
-  return slot.queries.length === 0 && slot.notes.length === 0 && slot.draftQuery.length === 0;
+  return (
+    slot.queries.length === 0 &&
+    slot.notes.length === 0 &&
+    slot.draftQuery.length === 0 &&
+    slot.treeFilter.length === 0
+  );
 }
 
 function writeSlot(
@@ -80,8 +89,9 @@ function sanitizeRecents(value: unknown): Record<string, VaultRecents> {
         )
       : [];
     const draftQuery = hydrateDraftQuery(raw.draftQuery);
-    if (queries.length > 0 || notes.length > 0 || draftQuery.length > 0) {
-      result[vault] = { queries, notes, draftQuery };
+    const treeFilter = hydrateDraftQuery(raw.treeFilter);
+    if (queries.length > 0 || notes.length > 0 || draftQuery.length > 0 || treeFilter.length > 0) {
+      result[vault] = { queries, notes, draftQuery, treeFilter };
     }
   }
   return result;
@@ -102,6 +112,17 @@ export const useRecentsStore = create<RecentsStore>()(
             return s;
           }
           return { byVault: writeSlot(s.byVault, vault, { ...current, draftQuery }) };
+        });
+      },
+      treeFilterOf: (vault) => get().byVault[vault]?.treeFilter ?? DRAFT_PERSIST_EMPTY,
+      setTreeFilter: (vault, query) => {
+        const treeFilter = hydrateDraftQuery(query);
+        set((s) => {
+          const current = slotOf(s.byVault, vault);
+          if (current.treeFilter === treeFilter) {
+            return s;
+          }
+          return { byVault: writeSlot(s.byVault, vault, { ...current, treeFilter }) };
         });
       },
       rememberQuery: (vault, query) => {

@@ -1,7 +1,7 @@
 {
   "name": "@graphite/ui",
   "private": true,
-  "version": "1.33.0",
+  "version": "1.34.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
