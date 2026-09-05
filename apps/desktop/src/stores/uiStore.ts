@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Theme } from '../theme';
 import { applyTheme, isTheme } from '../theme';
+import { todayYmd } from '../lib/dailyDoc';
 
 export const TREE_WIDTH_MIN = 240;
 export const TREE_WIDTH_MAX = 420;
@@ -75,6 +76,7 @@ export interface UiStore {
   theme: Theme;
   focusMode: boolean;
   pendingSearch: string | undefined;
+  journalDate: string | undefined;
   floatingCaptureOpen: boolean;
   onboardingDone: boolean;
   toasts: Toast[];
@@ -101,6 +103,8 @@ export interface UiStore {
   setFocusMode(on: boolean): void;
   openSearchWith(query: string): void;
   consumePendingSearch(): string | undefined;
+  openJournalDay(date?: string): void;
+  consumeJournalDate(): string | undefined;
   setFloatingCaptureOpen(open: boolean): void;
   toggleFloatingCapture(): void;
   setOnboardingDone(done: boolean): void;
@@ -175,6 +179,7 @@ export const useUiStore = create<UiStore>()(
       theme: 'default',
       focusMode: false,
       pendingSearch: undefined,
+      journalDate: undefined,
       floatingCaptureOpen: false,
       onboardingDone: false,
       toasts: [],
@@ -263,6 +268,20 @@ export const useUiStore = create<UiStore>()(
           set({ pendingSearch: undefined });
         }
         return query;
+      },
+      openJournalDay: (date) => {
+        set({
+          journalDate: date ?? todayYmd(),
+          railView: 'daily',
+          focusMode: false,
+        });
+      },
+      consumeJournalDate: () => {
+        const date = get().journalDate;
+        if (date !== undefined) {
+          set({ journalDate: undefined });
+        }
+        return date;
       },
       setFloatingCaptureOpen: (open) => {
         set({ floatingCaptureOpen: open });

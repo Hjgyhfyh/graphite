@@ -293,6 +293,17 @@ export function JournalView() {
     return { year: now.getFullYear(), month: now.getMonth(), dir: 0 };
   });
   const [selectedDate, setSelectedDate] = useState(() => ymd(new Date()));
+  const journalDate = useUiStore((s) => s.journalDate);
+
+  useEffect(() => {
+    if (journalDate === undefined) {
+      return;
+    }
+    setSelectedDate(journalDate);
+    const dayDate = dateFromYmd(journalDate);
+    setCursor({ year: dayDate.getFullYear(), month: dayDate.getMonth(), dir: 0 });
+    useUiStore.getState().consumeJournalDate();
+  }, [journalDate]);
   const [day, setDay] = useState<{ ref: NoteRef; virgin: boolean; doc?: string } | undefined>(undefined);
   const [dayLoading, setDayLoading] = useState(false);
   const [dayError, setDayError] = useState<string | undefined>(undefined);

@@ -10,7 +10,7 @@ import { cx } from '@graphite/ui';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
 import { titleFromRef } from '../../stores/tabsStore';
-import { NoteIcon, resolveIconColor } from '../tree/NoteIcon';
+import { NoteIcon } from '../tree/NoteIcon';
 import {
   Presence,
   REDUCED_CROSSFADE,
@@ -28,25 +28,21 @@ const PANEL_WIDTH = 336;
 const SKELETON_THRESHOLD_MS = 150;
 const LAYOUT_ANIMATION_CAP = 180;
 
-/** Палитра облака — те же оттенки, что у иконок заметок (NoteIcon), под тёмный фон. */
+/** Палитра облака — только токены темы, чтобы «Бумага» не ловила неоновые hex. */
 const TAG_PALETTE: readonly string[] = [
-  'accent',
-  'ai',
-  '#F27E93',
-  '#FF96C8',
-  '#E58FE5',
-  '#C48CFF',
-  '#9E8CFF',
-  '#6FB9FF',
-  '#54D0E0',
-  '#7FD98F',
-  '#C8D96F',
-  '#FFCB6B',
-  '#FFB27D',
-  '#FF9E9E',
-  'ok',
-  'warn',
-].map((value) => resolveIconColor(value) ?? value);
+  'var(--accent)',
+  'var(--ai)',
+  'var(--ok)',
+  'var(--warn)',
+  'var(--danger)',
+  'color-mix(in srgb, var(--accent) 55%, var(--ai))',
+  'color-mix(in srgb, var(--accent) 50%, var(--warn))',
+  'color-mix(in srgb, var(--ai) 60%, var(--ok))',
+  'color-mix(in srgb, var(--danger) 45%, var(--accent))',
+  'color-mix(in srgb, var(--ok) 55%, var(--accent))',
+  'color-mix(in srgb, var(--warn) 55%, var(--danger))',
+  'color-mix(in srgb, var(--text-1) 55%, var(--accent))',
+];
 
 /** Детерминированный цвет тега: одинаковый оттенок при каждом открытии. */
 function tagColor(tag: string): string {

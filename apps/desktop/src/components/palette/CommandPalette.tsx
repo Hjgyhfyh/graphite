@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Command } from 'cmdk';
 import { motion } from 'motion/react';
 import {
+  CalendarDays,
   Camera,
   ChevronRight,
   CornerDownLeft,
@@ -41,23 +42,33 @@ interface PaletteAction {
   run: () => void;
 }
 
-const VIEW_ACTIONS: readonly PaletteAction[] = RAIL_DEFAULT_ORDER.map((view) => ({
-  id: `view.${view}`,
-  title: `Раздел: ${RAIL_META[view].label}`,
-  icon: RAIL_META[view].icon,
-  run: () => {
-    if (view === 'brief') {
-      openBriefView();
-      return;
-    }
-    const ui = useUiStore.getState();
-    ui.setFocusMode(false);
-    ui.setRailView(view);
-    if (view === 'tree' || view === 'search') {
-      ui.setSidebarHidden(false);
-    }
+const VIEW_ACTIONS: readonly PaletteAction[] = [
+  {
+    id: 'journal.today',
+    title: 'Сегодня в дневнике',
+    icon: CalendarDays,
+    run: () => {
+      useUiStore.getState().openJournalDay();
+    },
   },
-}));
+  ...RAIL_DEFAULT_ORDER.map((view) => ({
+    id: `view.${view}`,
+    title: `Раздел: ${RAIL_META[view].label}`,
+    icon: RAIL_META[view].icon,
+    run: () => {
+      if (view === 'brief') {
+        openBriefView();
+        return;
+      }
+      const ui = useUiStore.getState();
+      ui.setFocusMode(false);
+      ui.setRailView(view);
+      if (view === 'tree' || view === 'search') {
+        ui.setSidebarHidden(false);
+      }
+    },
+  })),
+];
 
 const BACKUP_ACTIONS: readonly PaletteAction[] = [
   {
@@ -270,7 +281,10 @@ export function CommandPalette() {
   const hasQuery = trimmed.length > 0;
   const activeVaultKey = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
   const commandMatches = useMemo(
-    () => ACTIONS.filter((action) => action.id !== 'palette.open' && matches(dq, action.title, action.group)),
+    () =>
+      ACTIONS.filter(
+        (action) => action.id !== 'palette.open' && action.id !== 'view.today' && matches(dq, action.title, action.group),
+      ),
     [dq],
   );
   const backupMatches = useMemo(() => BACKUP_ACTIONS.filter((action) => matches(dq, action.title)), [dq]);

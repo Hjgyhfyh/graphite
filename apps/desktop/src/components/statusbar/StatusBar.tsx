@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
   ArrowUp,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Cloud,
@@ -369,6 +370,25 @@ function GitIndicator() {
   );
 }
 
+const TODAY_FMT = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
+
+function TodayChip() {
+  const label = TODAY_FMT.format(new Date());
+  return (
+    <Tooltip content="Сегодняшний день в дневнике · Ctrl+Shift+J" side="top">
+      <button
+        type="button"
+        aria-label={`Сегодня ${label}`}
+        onClick={() => useUiStore.getState().openJournalDay()}
+        className="flex items-center gap-1 rounded-xs px-1 py-0.5 tabular-nums text-text-2 transition-colors duration-[120ms] hover:bg-bg-3 hover:text-text-0"
+      >
+        <CalendarDays size={12} strokeWidth={1.75} aria-hidden />
+        {label}
+      </button>
+    </Tooltip>
+  );
+}
+
 function DocStats() {
   const words = useEditorMetaStore((s) => s.words);
   const readingMin = useEditorMetaStore((s) => s.readingMin);
@@ -470,6 +490,7 @@ export function StatusBar() {
       <div className="flex min-w-0 items-center gap-2">
         <Library size={13} strokeWidth={1.75} aria-hidden className="shrink-0 text-text-3" />
         <span className="truncate text-text-1">{vaultLabel(info?.root)}</span>
+        {info !== undefined ? <TodayChip /> : null}
         {info !== undefined ? (
           <>
             <span aria-hidden className="h-3.5 w-px shrink-0 bg-stroke-0" />

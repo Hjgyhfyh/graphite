@@ -22,6 +22,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'settings.open',
   'view.tasks',
   'view.brief',
+  'view.today',
   'sidebar.toggleTree',
   'sidebar.toggleRight',
   'aiFeed.toggle',
@@ -133,6 +134,9 @@ function runBuiltin(id: ActionId): boolean {
       return true;
     case 'view.brief':
       openBriefView();
+      return true;
+    case 'view.today':
+      ui.openJournalDay();
       return true;
     case 'prompts.history':
       openPromptHistory();

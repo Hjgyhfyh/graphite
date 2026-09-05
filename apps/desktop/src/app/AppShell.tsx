@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ChevronRight, Diamond, HardDrive, LoaderCircle, Minimize2, X } from 'lucide-react';
 import { Button, Kbd, MOTION, TooltipProvider, cx } from '@graphite/ui';
 import { commands, GRAPHITE_EVENT, isGraphiteError, isTauriAvailable } from '@graphite/bindings';
@@ -49,6 +50,9 @@ import { useUpdaterStore } from '../stores/updaterStore';
 import { bootstrapVault, pickVaultFolder, switchVault } from '../stores/vaultActions';
 import { useVaultStore } from '../stores/vaultStore';
 import { useVaultsStore } from '../stores/vaultsStore';
+import { usePanesStore } from '../stores/panesStore';
+import { titleFromRef, useTabsStore } from '../stores/tabsStore';
+import { graphiteWindowTitle } from '../lib/windowTitle';
 
 // Проводник — стартовый экран, поэтому он остаётся в основном бандле. Остальные
 // полноэкранные разделы грузятся только при первом открытии: CodeMirror, граф и
@@ -300,6 +304,38 @@ function CenterView() {
   );
 }
 
+function WindowTitleSync() {
+  const railView = useUiStore((s) => s.railView);
+  const focusMode = useUiStore((s) => s.focusMode);
+  const currentRef = useVaultStore((s) => s.currentRef);
+  const activePaneId = usePanesStore((s) => s.activePaneId);
+  const panes = usePanesStore((s) => s.panes);
+  const tabs = useTabsStore((s) => s.tabs);
+
+  const noteTitle = (() => {
+    const pane = panes.find((item) => item.id === activePaneId) ?? panes[0];
+    const tab = pane?.activeTabId === undefined ? undefined : tabs.find((item) => item.id === pane.activeTabId);
+    if (tab !== undefined && tab.kind === 'editor' && tab.title.length > 0) {
+      return tab.title;
+    }
+    if (currentRef !== undefined) {
+      return titleFromRef(currentRef);
+    }
+    return undefined;
+  })();
+
+  useEffect(() => {
+    const title = graphiteWindowTitle({ railView, noteTitle, focusMode });
+    document.title = title;
+    if (!isTauriAvailable()) {
+      return;
+    }
+    void getCurrentWindow().setTitle(title);
+  }, [railView, noteTitle, focusMode]);
+
+  return null;
+}
+
 export function AppShell() {
   const railView = useUiStore((s) => s.railView);
   const sidebarHidden = useUiStore((s) => s.sidebarHidden);
@@ -373,6 +409,7 @@ export function AppShell() {
   return (
     <AppMotionConfig>
       <TooltipProvider>
+        <WindowTitleSync />
         <AppLaunch className="flex h-dvh flex-col overflow-hidden bg-bg-0 text-text-0">
           <PanelStagger className="flex min-h-0 min-w-0 flex-1">
             <PanelItem className="flex shrink-0">
