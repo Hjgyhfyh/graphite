@@ -25,6 +25,9 @@ export type ActionId =
   | 'note.print'
   | 'editor.toggleReading'
   | 'editor.focusMode'
+  | 'editor.zoomIn'
+  | 'editor.zoomOut'
+  | 'editor.zoomReset'
   | 'editor.linkNote'
   | 'format.bold'
   | 'format.italic'
@@ -77,6 +80,9 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'note.print', title: 'Печать / PDF…', group: 'Заметки' },
   { id: 'editor.toggleReading', title: 'Режим чтения', group: 'Редактор' },
   { id: 'editor.focusMode', title: 'Режим фокуса', group: 'Редактор' },
+  { id: 'editor.zoomIn', title: 'Крупнее текст', group: 'Редактор' },
+  { id: 'editor.zoomOut', title: 'Мельче текст', group: 'Редактор' },
+  { id: 'editor.zoomReset', title: 'Размер текста 100%', group: 'Редактор' },
   { id: 'editor.linkNote', title: 'Связать заметку', group: 'Редактор' },
   { id: 'format.bold', title: 'Жирный', group: 'Редактор' },
   { id: 'format.italic', title: 'Курсив', group: 'Редактор' },
@@ -122,6 +128,9 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'note.print': [],
   'editor.toggleReading': ['Ctrl+E'],
   'editor.focusMode': ['Ctrl+Shift+Backslash'],
+  'editor.zoomIn': ['Ctrl+Equal'],
+  'editor.zoomOut': ['Ctrl+Minus'],
+  'editor.zoomReset': ['Ctrl+0'],
   'editor.linkNote': ['Ctrl+L'],
   'format.bold': ['Ctrl+B'],
   'format.italic': ['Ctrl+I'],

@@ -16,6 +16,11 @@ export const ANIMATION_SPEED_MIN = 0.5;
 export const ANIMATION_SPEED_MAX = 1.6;
 export const ANIMATION_SPEED_DEFAULT = 1;
 
+export const EDITOR_SCALE_MIN = 0.85;
+export const EDITOR_SCALE_MAX = 1.3;
+export const EDITOR_SCALE_DEFAULT = 1;
+export const EDITOR_SCALE_STEP = 0.05;
+
 const TOAST_DURATION_MS = 4000;
 
 export type RailView =
@@ -75,6 +80,8 @@ export interface UiStore {
   animationSpeed: number;
   theme: Theme;
   focusMode: boolean;
+  typewriter: boolean;
+  editorScale: number;
   pendingSearch: string | undefined;
   journalDate: string | undefined;
   pendingTreeReveal: string | undefined;
@@ -102,6 +109,10 @@ export interface UiStore {
   setTheme(theme: Theme): void;
   toggleFocusMode(): void;
   setFocusMode(on: boolean): void;
+  setTypewriter(on: boolean): void;
+  setEditorScale(scale: number): void;
+  nudgeEditorScale(delta: number): void;
+  resetEditorScale(): void;
   openSearchWith(query: string): void;
   consumePendingSearch(): string | undefined;
   openJournalDay(date?: string): void;
@@ -117,6 +128,11 @@ export interface UiStore {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function snapEditorScale(value: number): number {
+  const snapped = Math.round(value / EDITOR_SCALE_STEP) * EDITOR_SCALE_STEP;
+  return clamp(Number(snapped.toFixed(2)), EDITOR_SCALE_MIN, EDITOR_SCALE_MAX);
 }
 
 function hydrateNumber(value: unknown, min: number, max: number, fallback: number): number {
@@ -181,6 +197,8 @@ export const useUiStore = create<UiStore>()(
       animationSpeed: ANIMATION_SPEED_DEFAULT,
       theme: 'default',
       focusMode: false,
+      typewriter: true,
+      editorScale: EDITOR_SCALE_DEFAULT,
       pendingSearch: undefined,
       journalDate: undefined,
       pendingTreeReveal: undefined,
@@ -263,6 +281,18 @@ export const useUiStore = create<UiStore>()(
       setFocusMode: (on) => {
         set({ focusMode: on });
       },
+      setTypewriter: (on) => {
+        set({ typewriter: on });
+      },
+      setEditorScale: (scale) => {
+        set({ editorScale: snapEditorScale(scale) });
+      },
+      nudgeEditorScale: (delta) => {
+        set((s) => ({ editorScale: snapEditorScale(s.editorScale + delta) }));
+      },
+      resetEditorScale: () => {
+        set({ editorScale: EDITOR_SCALE_DEFAULT });
+      },
       openSearchWith: (query) => {
         set({ pendingSearch: query, railView: 'search', sidebarHidden: false, focusMode: false });
       },
@@ -340,6 +370,8 @@ export const useUiStore = create<UiStore>()(
         animationSpeed: s.animationSpeed,
         theme: s.theme,
         focusMode: s.focusMode,
+        typewriter: s.typewriter,
+        editorScale: s.editorScale,
         onboardingDone: s.onboardingDone,
       }),
       merge: (persisted, current) => {
@@ -355,8 +387,10 @@ export const useUiStore = create<UiStore>()(
             ANIMATION_SPEED_MAX,
             ANIMATION_SPEED_DEFAULT,
           ),
+          editorScale: hydrateNumber(saved.editorScale, EDITOR_SCALE_MIN, EDITOR_SCALE_MAX, EDITOR_SCALE_DEFAULT),
           theme: isTheme(saved.theme) ? saved.theme : 'default',
           focusMode: saved.focusMode === true,
+          typewriter: saved.typewriter !== false,
           railView: isRailView(saved.railView) ? saved.railView : current.railView,
           ...normalizeRailOrder(saved.railOrder, saved.railHidden),
         };

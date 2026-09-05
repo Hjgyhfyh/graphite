@@ -9,7 +9,7 @@ import { useNavStore } from '../stores/navStore';
 import { usePanesStore } from '../stores/panesStore';
 import { useTabsStore } from '../stores/tabsStore';
 import { useTemplatePickerStore } from '../stores/templatePickerStore';
-import { useUiStore } from '../stores/uiStore';
+import { EDITOR_SCALE_STEP, useUiStore } from '../stores/uiStore';
 import { useVaultStore } from '../stores/vaultStore';
 
 type ActionHandler = () => void;
@@ -40,6 +40,9 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'note.copyWikiLink',
   'editor.toggleReading',
   'editor.focusMode',
+  'editor.zoomIn',
+  'editor.zoomOut',
+  'editor.zoomReset',
   'task.sweepDone',
   'view.outline',
 ]);
@@ -170,6 +173,15 @@ function runBuiltin(id: ActionId): boolean {
       return true;
     case 'editor.focusMode':
       ui.toggleFocusMode();
+      return true;
+    case 'editor.zoomIn':
+      ui.nudgeEditorScale(EDITOR_SCALE_STEP);
+      return true;
+    case 'editor.zoomOut':
+      ui.nudgeEditorScale(-EDITOR_SCALE_STEP);
+      return true;
+    case 'editor.zoomReset':
+      ui.resetEditorScale();
       return true;
     case 'search.inNote':
       return focusActiveEditor();

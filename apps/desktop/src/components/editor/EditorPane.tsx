@@ -768,7 +768,7 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink }: Readin
       exit={{ opacity: 0 }}
       transition={{ duration: reduced ? 0.08 : 0.16, ease: easePoints.out }}
     >
-      <div className="mx-auto max-w-[calc(72ch+48px)] px-6 py-12 text-[17px] leading-[28px]" style={{ fontFamily: READING_FONT }}>
+      <div className="mx-auto max-w-[calc(72ch+48px)] px-6 py-12" style={{ fontFamily: READING_FONT, fontSize: 'calc(17px * var(--editor-scale, 1))', lineHeight: 'calc(28px * var(--editor-scale, 1))' }}>
         {entries !== undefined ? (
           <ReadingHeader
             entries={entries}
@@ -1086,6 +1086,8 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   const toggleReadingMode = useUiStore((s) => s.toggleReadingMode);
   const focusMode = useUiStore((s) => s.focusMode);
   const toggleFocusMode = useUiStore((s) => s.toggleFocusMode);
+  const typewriter = useUiStore((s) => s.typewriter);
+  const editorScale = useUiStore((s) => s.editorScale);
   const showPropsInText = useUiStore((s) => s.showPropsInText);
   const reduced = usePrefersReducedMotion();
 
@@ -1417,6 +1419,7 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
         // Снимок через getState: живое переключение идёт реконфигурацией ниже,
         // без пересоздания редактора (иначе терялись бы undo и позиция).
         hideFrontmatter: !useUiStore.getState().showPropsInText,
+        typewriter: useUiStore.getState().typewriter,
         linkSource,
         attachments: readOnly
           ? undefined
@@ -1506,6 +1509,10 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   useEffect(() => {
     editorRef.current?.setHideFrontmatter(!showPropsInText);
   }, [showPropsInText]);
+
+  useEffect(() => {
+    editorRef.current?.setTypewriter(typewriter);
+  }, [typewriter]);
 
   // Синк окон одной заметки (#4): buffer_save другого окна (и любые внешние
   // правки) приходят событием note_changed. Своя запись узнаётся по rev; при
@@ -1770,7 +1777,10 @@ export function EditorPane({ tabId, noteRef, initialDoc }: EditorPaneProps) {
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col"
-      style={selectionStyle}
+      style={{
+        ...selectionStyle,
+        ['--editor-scale' as string]: String(editorScale),
+      }}
       onContextMenu={handleContextMenu}
     >
       {conflict !== null ? <ConflictBanner onKeep={keepMine} onTakeDisk={takeDisk} /> : null}

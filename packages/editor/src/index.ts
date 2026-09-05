@@ -1,4 +1,5 @@
 export { createEditor } from './createEditor';
+export { typewriterScroll } from './typewriter';
 export type { CreateEditorOptions, EditorHandle } from './createEditor';
 export { graphiteDark } from './theme';
 export { parseBlocks, parseInline, parseTableBlock, sweepDoneTasks, sweepLinesDone, toggleTaskOnLine } from './markdown';

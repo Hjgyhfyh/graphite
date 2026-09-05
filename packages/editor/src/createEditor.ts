@@ -20,6 +20,7 @@ import { tablePreview } from './tablePreview';
 import { tagHighlight } from './tagHighlight';
 import { taskCheckboxes } from './taskList';
 import { graphiteDark } from './theme';
+import { typewriterScroll } from './typewriter';
 import { openWikiLinkPicker, wikiLinkCompletion } from './wikilink';
 import type { WikiLinkSource } from './wikilink';
 
@@ -36,6 +37,8 @@ export interface CreateEditorOptions {
   images?: ImagePreviewOptions;
   /** Прятать YAML-блок свойств в начале документа (по умолчанию включено). */
   hideFrontmatter?: boolean;
+  /** Держать курсор в средней полосе экрана при наборе. */
+  typewriter?: boolean;
 }
 
 export interface EditorHandle {
@@ -44,6 +47,7 @@ export interface EditorHandle {
   setDoc(doc: string): void;
   markAi(from: number, to: number): void;
   setHideFrontmatter(hide: boolean): void;
+  setTypewriter(on: boolean): void;
   focus(): void;
   destroy(): void;
 }
@@ -88,11 +92,21 @@ const markdownKeymap: readonly KeyBinding[] = [
 ];
 
 export function createEditor(container: HTMLElement, options: CreateEditorOptions = {}): EditorHandle {
-  const { initialDoc = '', readOnly = false, onChange, linkSource, attachments, images, hideFrontmatter = true } = options;
+  const {
+    initialDoc = '',
+    readOnly = false,
+    onChange,
+    linkSource,
+    attachments,
+    images,
+    hideFrontmatter = true,
+    typewriter = false,
+  } = options;
 
-  // Compartment на инстанс: «скрыть/показать свойства» переключается на живом
-  // редакторе без пересоздания, не задевая undo-стек и позицию скролла.
+  // Compartment на инстанс: «скрыть/показать свойства» и печатная машинка
+  // переключаются на живом редакторе без пересоздания.
   const frontmatterCompartment = new Compartment();
+  const typewriterCompartment = new Compartment();
 
   const updateListener = EditorView.updateListener.of((update) => {
     if (!update.docChanged || onChange === undefined) {
@@ -132,6 +146,7 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
       tablePreview,
       tagHighlight,
       frontmatterCompartment.of(hideFrontmatter ? frontmatterHide() : []),
+      typewriterCompartment.of(typewriter ? typewriterScroll() : []),
       taskCheckboxes,
       doneFold,
       aiTouchField,
@@ -206,6 +221,9 @@ export function createEditor(container: HTMLElement, options: CreateEditorOption
     },
     setHideFrontmatter: (hide) => {
       view.dispatch({ effects: frontmatterCompartment.reconfigure(hide ? frontmatterHide() : []) });
+    },
+    setTypewriter: (on) => {
+      view.dispatch({ effects: typewriterCompartment.reconfigure(on ? typewriterScroll() : []) });
     },
     markAi: (from, to) => {
       const max = view.state.doc.length;

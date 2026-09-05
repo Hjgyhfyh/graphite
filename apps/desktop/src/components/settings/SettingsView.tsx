@@ -29,6 +29,9 @@ import { Fade, REDUCED_CROSSFADE, springSnappy, usePrefersReducedMotion } from '
 import {
   ANIMATION_SPEED_MAX,
   ANIMATION_SPEED_MIN,
+  EDITOR_SCALE_MAX,
+  EDITOR_SCALE_MIN,
+  EDITOR_SCALE_STEP,
   useUiStore,
 } from '../../stores/uiStore';
 import { isSyncPath, useSyncStore } from '../../stores/syncStore';
@@ -295,6 +298,10 @@ export function SettingsView() {
   const setFocusMode = useUiStore((s) => s.setFocusMode);
   const showPropsInText = useUiStore((s) => s.showPropsInText);
   const setShowPropsInText = useUiStore((s) => s.setShowPropsInText);
+  const typewriter = useUiStore((s) => s.typewriter);
+  const setTypewriter = useUiStore((s) => s.setTypewriter);
+  const editorScale = useUiStore((s) => s.editorScale);
+  const setEditorScale = useUiStore((s) => s.setEditorScale);
   const pushToast = useUiStore((s) => s.pushToast);
 
   const updaterStatus = useUpdaterStore((s) => s.status);
@@ -667,7 +674,7 @@ export function SettingsView() {
               id="appearance"
               icon={Palette}
               title="Внешний вид"
-              description="Тема, анимации и режим чтения. «Бумага» — светлая палитра."
+              description="Тема, размер текста, печатная машинка и режим чтения. «Бумага» — светлая палитра."
               sectionRef={(el) => {
                 sectionEls.current.appearance = el;
               }}
@@ -680,6 +687,33 @@ export function SettingsView() {
               </Row>
               <Row title="Режим фокуса" hint="Прячет рейку, дерево и статусбар — только текст. Ctrl+Shift+\ или Esc">
                 <Switch checked={focusMode} onCheckedChange={setFocusMode} />
+              </Row>
+              <Row
+                title="Печатная машинка"
+                hint="Курсор остаётся в середине экрана при наборе — как в пишущей машинке"
+              >
+                <Switch checked={typewriter} onCheckedChange={setTypewriter} />
+              </Row>
+              <Row
+                title="Размер текста"
+                hint={`${Math.round(editorScale * 100)}% · Ctrl+Minus / Ctrl+= / Ctrl+0`}
+              >
+                <div className="flex w-44 flex-col gap-1">
+                  <input
+                    type="range"
+                    min={EDITOR_SCALE_MIN}
+                    max={EDITOR_SCALE_MAX}
+                    step={EDITOR_SCALE_STEP}
+                    value={editorScale}
+                    onChange={(event) => setEditorScale(Number(event.target.value))}
+                    className="h-1 w-full cursor-pointer accent-accent"
+                  />
+                  <div className="flex justify-between text-micro text-text-3">
+                    <span>85%</span>
+                    <span>100%</span>
+                    <span>130%</span>
+                  </div>
+                </div>
               </Row>
               <Row title="Свойства в тексте" hint="Показывать YAML-блок в начале заметки — по умолчанию он скрыт, свойства правятся на панели справа">
                 <Switch checked={showPropsInText} onCheckedChange={setShowPropsInText} />
