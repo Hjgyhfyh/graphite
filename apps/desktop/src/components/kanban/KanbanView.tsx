@@ -8,6 +8,7 @@ import type { NoteRef, Status } from '@graphite/bindings';
 import { useVaultStore } from '../../stores/vaultStore';
 import { useUiStore } from '../../stores/uiStore';
 import { vaultKey } from '../../stores/vaultsStore';
+import { useRecentsStore } from '../../stores/recentsStore';
 import { mergeVisibleOrder, useBoardConfig, useBoardStore } from '../../stores/boardStore';
 import { usePrefersReducedMotion } from '../../motion';
 import { KanbanColumn } from './KanbanColumn';
@@ -53,6 +54,7 @@ export function KanbanView() {
   const [showHidden, setShowHidden] = useState(false);
   const [filter, setFilter] = useState('');
   const filterRef = useRef<HTMLInputElement>(null);
+  const filterHydratedRef = useRef<string | undefined>(undefined);
   const pendingBoardFilter = useUiStore((s) => s.pendingBoardFilter);
   const filterBinding = useKeybindingsStore((s) => s.bindings['board.filter']);
 
@@ -64,8 +66,25 @@ export function KanbanView() {
 
   useEffect(() => {
     setShowHidden(false);
-    setFilter('');
   }, [vk]);
+
+  useEffect(() => {
+    if (vk.length === 0 || filterHydratedRef.current === vk) {
+      return;
+    }
+    filterHydratedRef.current = vk;
+    setFilter(useRecentsStore.getState().boardFilterOf(vk));
+  }, [vk]);
+
+  useEffect(() => {
+    if (vk.length === 0 || filterHydratedRef.current !== vk) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      useRecentsStore.getState().setBoardFilter(vk, filter);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [filter, vk]);
 
   useEffect(() => {
     if (!pendingBoardFilter) {

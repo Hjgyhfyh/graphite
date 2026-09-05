@@ -14,6 +14,8 @@ export interface VaultRecents {
   draftQuery: string;
   /** Фильтр дерева — переживает уход на поиск и перезапуск. */
   treeFilter: string;
+  /** Фильтр канбана «Поток» — переживает уход с доски и перезапуск. */
+  boardFilter: string;
 }
 
 export interface RecentsStore {
@@ -24,6 +26,8 @@ export interface RecentsStore {
   draftQueryOf(vault: string): string;
   setTreeFilter(vault: string, query: string): void;
   treeFilterOf(vault: string): string;
+  setBoardFilter(vault: string, query: string): void;
+  boardFilterOf(vault: string): string;
   rememberNote(vault: string, ref: NoteRef): void;
   forgetNote(vault: string, ref: NoteRef): void;
   remapNote(vault: string, oldRef: NoteRef, nextRef: NoteRef): void;
@@ -43,8 +47,18 @@ function foldQuery(value: string): string {
   return value.trim().toLowerCase().replace(/ё/g, 'е');
 }
 
+function emptySlot(): VaultRecents {
+  return {
+    queries: [],
+    notes: [],
+    draftQuery: DRAFT_PERSIST_EMPTY,
+    treeFilter: DRAFT_PERSIST_EMPTY,
+    boardFilter: DRAFT_PERSIST_EMPTY,
+  };
+}
+
 function slotOf(byVault: Record<string, VaultRecents>, vault: string): VaultRecents {
-  return byVault[vault] ?? { queries: [], notes: [], draftQuery: DRAFT_PERSIST_EMPTY, treeFilter: DRAFT_PERSIST_EMPTY };
+  return byVault[vault] ?? emptySlot();
 }
 
 function slotIsEmpty(slot: VaultRecents): boolean {
@@ -52,7 +66,8 @@ function slotIsEmpty(slot: VaultRecents): boolean {
     slot.queries.length === 0 &&
     slot.notes.length === 0 &&
     slot.draftQuery.length === 0 &&
-    slot.treeFilter.length === 0
+    slot.treeFilter.length === 0 &&
+    slot.boardFilter.length === 0
   );
 }
 
@@ -90,8 +105,15 @@ function sanitizeRecents(value: unknown): Record<string, VaultRecents> {
       : [];
     const draftQuery = hydrateDraftQuery(raw.draftQuery);
     const treeFilter = hydrateDraftQuery(raw.treeFilter);
-    if (queries.length > 0 || notes.length > 0 || draftQuery.length > 0 || treeFilter.length > 0) {
-      result[vault] = { queries, notes, draftQuery, treeFilter };
+    const boardFilter = hydrateDraftQuery(raw.boardFilter);
+    if (
+      queries.length > 0 ||
+      notes.length > 0 ||
+      draftQuery.length > 0 ||
+      treeFilter.length > 0 ||
+      boardFilter.length > 0
+    ) {
+      result[vault] = { queries, notes, draftQuery, treeFilter, boardFilter };
     }
   }
   return result;
@@ -123,6 +145,17 @@ export const useRecentsStore = create<RecentsStore>()(
             return s;
           }
           return { byVault: writeSlot(s.byVault, vault, { ...current, treeFilter }) };
+        });
+      },
+      boardFilterOf: (vault) => get().byVault[vault]?.boardFilter ?? DRAFT_PERSIST_EMPTY,
+      setBoardFilter: (vault, query) => {
+        const boardFilter = hydrateDraftQuery(query);
+        set((s) => {
+          const current = slotOf(s.byVault, vault);
+          if (current.boardFilter === boardFilter) {
+            return s;
+          }
+          return { byVault: writeSlot(s.byVault, vault, { ...current, boardFilter }) };
         });
       },
       rememberQuery: (vault, query) => {
