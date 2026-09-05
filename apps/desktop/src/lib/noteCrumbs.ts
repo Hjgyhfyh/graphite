@@ -9,6 +9,8 @@ export interface NoteCrumb {
   kind: 'folder' | 'note';
   /** Относительный путь папки в хранилище — только у folder-крошек. */
   dir?: string;
+  /** Folder-note этой папки (`path:…/_index.md`), если крошка ведёт в папку. */
+  ref?: NoteRef;
 }
 
 function vaultPath(ref: NoteRef): string {
@@ -19,6 +21,11 @@ function vaultPath(ref: NoteRef): string {
 function baseName(path: string): string {
   const slash = path.lastIndexOf('/');
   return slash === -1 ? path : path.slice(slash + 1);
+}
+
+/** Folder-note папки: в Graphite это всегда `path:<dir>/_index.md`. */
+export function folderNoteRef(dir: string): NoteRef {
+  return `${PATH_PREFIX}${dir}${INDEX_SUFFIX}`;
 }
 
 /** Id узла дерева для папки: folder-note, если есть, иначе виртуальная. */
@@ -84,7 +91,12 @@ export function noteCrumbs(ref: NoteRef, tree: readonly TreeNode[]): NoteCrumb[]
       acc = acc.length === 0 ? part : `${acc}/${part}`;
       const indexRef = `${PATH_PREFIX}${acc}${INDEX_SUFFIX}`;
       const folderNode = tree.find((node) => node.ref === indexRef);
-      crumbs.push({ label: folderNode?.title ?? part, kind: 'folder', dir: acc });
+      crumbs.push({
+        label: folderNode?.title ?? part,
+        kind: 'folder',
+        dir: acc,
+        ref: folderNoteRef(acc),
+      });
     }
   }
   if (noteLabel !== undefined && noteLabel.length > 0) {

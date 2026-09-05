@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import { Tooltip, cx } from '@graphite/ui';
 import type { NoteRef } from '@graphite/bindings';
-import { noteCrumbs, treeIdForDir } from '../../lib/noteCrumbs';
+import { folderNoteRef, noteCrumbs, treeIdForDir } from '../../lib/noteCrumbs';
 import { revealInTree } from '../../lib/revealInTree';
 import { copyWikiLink, wikiLinkMarkup } from '../../lib/wikiLink';
 import { useUiStore } from '../../stores/uiStore';
@@ -39,7 +39,7 @@ export function NoteCrumbs({ noteRef }: { noteRef: NoteRef }) {
                 </button>
               </Tooltip>
             ) : (
-              <Tooltip content="Показать в дереве" side="bottom">
+              <Tooltip content="Открыть папку" side="bottom">
                 <button
                   type="button"
                   onClick={() => {
@@ -47,6 +47,7 @@ export function NoteCrumbs({ noteRef }: { noteRef: NoteRef }) {
                       return;
                     }
                     revealInTree(treeIdForDir(crumb.dir, tree), crumb.dir);
+                    useVaultStore.getState().openNote(crumb.ref ?? folderNoteRef(crumb.dir));
                   }}
                   className={cx(
                     'max-w-[12rem] truncate rounded-xs px-1 py-0.5 text-text-2 transition-colors duration-[120ms]',
