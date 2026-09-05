@@ -16,6 +16,8 @@ export { isWikiFollowClick, snippetFromBody, wikiLinkPreview, wikiNoteTitle } fr
 export { wrapPlainMention } from './wrapMention';
 export type { WikiMentionReplace } from './wrapMention';
 export { appendCaptureToDoc } from './appendCapture';
+export { similarNotesByTags } from './similarByTags';
+export type { SimilarByTagsHit, TagNoteBucket } from './similarByTags';
 export type { WikiOpenHandler, WikiPreview, WikiPreviewSource } from './wikiHover';
 export { frontmatterHide } from './frontmatterHide';
 export { tagHighlight, findInlineTags, tagAt } from './tagHighlight';
