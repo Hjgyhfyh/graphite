@@ -10,12 +10,13 @@ import type {
   TreeNode,
   VaultInfoResponse,
 } from '@graphite/bindings';
+import { parseFrontmatter, splitFrontmatter } from '@graphite/editor';
 import { useNavStore } from './navStore';
 import { useRecentsStore } from './recentsStore';
 import { useTabsStore } from './tabsStore';
 import { useUiStore } from './uiStore';
 import { useVaultsStore, vaultKey } from './vaultsStore';
-import { WELCOME_NOTE_REF } from '../components/editor/editorSession';
+import { WELCOME_NOTE_REF, flushPendingSaves, pendingSaveFor } from '../components/editor/editorSession';
 
 function recentsVault(root: string | undefined): string | undefined {
   return root === undefined ? undefined : vaultKey(root);
@@ -50,6 +51,7 @@ export interface VaultStore {
   applyNoteChanged(e: NoteChangedEvent): void;
   setIndexStatus(s: IndexProgressEvent): void;
   createNote(opts?: CreateNoteOptions): Promise<void>;
+  duplicateNote(ref: NoteRef): Promise<void>;
   createFolder(parent?: NoteRef, title?: string): Promise<NoteRef | undefined>;
   addPathNotes(paths: string[], parent?: NoteRef): Promise<number>;
   createBundle(params: BundleCreateParams): Promise<void>;
@@ -111,6 +113,51 @@ function sanitizeFileName(title: string): string {
     stem = '_index—';
   }
   return stem;
+}
+
+/** Каталог, в котором лежит заметка (сосед, не «дети этой заметки»). */
+function siblingDirFromRef(ref: NoteRef): string {
+  const raw = ref.startsWith('path:') ? ref.slice('path:'.length) : ref;
+  const rel = raw.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (rel.endsWith('/_index.md')) {
+    const folder = rel.slice(0, -'/_index.md'.length);
+    const slash = folder.lastIndexOf('/');
+    return slash < 0 ? '' : folder.slice(0, slash);
+  }
+  if (rel.toLowerCase() === '_index.md') {
+    return '';
+  }
+  const slash = rel.lastIndexOf('/');
+  return slash < 0 ? '' : rel.slice(0, slash);
+}
+
+function siblingParentRef(ref: NoteRef): NoteRef {
+  const dir = siblingDirFromRef(ref);
+  return dir === '' ? 'path:' : `path:${dir}`;
+}
+
+function copyNoteTitle(title: string, taken: Set<string>): string {
+  const base = title.trim().length > 0 ? title.trim() : 'Без названия';
+  for (let n = 1; n < 500; n += 1) {
+    const next = n === 1 ? `${base} (копия)` : `${base} (копия ${n})`;
+    if (!taken.has(sanitizeFileName(next).toLowerCase())) {
+      return next;
+    }
+  }
+  return `${base} (копия)`;
+}
+
+function tagsFromContent(content: string): string[] | undefined {
+  const parsed = parseFrontmatter(content);
+  if (parsed === null) {
+    return undefined;
+  }
+  const entry = parsed.entries.find((item) => item.key === 'tags');
+  if (entry === undefined) {
+    return undefined;
+  }
+  const items = entry.items.length > 0 ? [...entry.items] : entry.value.length > 0 ? [entry.value] : [];
+  return items.length > 0 ? items : undefined;
 }
 
 /** Имена прямых детей каталога (файлы без `.md` и подпапки), в нижнем регистре. */
@@ -326,6 +373,42 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
       get().openNote(created.ref);
     } catch (error) {
       useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось создать заметку') });
+    }
+  },
+  duplicateNote: async (ref) => {
+    if (ref === WELCOME_NOTE_REF) {
+      useUiStore.getState().pushToast({ kind: 'info', text: 'Стартовую страницу нельзя дублировать' });
+      return;
+    }
+    const source = get().tree.find((node) => node.ref === ref);
+    const icon = get().iconByRef[ref];
+    try {
+      await flushPendingSaves();
+      await pendingSaveFor(ref);
+      const read = await commands.noteRead({ ref });
+      const body = splitFrontmatter(read.content)?.body ?? read.content;
+      const taken = childNames(get().tree, siblingDirFromRef(ref));
+      const fmTitle = parseFrontmatter(read.content)?.entries.find((entry) => entry.key === 'title')?.value;
+      const title = copyNoteTitle(
+        source?.title ?? (fmTitle !== undefined && fmTitle.length > 0 ? fmTitle : 'Заметка'),
+        taken,
+      );
+      const created = await commands.noteCreate({
+        title,
+        parent: siblingParentRef(ref),
+        type: source?.type,
+        tags: tagsFromContent(read.content),
+        content: body,
+      });
+      await get().loadTree();
+      void get().loadInfo();
+      if (icon?.icon !== undefined || icon?.color !== undefined) {
+        await get().setIcon(created.ref, icon.icon, icon.color);
+      }
+      get().openNote(created.ref);
+      useUiStore.getState().pushToast({ kind: 'success', text: `Создана копия «${title}»` });
+    } catch (error) {
+      useUiStore.getState().pushToast({ kind: 'error', text: reason(error, 'Не удалось дублировать заметку') });
     }
   },
   createFolder: async (parent, title) => {

@@ -37,6 +37,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'note.new',
   'note.newChild',
   'note.newFromTemplate',
+  'note.duplicate',
   'note.copyPage',
   'note.copyWikiLink',
   'editor.toggleReading',
@@ -208,6 +209,14 @@ function runBuiltin(id: ActionId): boolean {
     case 'note.newFromTemplate':
       useTemplatePickerStore.getState().openPicker();
       return true;
+    case 'note.duplicate': {
+      const ref = useVaultStore.getState().currentRef;
+      if (ref === undefined) {
+        return false;
+      }
+      void useVaultStore.getState().duplicateNote(ref);
+      return true;
+    }
     case 'note.exportHtml': {
       const ref = useVaultStore.getState().currentRef;
       if (ref === undefined) {

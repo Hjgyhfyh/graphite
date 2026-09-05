@@ -16,6 +16,7 @@ export type ActionId =
   | 'note.new'
   | 'note.newChild'
   | 'note.newFromTemplate'
+  | 'note.duplicate'
   | 'note.rename'
   | 'note.delete'
   | 'note.copyPage'
@@ -72,6 +73,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'note.new', title: 'Новая заметка', group: 'Заметки' },
   { id: 'note.newChild', title: 'Под-заметка', group: 'Заметки' },
   { id: 'note.newFromTemplate', title: 'Заметка из шаблона…', group: 'Заметки' },
+  { id: 'note.duplicate', title: 'Дублировать заметку', group: 'Заметки' },
   { id: 'note.rename', title: 'Переименовать', group: 'Заметки' },
   { id: 'note.delete', title: 'Удалить в корзину', group: 'Заметки' },
   { id: 'note.copyPage', title: 'Скопировать для ИИ', group: 'Заметки' },
@@ -121,6 +123,7 @@ export const DEFAULT_BINDINGS: Record<ActionId, string[]> = {
   'note.new': ['Ctrl+N'],
   'note.newChild': ['Ctrl+Shift+N'],
   'note.newFromTemplate': ['Ctrl+Alt+N'],
+  'note.duplicate': ['Ctrl+Alt+D'],
   'note.rename': ['F2'],
   'note.delete': ['Delete'],
   'note.copyPage': ['Ctrl+Shift+C'],

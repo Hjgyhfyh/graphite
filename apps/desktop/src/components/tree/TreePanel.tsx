@@ -22,6 +22,7 @@ import {
   ChevronsUpDown,
   Columns2,
   Copy,
+  CopyPlus,
   FilePlus,
   FileText,
   Folder,
@@ -631,6 +632,11 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
                     label="Показать на графе"
                     onSelect={() => useUiStore.getState().revealOnGraph(data.ref)}
                   />
+                  <MenuItem
+                    icon={CopyPlus}
+                    label="Дублировать"
+                    onSelect={() => void useVaultStore.getState().duplicateNote(data.ref)}
+                  />
                 </>
               ) : null}
               <MenuSeparator />
@@ -680,6 +686,11 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<ArNode>) {
                 icon={Network}
                 label="Показать на графе"
                 onSelect={() => useUiStore.getState().revealOnGraph(data.ref)}
+              />
+              <MenuItem
+                icon={CopyPlus}
+                label="Дублировать"
+                onSelect={() => void useVaultStore.getState().duplicateNote(data.ref)}
               />
               <MenuSeparator />
               <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.startRename(node)} />
@@ -818,6 +829,11 @@ function PinnedRow({ item }: { item: PinnedItem }) {
             icon={Network}
             label="Показать на графе"
             onSelect={() => useUiStore.getState().revealOnGraph(item.ref)}
+          />
+          <MenuItem
+            icon={CopyPlus}
+            label="Дублировать"
+            onSelect={() => void useVaultStore.getState().duplicateNote(item.ref)}
           />
           <MenuSeparator />
           <MenuItem icon={Pencil} label="Переименовать" kbd="F2" onSelect={() => ctx.renameByRef(item.ref)} />
