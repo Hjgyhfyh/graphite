@@ -53,6 +53,15 @@ const STATUS_LABEL: Record<Status, string> = {
   iced: 'Лёд',
 };
 
+const STATUS_EMPTY: Record<Status, { title: string; hint: string }> = {
+  inbox: { title: 'Входящие пусты', hint: 'Новые искры появятся с Ctrl+Alt+Space.' },
+  shaping: { title: 'Нечего прорабатывать', hint: 'Искра станет заметкой — или уйдёт на лёд.' },
+  planned: { title: 'Планов нет', hint: 'Когда идея созреет, она окажется здесь.' },
+  active: { title: 'Ничего в работе', hint: 'План, который начали делать, появится в этой колонке.' },
+  done: { title: 'Пока ничего не завершено', hint: 'Готовые заметки собираются здесь.' },
+  iced: { title: 'На льду пусто', hint: 'Заморозка — чтобы вернуться позже.' },
+};
+
 const STATUS_DOT: Record<Status, string> = {
   inbox: 'bg-status-inbox',
   shaping: 'bg-status-shaping',
@@ -471,43 +480,74 @@ function pluralResults(count: number): string {
   return `${count} ${word}`;
 }
 
-function InboxTriageActions({
+function triageFor(status: Status): {
+  next?: { status: Status; label: string };
+  ice?: { status: Status; label: string };
+} {
+  switch (status) {
+    case 'inbox':
+      return { next: { status: 'shaping', label: 'Проработка' }, ice: { status: 'iced', label: 'Лёд' } };
+    case 'shaping':
+      return { next: { status: 'planned', label: 'План' }, ice: { status: 'iced', label: 'Лёд' } };
+    case 'planned':
+      return { next: { status: 'active', label: 'В работе' }, ice: { status: 'iced', label: 'Лёд' } };
+    case 'active':
+      return { next: { status: 'done', label: 'Готово' }, ice: { status: 'iced', label: 'Лёд' } };
+    case 'done':
+      return { ice: { status: 'iced', label: 'Лёд' } };
+    case 'iced':
+      return { next: { status: 'shaping', label: 'Разморозить' } };
+  }
+}
+
+function StatusTriageActions({
   busy,
-  onShaping,
+  nextLabel,
+  iceLabel,
+  onNext,
   onIce,
 }: {
   busy: boolean;
-  onShaping: () => void;
-  onIce: () => void;
+  nextLabel?: string;
+  iceLabel?: string;
+  onNext?: () => void;
+  onIce?: () => void;
 }) {
+  if (nextLabel === undefined && iceLabel === undefined) {
+    return null;
+  }
   return (
     <span className="flex shrink-0 flex-col justify-center gap-0.5 py-1.5 pr-1.5">
-      <button
-        type="button"
-        disabled={busy}
-        title="Проработка · Ctrl+Enter"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onShaping();
-        }}
-        className="rounded-xs px-1.5 py-0.5 text-micro font-medium text-accent outline-none hover:bg-accent/10 disabled:opacity-45"
-      >
-        Проработка
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        title="Лёд · Shift+Enter"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onIce();
-        }}
-        className="rounded-xs px-1.5 py-0.5 text-micro font-medium text-text-2 outline-none hover:bg-bg-4 hover:text-text-0 disabled:opacity-45"
-      >
-        Лёд
-      </button>
+      {nextLabel !== undefined && onNext !== undefined ? (
+        <button
+          type="button"
+          disabled={busy}
+          title={`${nextLabel} · Ctrl+Enter`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onNext();
+          }}
+          className="rounded-xs px-1.5 py-0.5 text-micro font-medium text-accent outline-none hover:bg-accent/10 disabled:opacity-45"
+        >
+          {nextLabel}
+        </button>
+      ) : null}
+      {iceLabel !== undefined && onIce !== undefined ? (
+        <button
+          type="button"
+          disabled={busy}
+          title={`${iceLabel} · Shift+Enter`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onIce();
+          }}
+          className="rounded-xs px-1.5 py-0.5 text-micro font-medium text-text-2 outline-none hover:bg-bg-4 hover:text-text-0 disabled:opacity-45"
+        >
+          {iceLabel}
+        </button>
+      ) : null}
     </span>
   );
 }
@@ -722,7 +762,8 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
   const vaultRoot = useVaultStore((s) => s.info?.root);
   const recentsVault = vaultRoot === undefined ? undefined : vaultKey(vaultRoot);
   const parsed = useMemo(() => parseQuery(query), [query]);
-  const inboxQueue = parsed.filters.status === 'inbox';
+  const statusFilter = parsed.filters.status;
+  const triage = statusFilter !== undefined ? triageFor(statusFilter) : undefined;
 
   useEffect(() => {
     if (!parsed.hasQuery || phase !== 'ready' || recentsVault === undefined) {
@@ -741,7 +782,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
     openNote(ref);
   };
 
-  const triageHit = async (ref: NoteRef, status: Extract<Status, 'shaping' | 'iced'>) => {
+  const triageHit = async (ref: NoteRef, status: Status) => {
     if (busyRef !== undefined) {
       return;
     }
@@ -759,7 +800,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
       void useVaultStore.getState().loadInfo();
       useUiStore.getState().pushToast({
         kind: 'success',
-        text: status === 'iced' ? 'На лёд' : 'В проработку',
+        text: status === 'iced' ? 'На лёд' : `→ ${STATUS_LABEL[status]}`,
       });
     } catch (error) {
       useUiStore.getState().pushToast({
@@ -942,17 +983,17 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
         event.preventDefault();
         setSelectedIndex(hits.length - 1);
       }
-    } else if (event.key === 'Enter' && inboxQueue && (event.ctrlKey || event.metaKey)) {
+    } else if (event.key === 'Enter' && triage?.next !== undefined && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       const target = hits[selectedIndex] ?? hits[0];
       if (target !== undefined) {
-        void triageHit(target.ref, 'shaping');
+        void triageHit(target.ref, triage.next.status);
       }
-    } else if (event.key === 'Enter' && inboxQueue && event.shiftKey) {
+    } else if (event.key === 'Enter' && triage?.ice !== undefined && event.shiftKey) {
       event.preventDefault();
       const target = hits[selectedIndex] ?? hits[0];
       if (target !== undefined) {
-        void triageHit(target.ref, 'iced');
+        void triageHit(target.ref, triage.ice.status);
       }
     } else if (event.key === 'Enter') {
       event.preventDefault();
@@ -1014,8 +1055,8 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
 
   const footerText =
     view === 'results'
-      ? inboxQueue
-        ? `${hits.length} во входящих`
+      ? statusFilter !== undefined
+        ? `${hits.length} · ${STATUS_LABEL[statusFilter]}`
         : pluralResults(hits.length)
       : indexBuilding
         ? indexStatus.total > 0
@@ -1102,15 +1143,17 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
           <Presence mode="wait">
             {view === 'results' ? (
               <Fade key="results" className="flex flex-col p-2">
-                {inboxQueue ? (
+                {triage !== undefined ? (
                   <p className="px-1 pb-2 text-micro text-text-3">
-                    Разберите входящие: проработка или лёд. Клик открывает заметку. Ctrl+Enter / Shift+Enter.
+                    {statusFilter === 'iced'
+                      ? 'Ctrl+Enter разморозит в проработку. Клик открывает заметку.'
+                      : 'Ctrl+Enter — следующий статус, Shift+Enter — лёд. Клик открывает заметку.'}
                   </p>
                 ) : null}
                 <motion.ul
                   id="search-results-list"
                   role="listbox"
-                  aria-label={inboxQueue ? 'Входящие' : 'Результаты поиска'}
+                  aria-label={statusFilter !== undefined ? STATUS_LABEL[statusFilter] : 'Результаты поиска'}
                   variants={listContainerVariants}
                   initial="initial"
                   animate="animate"
@@ -1124,6 +1167,8 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                     const date = formatUpdated(hit.updated);
                     const snippets = hit.snippets.filter((s) => s.trim().length > 0).slice(0, 3);
                     const selected = index === selectedIndex;
+                    const nextStatus = triage?.next?.status;
+                    const iceStatus = triage?.ice?.status;
                     return (
                       <motion.li key={hit.ref} variants={listItemVariants}>
                         <div
@@ -1189,11 +1234,15 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                               ) : null}
                             </span>
                           </button>
-                          {inboxQueue ? (
-                            <InboxTriageActions
+                          {triage !== undefined ? (
+                            <StatusTriageActions
                               busy={busyRef !== undefined}
-                              onShaping={() => void triageHit(hit.ref, 'shaping')}
-                              onIce={() => void triageHit(hit.ref, 'iced')}
+                              nextLabel={triage.next?.label}
+                              iceLabel={triage.ice?.label}
+                              onNext={
+                                nextStatus !== undefined ? () => void triageHit(hit.ref, nextStatus) : undefined
+                              }
+                              onIce={iceStatus !== undefined ? () => void triageHit(hit.ref, iceStatus) : undefined}
                             />
                           ) : null}
                         </div>
@@ -1238,17 +1287,19 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
             ) : view === 'empty' ? (
               <Fade key="empty" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
                 <span className="grid size-11 place-items-center rounded-full border border-stroke-0 bg-bg-2 text-text-2">
-                  {inboxQueue ? <Inbox size={20} strokeWidth={1.75} /> : <SearchX size={20} strokeWidth={1.75} />}
+                  {statusFilter !== undefined ? <Inbox size={20} strokeWidth={1.75} /> : <SearchX size={20} strokeWidth={1.75} />}
                 </span>
                 <div className="flex flex-col gap-1">
-                  <p className="text-ui text-text-1">{inboxQueue ? 'Входящие пусты' : 'Ничего не найдено'}</p>
+                  <p className="text-ui text-text-1">
+                    {statusFilter !== undefined ? STATUS_EMPTY[statusFilter].title : 'Ничего не найдено'}
+                  </p>
                   <p className="text-caption text-text-2">
-                    {inboxQueue
-                      ? 'Новые искры появятся с Ctrl+Alt+Space.'
+                    {statusFilter !== undefined
+                      ? STATUS_EMPTY[statusFilter].hint
                       : 'Уточните запрос или измените операторы.'}
                   </p>
                 </div>
-                {inboxQueue ? null : (
+                {statusFilter !== undefined ? null : (
                 <div className="flex flex-wrap justify-center gap-1.5">
                   {(['tag:', 'status:', 'type:', 'path:', 'updated:'] as const).map((op) => (
                     <button
