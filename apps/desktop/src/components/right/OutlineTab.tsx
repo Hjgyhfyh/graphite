@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { motion } from 'motion/react';
-import { ListTree } from 'lucide-react';
+import { Copy, ListTree } from 'lucide-react';
 import { EditorView } from '@codemirror/view';
-import { cx } from '@graphite/ui';
+import { Tooltip, cx } from '@graphite/ui';
 import { GRAPHITE_EVENT, commands, isTauriAvailable } from '@graphite/bindings';
 import type { NoteChangedEvent, NoteRef } from '@graphite/bindings';
 import { listen } from '@tauri-apps/api/event';
@@ -12,6 +13,8 @@ import { Fade, Presence, springSnappy, usePrefersReducedMotion } from '../../mot
 import { useEditorViewsStore } from '../../stores/editorViewsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useVaultStore } from '../../stores/vaultStore';
+import { copyWikiLink, wikiLinkMarkup } from '../../lib/wikiLink';
+import { titleFromRef } from '../../stores/tabsStore';
 
 export interface OutlineTabProps {
   noteRef: NoteRef;
@@ -101,6 +104,21 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
 
   const headings = useMemo(() => (doc === undefined ? [] : parseHeadings(doc)), [doc]);
   const minLevel = useMemo(() => headings.reduce((min, h) => Math.min(min, h.level), 6), [headings]);
+  const tree = useVaultStore((s) => s.tree);
+  const childrenByRef = useVaultStore((s) => s.childrenByRef);
+  const noteTitle = useMemo(() => {
+    const fromTree = tree.find((node) => node.ref === noteRef)?.title;
+    if (fromTree !== undefined && fromTree.length > 0) {
+      return fromTree;
+    }
+    for (const nodes of Object.values(childrenByRef)) {
+      const title = nodes.find((node) => node.ref === noteRef)?.title;
+      if (title !== undefined && title.length > 0) {
+        return title;
+      }
+    }
+    return titleFromRef(noteRef);
+  }, [tree, childrenByRef, noteRef]);
   const readingMode = useUiStore((s) => s.readingMode);
   const readingScrollEl = useUiStore((s) => s.readingScrollEl);
   const readingScrollRef = useUiStore((s) => s.readingScrollRef);
@@ -173,6 +191,15 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
     jump();
   };
 
+  const onHeadingClick = (heading: MdHeading, event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      void copyWikiLink(noteRef, heading.text);
+      return;
+    }
+    jumpTo(heading);
+  };
+
   const state = doc === undefined ? 'loading' : headings.length === 0 ? 'empty' : 'list';
 
   return (
@@ -215,15 +242,13 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
               {headings.map((heading) => {
                 const active = heading.line === activeLine;
                 const label = heading.text.length > 0 ? heading.text : '…';
+                const link = wikiLinkMarkup(noteTitle, heading.text);
                 return (
                   <li key={heading.line}>
-                    <button
-                      type="button"
-                      title={label}
-                      onClick={() => jumpTo(heading)}
+                    <div
                       style={{ paddingLeft: (heading.level - minLevel) * 14 + 8 }}
                       className={cx(
-                        'group relative flex w-full items-center rounded-s px-2 py-1.5 text-left outline-none transition-colors duration-[120ms]',
+                        'group relative flex w-full items-center rounded-s pr-1 outline-none transition-colors duration-[120ms]',
                         !active && 'hover:bg-bg-2',
                       )}
                     >
@@ -234,20 +259,42 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
                           transition={reduced ? { duration: 0 } : springSnappy}
                         />
                       ) : null}
-                      <span
-                        className={cx(
-                          'relative z-10 min-w-0 flex-1 truncate',
-                          heading.level <= 2 ? 'text-ui' : 'text-caption',
-                          active
-                            ? 'text-accent'
-                            : heading.level <= 2
-                              ? 'text-text-1 group-hover:text-text-0'
-                              : 'text-text-2 group-hover:text-text-1',
-                        )}
+                      <button
+                        type="button"
+                        title={`${label} · Ctrl+клик — скопировать ${link}`}
+                        onClick={(event) => onHeadingClick(heading, event)}
+                        className="relative z-10 min-w-0 flex-1 truncate px-2 py-1.5 text-left"
                       >
-                        {label}
-                      </span>
-                    </button>
+                        <span
+                          className={cx(
+                            heading.level <= 2 ? 'text-ui' : 'text-caption',
+                            active
+                              ? 'text-accent'
+                              : heading.level <= 2
+                                ? 'text-text-1 group-hover:text-text-0'
+                                : 'text-text-2 group-hover:text-text-1',
+                          )}
+                        >
+                          {label}
+                        </span>
+                      </button>
+                      <Tooltip content={`Скопировать ${link}`} side="left">
+                        <button
+                          type="button"
+                          aria-label={`Скопировать ${link}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void copyWikiLink(noteRef, heading.text);
+                          }}
+                          className={cx(
+                            'relative z-10 flex size-6 shrink-0 items-center justify-center rounded-xs text-text-3 transition-opacity duration-[120ms] hover:bg-bg-3 hover:text-text-0',
+                            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                          )}
+                        >
+                          <Copy size={12} strokeWidth={1.75} />
+                        </button>
+                      </Tooltip>
+                    </div>
                   </li>
                 );
               })}
