@@ -36,7 +36,7 @@ export interface MdTable {
 }
 
 export type MdBlock =
-  | { readonly kind: 'heading'; readonly level: 1 | 2 | 3 | 4 | 5 | 6; readonly content: readonly MdInline[] }
+  | { readonly kind: 'heading'; readonly level: 1 | 2 | 3 | 4 | 5 | 6; readonly content: readonly MdInline[]; readonly line: number }
   | { readonly kind: 'paragraph'; readonly content: readonly MdInline[] }
   | { readonly kind: 'blockquote'; readonly children: readonly MdBlock[] }
   | { readonly kind: 'code'; readonly lang?: string; readonly value: string }
@@ -370,7 +370,7 @@ export function parseBlocks(source: string, baseOffset = 0): MdBlock[] {
     const heading = HEADING_RE.exec(line);
     if (heading !== null) {
       const level = heading[1].length as 1 | 2 | 3 | 4 | 5 | 6;
-      blocks.push({ kind: 'heading', level, content: parseInline(heading[2]) });
+      blocks.push({ kind: 'heading', level, content: parseInline(heading[2]), line: baseOffset + i });
       i += 1;
       continue;
     }

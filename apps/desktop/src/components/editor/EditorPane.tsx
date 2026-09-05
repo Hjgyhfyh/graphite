@@ -242,12 +242,12 @@ const HEADING_TAG: Record<1 | 2 | 3 | 4 | 5 | 6, ElementType> = {
 };
 
 const HEADING_CLASS: Record<1 | 2 | 3 | 4 | 5 | 6, string> = {
-  1: 'mb-4 mt-7 text-[28px] font-[650] leading-[34px] tracking-[-0.01em] text-text-0 first:mt-0',
-  2: 'mb-3 mt-7 text-[22px] font-[600] leading-[30px] tracking-[-0.01em] text-text-0 first:mt-0',
-  3: 'mb-2 mt-6 text-[18px] font-[600] leading-[26px] text-text-0 first:mt-0',
-  4: 'mb-2 mt-5 text-[16px] font-[600] leading-[24px] text-text-1 first:mt-0',
-  5: 'mb-2 mt-4 text-[15px] font-[600] text-text-2 first:mt-0',
-  6: 'mb-2 mt-4 text-[15px] font-[600] text-text-2 first:mt-0',
+  1: 'mb-4 mt-7 scroll-mt-6 text-[28px] font-[650] leading-[34px] tracking-[-0.01em] text-text-0 first:mt-0',
+  2: 'mb-3 mt-7 scroll-mt-6 text-[22px] font-[600] leading-[30px] tracking-[-0.01em] text-text-0 first:mt-0',
+  3: 'mb-2 mt-6 scroll-mt-6 text-[18px] font-[600] leading-[26px] text-text-0 first:mt-0',
+  4: 'mb-2 mt-5 scroll-mt-6 text-[16px] font-[600] leading-[24px] text-text-1 first:mt-0',
+  5: 'mb-2 mt-4 scroll-mt-6 text-[15px] font-[600] text-text-2 first:mt-0',
+  6: 'mb-2 mt-4 scroll-mt-6 text-[15px] font-[600] text-text-2 first:mt-0',
 };
 
 interface InlineContext {
@@ -564,7 +564,9 @@ function renderBlock(block: MdBlock, key: string, ctx: InlineContext, onToggleTa
     case 'heading': {
       const Tag = HEADING_TAG[block.level];
       return (
-        <Tag className={HEADING_CLASS[block.level]}>{renderInline(block.content, key, ctx)}</Tag>
+        <Tag id={`gr-h-${block.line}`} className={HEADING_CLASS[block.level]}>
+          {renderInline(block.content, key, ctx)}
+        </Tag>
       );
     }
     case 'paragraph':
@@ -812,6 +814,8 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink, onOpenTa
     () => (split !== null ? parseBlocks(split.body, split.bodyLine) : parseBlocks(doc)),
     [split, doc],
   );
+  const pendingHeading = useUiStore((s) => s.pendingReadingJump);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const entries = split?.frontmatter.entries;
   const hideTitle = useMemo(() => {
     if (entries === undefined) {
@@ -830,10 +834,23 @@ function ReadingView({ doc, noteRef, reduced, onToggleTask, onOpenLink, onOpenTa
     );
   }, [entries, blocks]);
 
+  useEffect(() => {
+    if (pendingHeading === undefined) {
+      return;
+    }
+    const host = scrollerRef.current;
+    const target = host?.querySelector(`#gr-h-${pendingHeading}`);
+    useUiStore.getState().consumeReadingJump();
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+    }
+  }, [pendingHeading, blocks, reduced]);
+
   const ctx: InlineContext = { onOpenLink, onOpenTag, reduced };
   return (
     <motion.div
       key="reading"
+      ref={scrollerRef}
       className="absolute inset-0 z-10 overflow-y-auto bg-bg-0"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}

@@ -40,6 +40,12 @@ describe('parseBlocks — огороженный код (fenced)', () => {
     expect(text((blocks[2] as Para).content)).toBe('para');
   });
 
+  it('заголовок знает номер строки в полном документе', () => {
+    const blocks = parseBlocks('# A\n\n## B', 4);
+    expect(blocks[0]).toMatchObject({ kind: 'heading', line: 4 });
+    expect(blocks[1]).toMatchObject({ kind: 'heading', line: 6 });
+  });
+
   it('более длинная закрывающая ограда закрывает более короткую открывающую', () => {
     const blocks = parseBlocks(lines('```', 'body', '````', 'after'));
     expect(blocks[0]).toMatchObject({ kind: 'code', value: 'body' });

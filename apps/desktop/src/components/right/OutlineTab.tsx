@@ -142,12 +142,8 @@ export function OutlineTab({ noteRef, tabId }: OutlineTabProps) {
       });
       view.focus();
     };
-    const ui = useUiStore.getState();
-    if (ui.readingMode) {
-      // В режиме чтения CodeMirror скрыт под ReadingView: сначала выводим
-      // в правку, прыгаем после кадра — когда редактор снова виден.
-      ui.setReadingMode(false);
-      requestAnimationFrame(jump);
+    if (useUiStore.getState().readingMode) {
+      useUiStore.getState().requestReadingJump(heading.line);
       return;
     }
     jump();

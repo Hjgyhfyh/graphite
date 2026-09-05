@@ -94,6 +94,7 @@ export interface UiStore {
   pendingTasksFilter: boolean;
   pendingTag: string | undefined;
   pendingTaskJump: TaskJumpTarget | undefined;
+  pendingReadingJump: number | undefined;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
   onboardingDone: boolean;
@@ -139,6 +140,8 @@ export interface UiStore {
   consumePendingTag(): string | undefined;
   requestTaskJump(target: TaskJumpTarget): void;
   consumeTaskJump(): TaskJumpTarget | undefined;
+  requestReadingJump(line: number): void;
+  consumeReadingJump(): number | undefined;
   revealOnGraph(ref: NoteRef): void;
   consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
@@ -233,6 +236,7 @@ export const useUiStore = create<UiStore>()(
       pendingTasksFilter: false,
       pendingTag: undefined,
       pendingTaskJump: undefined,
+      pendingReadingJump: undefined,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
       onboardingDone: false,
@@ -440,6 +444,16 @@ export const useUiStore = create<UiStore>()(
           set({ pendingTaskJump: undefined });
         }
         return target;
+      },
+      requestReadingJump: (line) => {
+        set({ pendingReadingJump: line });
+      },
+      consumeReadingJump: () => {
+        const line = get().pendingReadingJump;
+        if (line !== undefined) {
+          set({ pendingReadingJump: undefined });
+        }
+        return line;
       },
       revealOnGraph: (ref) => {
         set({
