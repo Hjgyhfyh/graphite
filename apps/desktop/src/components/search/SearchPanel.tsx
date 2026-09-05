@@ -31,6 +31,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useRecentsStore } from '../../stores/recentsStore';
 import { vaultKey } from '../../stores/vaultsStore';
 import { NoteIcon } from '../tree/NoteIcon';
+import { copyWikiLink } from '../../lib/wikiLink';
 import { Fade, Presence, listContainerVariants, listItemVariants, usePrefersReducedMotion } from '../../motion';
 
 export interface SearchPanelProps {
@@ -709,7 +710,15 @@ function RecentsIdle({
               <button
                 key={node.ref}
                 type="button"
-                onClick={() => onOpenNote(node.ref)}
+                title="Клик — открыть · Ctrl — скопировать ссылку"
+                onClick={(event) => {
+                  if (event.ctrlKey || event.metaKey) {
+                    event.preventDefault();
+                    void copyWikiLink(node.ref);
+                    return;
+                  }
+                  onOpenNote(node.ref);
+                }}
                 className="flex min-w-0 items-center gap-2.5 rounded-s px-2 py-1.5 text-left transition-colors hover:bg-bg-2"
               >
                 <NoteIcon
@@ -1017,6 +1026,12 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
       if (target !== undefined) {
         void triageHit(target.ref, triage.next.status);
       }
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      const target = hits[selectedIndex] ?? hits[0];
+      if (target !== undefined) {
+        void copyWikiLink(target.ref);
+      }
     } else if (event.key === 'Enter' && triage?.ice !== undefined && event.shiftKey) {
       event.preventDefault();
       const target = hits[selectedIndex] ?? hits[0];
@@ -1174,8 +1189,8 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                 {triage !== undefined ? (
                   <p className="px-1 pb-2 text-micro text-text-3">
                     {statusFilter === 'iced'
-                      ? 'Ctrl+Enter разморозит в проработку. Клик открывает заметку.'
-                      : 'Ctrl+Enter — следующий статус, Shift+Enter — лёд. Клик открывает заметку.'}
+                      ? 'Ctrl+Enter разморозит в проработку. Ctrl+клик копирует ссылку.'
+                      : 'Ctrl+Enter — следующий статус, Shift+Enter — лёд. Ctrl+клик копирует ссылку.'}
                   </p>
                 ) : null}
                 <motion.ul
@@ -1214,7 +1229,15 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                             id={`search-option-${index}`}
                             role="option"
                             aria-selected={selected}
-                            onClick={() => openHit(hit.ref)}
+                            onClick={(event) => {
+                              if (event.ctrlKey || event.metaKey) {
+                                event.preventDefault();
+                                void copyWikiLink(hit.ref);
+                                return;
+                              }
+                              openHit(hit.ref);
+                            }}
+                            title="Клик — открыть · Ctrl — скопировать ссылку"
                             className="flex min-w-0 flex-1 gap-2.5 px-2.5 py-2 text-left"
                           >
                             <span
@@ -1362,7 +1385,7 @@ export function SearchPanel({ width, onWidthChange }: SearchPanelProps) {
                 <div className="flex flex-col gap-1.5">
                   <p className="text-ui text-text-1">Поиск по хранилищу</p>
                   <p className="text-caption text-text-2">
-                    Введите запрос или используйте операторы. Навигация — стрелками, открытие — Enter.
+                    Введите запрос или используйте операторы. Навигация — стрелками, открытие — Enter, Ctrl — ссылка.
                   </p>
                 </div>
                 <RecentsIdle
