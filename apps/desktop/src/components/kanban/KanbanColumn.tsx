@@ -77,6 +77,8 @@ export interface KanbanColumnProps {
   settlingRef: NoteRef | null;
   isOver: boolean;
   columnDragging: boolean;
+  filterNeedle?: string;
+  emptyHint?: string;
   registerColumn(status: Status, el: HTMLElement | null): void;
   registerCard(ref: NoteRef, el: HTMLElement): void;
   unregisterCard(ref: NoteRef, el: HTMLElement): void;
@@ -96,6 +98,8 @@ export function KanbanColumn({
   settlingRef,
   isOver,
   columnDragging,
+  filterNeedle = '',
+  emptyHint,
   registerColumn,
   registerCard,
   unregisterCard,
@@ -163,6 +167,7 @@ export function KanbanColumn({
               reduced={reduced}
               dragging={draggingRef === card.ref}
               settling={settlingRef === card.ref}
+              filterNeedle={filterNeedle}
               onLift={onCardLift}
               onOpen={onCardOpen}
               onAliasChange={onAliasChange}
@@ -180,7 +185,7 @@ export function KanbanColumn({
               isOver ? 'border-accent/50 text-text-2' : 'border-stroke-0 text-text-3',
             )}
           >
-            {isOver ? 'Отпустите здесь' : column.hint}
+            {isOver ? 'Отпустите здесь' : (emptyHint ?? column.hint)}
           </div>
         ) : null}
       </div>

@@ -89,6 +89,7 @@ export interface UiStore {
   pendingTreeReveal: string | undefined;
   pendingGraphFocus: NoteRef | undefined;
   pendingTreeFilter: boolean;
+  pendingBoardFilter: boolean;
   floatingCaptureOpen: boolean;
   captureDest: CaptureDest;
   onboardingDone: boolean;
@@ -126,6 +127,8 @@ export interface UiStore {
   consumeTreeReveal(): string | undefined;
   focusTreeFilter(): void;
   consumeTreeFilterFocus(): boolean;
+  focusBoardFilter(): void;
+  consumeBoardFilterFocus(): boolean;
   revealOnGraph(ref: NoteRef): void;
   consumeGraphFocus(): NoteRef | undefined;
   setFloatingCaptureOpen(open: boolean): void;
@@ -216,6 +219,7 @@ export const useUiStore = create<UiStore>()(
       pendingTreeReveal: undefined,
       pendingGraphFocus: undefined,
       pendingTreeFilter: false,
+      pendingBoardFilter: false,
       floatingCaptureOpen: false,
       captureDest: 'inbox',
       onboardingDone: false,
@@ -360,6 +364,20 @@ export const useUiStore = create<UiStore>()(
           return false;
         }
         set({ pendingTreeFilter: false });
+        return true;
+      },
+      focusBoardFilter: () => {
+        set({
+          pendingBoardFilter: true,
+          railView: 'plan',
+          focusMode: false,
+        });
+      },
+      consumeBoardFilterFocus: () => {
+        if (!get().pendingBoardFilter) {
+          return false;
+        }
+        set({ pendingBoardFilter: false });
         return true;
       },
       revealOnGraph: (ref) => {

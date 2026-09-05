@@ -7,6 +7,7 @@ import { Tooltip, cx } from '@graphite/ui';
 import { commands, isGraphiteError } from '@graphite/bindings';
 import type { NoteRef } from '@graphite/bindings';
 import { NoteIcon } from '../tree/NoteIcon';
+import { highlightNameParts } from '../../lib/treeFilter';
 import { REDUCED_CROSSFADE, springSnappy, springStandard } from '../../motion';
 import { CARD_ALIAS_MAX } from '../../stores/boardStore';
 import { formatUpdated, typeFallbackIcon, typeLabel } from './columns';
@@ -93,11 +94,28 @@ export interface CardSurfaceProps extends HTMLAttributes<HTMLDivElement> {
   card: KanbanCardData;
   tags: string[];
   titleAction?: ReactNode;
+  filterNeedle?: string;
   ref?: Ref<HTMLDivElement>;
 }
 
-export function CardSurface({ card, tags, titleAction, className, ref, ...rest }: CardSurfaceProps) {
+function HighlightText({ text, needle }: { text: string; needle: string }) {
+  if (needle.length === 0) {
+    return text;
+  }
+  return highlightNameParts(text, needle).map((part, index) =>
+    part.hit ? (
+      <mark key={index} className="rounded-xs bg-accent/20 text-inherit">
+        {part.text}
+      </mark>
+    ) : (
+      <span key={index}>{part.text}</span>
+    ),
+  );
+}
+
+export function CardSurface({ card, tags, titleAction, filterNeedle = '', className, ref, ...rest }: CardSurfaceProps) {
   const updatedLabel = formatUpdated(card.updated);
+  const shown = card.alias ?? card.title;
   return (
     <div
       ref={ref}
@@ -112,9 +130,13 @@ export function CardSurface({ card, tags, titleAction, className, ref, ...rest }
           <NoteIcon icon={card.icon} color={card.iconColor} size={15} fallback={typeFallbackIcon(card.type)} />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 text-ui text-text-0">{card.alias ?? card.title}</h3>
+          <h3 className="line-clamp-2 text-ui text-text-0">
+            <HighlightText text={shown} needle={filterNeedle} />
+          </h3>
           {card.alias !== undefined ? (
-            <p className="mt-0.5 line-clamp-1 text-micro text-text-3">{card.title}</p>
+            <p className="mt-0.5 line-clamp-1 text-micro text-text-3">
+              <HighlightText text={card.title} needle={filterNeedle} />
+            </p>
           ) : null}
         </div>
         {card.pinned === true ? (
@@ -255,6 +277,7 @@ export interface KanbanCardProps {
   reduced: boolean;
   dragging: boolean;
   settling: boolean;
+  filterNeedle?: string;
   onLift(event: ReactPointerEvent<HTMLElement>, card: KanbanCardData, tags: string[]): void;
   onOpen(ref: NoteRef): void;
   onAliasChange(ref: NoteRef, alias: string): void;
@@ -268,6 +291,7 @@ export function KanbanCard({
   reduced,
   dragging,
   settling,
+  filterNeedle = '',
   onLift,
   onOpen,
   onAliasChange,
@@ -321,6 +345,7 @@ export function KanbanCard({
         ref={attachSurface}
         card={card}
         tags={tags}
+        filterNeedle={filterNeedle}
         titleAction={<CardAliasButton card={card} onAliasChange={onAliasChange} />}
         role="button"
         tabIndex={0}

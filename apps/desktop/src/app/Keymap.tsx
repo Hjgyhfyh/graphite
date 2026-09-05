@@ -21,6 +21,7 @@ const GLOBAL_ACTIONS = new Set<ActionId>([
   'switcher.open',
   'search.global',
   'tree.filter',
+  'board.filter',
   'settings.open',
   'view.tasks',
   'view.brief',
@@ -138,6 +139,9 @@ function runBuiltin(id: ActionId): boolean {
       return true;
     case 'tree.filter':
       ui.focusTreeFilter();
+      return true;
+    case 'board.filter':
+      ui.focusBoardFilter();
       return true;
     case 'view.tasks':
       ui.setRailView('tasks');

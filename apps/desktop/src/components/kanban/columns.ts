@@ -6,11 +6,22 @@ import type { NoteType, Status, TreeNode } from '@graphite/bindings';
 import { DEFAULT_ORDER } from '../../stores/boardStore';
 import type { BoardConfig, ColumnConfig } from '../../stores/boardStore';
 import { resolveIconColor, resolveIconComponent } from '../tree/NoteIcon';
+import { nameMatchesFilter } from '../../lib/treeFilter';
 
 export interface KanbanCardData extends TreeNode {
   status: Status;
   sortStamp: number;
   alias?: string;
+}
+
+export function cardMatchesFilter(card: KanbanCardData, needle: string): boolean {
+  if (needle.length === 0) {
+    return true;
+  }
+  if (nameMatchesFilter(card.title, needle)) {
+    return true;
+  }
+  return card.alias !== undefined && nameMatchesFilter(card.alias, needle);
 }
 
 export interface ColumnMeta {

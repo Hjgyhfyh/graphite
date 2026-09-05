@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { AnimatePresence, LayoutGroup } from 'motion/react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Search, X } from 'lucide-react';
 import { Tooltip, cx } from '@graphite/ui';
 import { commands } from '@graphite/bindings';
 import type { NoteRef, Status } from '@graphite/bindings';
@@ -15,8 +15,10 @@ import { DragGhost } from './DragGhost';
 import { BoardSettings } from './BoardSettings';
 import { useKanbanDnd } from './useKanbanDnd';
 import { useColumnReorder } from './useColumnReorder';
-import { groupByStatus, pipelineStatus, resolveColumns, statusReason } from './columns';
+import { groupByStatus, pipelineStatus, resolveColumns, statusReason, cardMatchesFilter } from './columns';
 import type { KanbanCardData, ResolvedColumn } from './columns';
+import { filterNeedle } from '../../lib/treeFilter';
+import { formatBinding, useKeybindingsStore } from '../../stores/keybindingsStore';
 
 interface OptimisticMove {
   status: Status;
@@ -49,6 +51,10 @@ export function KanbanView() {
 
   const [optimistic, setOptimistic] = useState<Record<NoteRef, OptimisticMove>>({});
   const [showHidden, setShowHidden] = useState(false);
+  const [filter, setFilter] = useState('');
+  const filterRef = useRef<HTMLInputElement>(null);
+  const pendingBoardFilter = useUiStore((s) => s.pendingBoardFilter);
+  const filterBinding = useKeybindingsStore((s) => s.bindings['board.filter']);
 
   useEffect(() => {
     if (useVaultStore.getState().tree.length === 0) {
@@ -58,7 +64,20 @@ export function KanbanView() {
 
   useEffect(() => {
     setShowHidden(false);
+    setFilter('');
   }, [vk]);
+
+  useEffect(() => {
+    if (!pendingBoardFilter) {
+      return;
+    }
+    useUiStore.getState().consumeBoardFilterFocus();
+    const frame = requestAnimationFrame(() => {
+      filterRef.current?.focus();
+      filterRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingBoardFilter]);
 
   const cards = useMemo<KanbanCardData[]>(() => {
     const list: KanbanCardData[] = [];
@@ -78,7 +97,13 @@ export function KanbanView() {
     return list;
   }, [tree, optimistic, config.cardAliases]);
 
-  const byStatus = useMemo(() => groupByStatus(cards), [cards]);
+  const needle = filterNeedle(filter);
+  const visibleCards = useMemo(
+    () => (needle.length === 0 ? cards : cards.filter((card) => cardMatchesFilter(card, needle))),
+    [cards, needle],
+  );
+
+  const byStatus = useMemo(() => groupByStatus(visibleCards), [visibleCards]);
 
   const columns = useMemo(() => resolveColumns(config, showHidden), [config, showHidden]);
 
@@ -222,10 +247,49 @@ export function KanbanView() {
       <header className="flex items-center justify-between gap-4 px-6 pb-4 pt-6">
         <div className="flex items-baseline gap-2.5">
           <h1 className="text-h2 text-text-0">Поток</h1>
-          {cards.length > 0 ? <span className="text-caption text-text-3">{cards.length}</span> : null}
+          {cards.length > 0 ? (
+            <span className="text-caption tabular-nums text-text-3">
+              {needle.length > 0 ? `${visibleCards.length} из ${cards.length}` : cards.length}
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1.5">
-          <p className="hidden pr-2 text-caption text-text-2 lg:block">
+          <label className="flex h-7 w-52 items-center gap-1.5 rounded-s border border-stroke-0 bg-bg-1 px-2 focus-within:border-stroke-1">
+            <Search size={13} strokeWidth={1.75} className="shrink-0 text-text-3" aria-hidden />
+            <input
+              ref={filterRef}
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (filter.length > 0) {
+                    setFilter('');
+                  } else {
+                    event.currentTarget.blur();
+                  }
+                }
+              }}
+              aria-label={`Фильтр канбана · ${formatBinding(filterBinding)}`}
+              placeholder="Фильтр карточек…"
+              className="min-w-0 flex-1 bg-transparent text-caption text-text-0 outline-none placeholder:text-text-3"
+            />
+            {filter.length > 0 ? (
+              <button
+                type="button"
+                aria-label="Сбросить фильтр"
+                onClick={() => {
+                  setFilter('');
+                  filterRef.current?.focus();
+                }}
+                className="shrink-0 rounded-xs p-0.5 text-text-3 hover:text-text-0"
+              >
+                <X size={12} strokeWidth={1.75} />
+              </button>
+            ) : null}
+          </label>
+          <p className="hidden pr-2 text-caption text-text-2 xl:block">
             Перетащите карточку между колонками, чтобы сменить статус
           </p>
           {hiddenStatuses.length > 0 ? (
@@ -271,6 +335,8 @@ export function KanbanView() {
                 settlingRef={dnd.settlingRef}
                 isOver={dnd.overStatus === column.status}
                 columnDragging={columnReorder.draggingColumn === column.status}
+                filterNeedle={needle}
+                emptyHint={needle.length > 0 ? 'Нет совпадений' : undefined}
                 registerColumn={registerColumn}
                 registerCard={dnd.registerCard}
                 unregisterCard={dnd.unregisterCard}
